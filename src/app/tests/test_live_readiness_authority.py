@@ -439,6 +439,11 @@ def test_probe_live_venue_accepts_a_freshly_verified_order_stream(
     md_faces = service._probe_live_venue("fyers-live")
     assert face.verify_calls == 1
     assert set(md_faces) == {"NSE:KAYNES"}
+    # Even a single consumer is wrapped: provider teardown must never close
+    # the venue-owned face that StaticPlugin will hand to the next START.
+    from broker.market_data_fanout import MarketDataSubscription
+
+    assert isinstance(md_faces["NSE:KAYNES"], MarketDataSubscription)
     assert service._account_state["ready"] is True
 
 

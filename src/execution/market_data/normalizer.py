@@ -82,6 +82,10 @@ class StreamNormalizer:
         self._refresh(stats)
         return healthy, reason
 
+    def rebase_health(self, symbol: str, now_epoch: float) -> None:
+        """Start a new expectation window at a market-session boundary."""
+        self._gate.rebase_health(symbol, now_epoch)
+
     def is_stale(self, symbol: str) -> bool:
         return self._gate.is_stale(symbol)
 

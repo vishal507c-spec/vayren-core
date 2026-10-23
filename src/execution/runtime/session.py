@@ -42,6 +42,7 @@ from execution.events import (
     SignalGenerated,
 )
 from execution.journal import ExecutionJournal, LatencyTracker
+from execution.market_data.health_policy import MarketDataHealthPolicy
 from execution.market_data.normalizer import NormalizerConfig, StreamNormalizer
 from execution.market_data.provider import MarketDataProvider
 from execution.models.contract import StrategyRuntimeContract
@@ -127,6 +128,7 @@ class SessionConfig:
     kill_switch_path: str | Path | None = None
     session_start: str | None = None
     session_end: str | None = None
+    market_holidays: tuple[str, ...] = ()
     adapter_name: str = ""  # sandbox/live venue key for resolve_broker; "" = none
 
 
@@ -274,6 +276,16 @@ class LiveSession:
         self._processed_signals: set[tuple[str, int]] = set()
         self._seen_candle_stamps: dict[str, str] = {}
         self._last_reconcile_epoch: float = 0.0
+        # Timeframe-aware candle-completeness health. The policy is installed
+        # at start() once the timeframe is known; the normalizer's staleness
+        # window comes from the Rust kernel, not a 60-second literal.
+        self._health_policy: MarketDataHealthPolicy | None = None
+        self._freshness_epoch: dict[str, float] = {}
+        self._stale_symbols: set[str] = set()
+        self._last_health_sweep_epoch = 0.0
+        self._last_rebase_day: dict[str, Any] = {}
+        self._subscribed_symbols: tuple[str, ...] = ()
+        self._strategy_events_delivered = 0
 
     # ── wiring ──────────────────────────────────────────────────
 
@@ -421,6 +433,12 @@ class LiveSession:
                     )
             self._journal.record("NOT_LIVE_READY", reasons=list(report.reasons))
             return report
+        try:
+            self._configure_health_policy(timeframe, symbols)
+        except ValueError as exc:
+            reasons = (f"market-data health policy invalid: {exc}",)
+            self._journal.record("NOT_LIVE_READY", reasons=list(reasons))
+            return ReadinessReport(ready=False, reasons=reasons)
         self._provider.open(symbols, timeframe)
         self._lifecycle.transition(LifecycleState.WARMING_UP, reason="warming strategies")
         for context in self._contexts.values():
@@ -467,6 +485,137 @@ class LiveSession:
             reasons.append("reconciliation mismatch blocks live")
         return ReadinessReport(ready=not reasons, reasons=tuple(reasons))
 
+    def _configure_health_policy(self, timeframe: str, symbols: tuple[str, ...]) -> None:
+        """Install the timeframe-derived health window for this run.
+
+        The normalizer is rebuilt before the provider opens: start() is the
+        only transition into a running session, and a fresh kernel has no
+        pending sequence history to lose. Rust derives the numeric candle
+        window; Python supplies the NSE session calendar used to freeze that
+        window while the market is closed.
+        """
+        self._health_policy = MarketDataHealthPolicy.for_timeframe(
+            timeframe,
+            session_start=self._config.session_start or "09:15",
+            session_end=self._config.session_end or "15:30",
+            holidays=self._config.market_holidays,
+        )
+        self._normalizer = StreamNormalizer(
+            NormalizerConfig(
+                stale_after_seconds=self._health_policy.stale_after_seconds,
+                heartbeat_timeout_seconds=self._health_policy.heartbeat_timeout_seconds,
+            )
+        )
+        self._freshness_epoch.clear()
+        self._stale_symbols.clear()
+        # A fresh kernel has no expectation clock. The daily rebase marker
+        # must be cleared with it, otherwise a same-day restart (new kernel,
+        # old marker) would never rebase and could never flag a silent feed.
+        self._last_rebase_day.clear()
+        self._last_health_sweep_epoch = 0.0
+        self._subscribed_symbols = tuple(dict.fromkeys(symbols))
+        self._strategy_events_delivered = 0
+
+    def _sweep_health(self, now_epoch: float) -> None:
+        """Periodically judge candle completeness for every subscription.
+
+        This is deliberately separate from ingestion. The old gate checked
+        *before* observing and dropped the first recovered candle, so a stale
+        stream could never clear its own flag (the 2026-10-22 30-minute
+        incident). Here the sweep marks a quiet symbol stale for order
+        gating, while a delivered event is always allowed to prove recovery.
+        """
+        policy = self._health_policy
+        if policy is None:
+            return
+        if now_epoch - self._last_health_sweep_epoch < 1.0:
+            return
+        self._last_health_sweep_epoch = now_epoch
+        if not policy.calendar.is_open(now_epoch):
+            # No candle is due outside the session. A stale flag from the last
+            # candle of the day must not stay on screen all night, and it must
+            # not block the first order at the next open; the next open
+            # rebases the expectation clock instead.
+            if self._stale_symbols:
+                closure = policy.calendar.closure_reason(now_epoch)
+                for symbol in tuple(self._stale_symbols):
+                    self._stale_symbols.discard(symbol)
+                    self._normalizer.rebase_health(symbol, now_epoch)
+                    self._journal.record(
+                        "STALE_CLEARED",
+                        symbol=symbol,
+                        timeframe=policy.timeframe,
+                        reason=closure,
+                    )
+            return
+        day = policy.calendar.trading_day(now_epoch)
+        for symbol in self._subscribed_symbols:
+            # The first check of each trading day rebases the kernel's
+            # expectation clock. Overnight/weekend/holiday time is not a
+            # missing candle, so Friday's close cannot make Monday's first
+            # candle look stale before it is due.
+            if self._last_rebase_day.get(symbol) != day:
+                self._normalizer.rebase_health(symbol, now_epoch)
+                self._last_rebase_day[symbol] = day
+                if symbol in self._stale_symbols:
+                    self._stale_symbols.discard(symbol)
+                    self._journal.record(
+                        "STALE_CLEARED",
+                        symbol=symbol,
+                        timeframe=policy.timeframe,
+                        reason="new trading session baseline",
+                    )
+            # The kernel's rebase is the expectation clock; do not invent a
+            # delivery timestamp here. ``last_delivery_epoch`` must stay empty
+            # until a candle actually arrives, otherwise the UI claims fresh
+            # data for a feed that has never delivered anything.
+            healthy, reason = self._normalizer.check_health(symbol, now_epoch)
+            if healthy:
+                if symbol in self._stale_symbols:
+                    self._stale_symbols.discard(symbol)
+                    self._journal.record(
+                        "STALE_CLEARED",
+                        symbol=symbol,
+                        timeframe=policy.timeframe,
+                        reason=reason,
+                    )
+                continue
+            if symbol not in self._stale_symbols:
+                self._stale_symbols.add(symbol)
+                self._journal.record(
+                    "STALE_DATA",
+                    symbol=symbol,
+                    timeframe=policy.timeframe,
+                    stale_after_seconds=policy.stale_after_seconds,
+                    reason=reason,
+                )
+
+    def market_data_health(self) -> dict[str, Any]:
+        """Observable health split by question: transport, candles, delivery.
+
+        Transport liveness (socket/socket quiet) is never conflated with
+        candle completeness (the timeframe window) or with strategy delivery
+        (events actually handed to the pipeline).
+        """
+        policy = self._health_policy
+        transport: dict[str, Any] = {"healthy": None, "reason": "not started"}
+        try:
+            healthy, reason = self._provider.health()
+            transport = {"healthy": bool(healthy), "reason": str(reason)}
+        except Exception as exc:  # noqa: BLE001 - health must never break a snapshot
+            transport = {"healthy": False, "reason": f"health unavailable: {type(exc).__name__}"}
+        return {
+            "timeframe": policy.timeframe if policy is not None else "",
+            "stale_after_seconds": (policy.stale_after_seconds if policy is not None else None),
+            "heartbeat_timeout_seconds": (
+                policy.heartbeat_timeout_seconds if policy is not None else None
+            ),
+            "stale_symbols": sorted(self._stale_symbols),
+            "last_delivery_epoch": dict(self._freshness_epoch),
+            "events_delivered": int(self._strategy_events_delivered),
+            "transport": transport,
+        }
+
     # ── event pipeline ──────────────────────────────────────────
 
     def step(self, now_epoch: float) -> int:
@@ -477,6 +626,7 @@ class LiveSession:
         if self._mode == ExecutionMode.LIVE and (now_epoch - self._last_reconcile_epoch >= 30.0):
             self._last_reconcile_epoch = now_epoch
             self.reconcile_now()
+        self._sweep_health(now_epoch)
         delivered = 0
         raw_events = self._provider.poll()
         under_load = len(raw_events) > 1000
@@ -496,19 +646,37 @@ class LiveSession:
             if isinstance(raw, HeartbeatEvent):
                 self._normalizer.observe(raw, now_epoch)
                 continue
-            # Staleness is judged BEFORE ingesting: a stalled stream must not
-            # refresh its own health timestamp by delivering old events.
-            healthy, _ = self._normalizer.check_health(raw.symbol, now_epoch)
-            if not healthy:
-                self._journal.record("STALE_DATA", symbol=raw.symbol, seq=raw.seq)
-                continue
+            # A replayed candle must never refresh the health clock. Duplicate
+            # suppression happens before the kernel so the stale window can
+            # only be moved by genuinely new data; it is not a pre-drop based
+            # on a previous stale verdict, which would prevent recovery.
+            if isinstance(raw, CandleEvent):
+                last_ts = self._seen_candle_stamps.get(raw.symbol)
+                if last_ts is not None and raw.timestamp <= last_ts:
+                    self._journal.record(
+                        "CANDLE_DUPLICATE_SKIPPED",
+                        symbol=raw.symbol,
+                        timestamp=raw.timestamp,
+                        seq=raw.seq,
+                    )
+                    continue
             for event in self._normalizer.observe(raw, now_epoch):
+                self._freshness_epoch[event.symbol] = now_epoch
+                if event.symbol in self._stale_symbols:
+                    self._stale_symbols.discard(event.symbol)
+                    self._journal.record(
+                        "STALE_CLEARED",
+                        symbol=event.symbol,
+                        timeframe=self._health_policy.timeframe if self._health_policy else "",
+                        reason="fresh delivery",
+                    )
                 decision = self._attention.observe(event, under_load=under_load)
                 if not decision.process:
                     continue
                 self._working_memory.note_event(type(event).__name__, event.symbol, event.seq)
                 self._on_event(event, now_epoch)
                 delivered += 1
+                self._strategy_events_delivered += 1
         self._drain_broker(now_epoch)
         return delivered
 
@@ -1435,10 +1603,11 @@ class LiveSession:
         if self._broker is None:
             return
         try:
+            stream_events = cast(Any, self._broker).stream_events
             try:
-                events = self._broker.stream_events(consumer_id=self._request_id)
+                events = stream_events(consumer_id=self._request_id)
             except TypeError:
-                events = self._broker.stream_events()
+                events = stream_events()
         except Exception as exc:
             self._broker_stream_errors += 1
             self._journal.record("BROKER_STREAM_ERROR", reason=str(exc))

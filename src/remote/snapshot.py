@@ -260,8 +260,19 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
                 or live.get("market_timeframe")
                 or ""
             ),
+            "health": scrub(market_data.get("health", {})),
+            "delivery": scrub(market_data.get("delivery", [])),
             "source": "market-data service + venue feed",
         },
+        "recovery": scrub(
+            live.get("recovery")
+            or {
+                "phase": "NOT_REQUIRED",
+                "required": False,
+                "operator_authorization_required": False,
+            }
+        ),
+        "desired_state": scrub(live.get("desired_state", {})),
         "order_stream": {**order_stream, "source": "broker connection + feed kind"},
         "strategy": strategy,
         "risk": risk,
@@ -278,6 +289,8 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "worker": {
             "status": str(live.get("session_status", "STOPPED") or "STOPPED").upper(),
             "running": str(live.get("session_status", "") or "").upper() == "RUNNING",
+            "alive": bool(live.get("worker_alive", False)),
+            "desired_status": str(live.get("desired_status", "") or ""),
             # These live under `session_timing`, not at the top level. Read
             # from the wrong level they were ALWAYS blank/0, which hid how
             # long a LIVE session had actually been armed.

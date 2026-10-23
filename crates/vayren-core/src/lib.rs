@@ -2274,6 +2274,12 @@ pub extern "C" fn vy_norm_stale_floor(seconds: f64) -> f64 {
     normalizer::stale_floor(seconds)
 }
 
+/// Staleness window for a candle-close stream at this interval.
+#[no_mangle]
+pub extern "C" fn vy_norm_candle_stale_after(interval_seconds: f64) -> f64 {
+    normalizer::candle_stale_after(interval_seconds)
+}
+
 /// `1` when the stream has been quiet longer than the window, else `0`.
 #[no_mangle]
 pub extern "C" fn vy_norm_gap_stale(now_epoch: f64, last_seen: f64, stale_after: f64) -> i32 {
@@ -2506,6 +2512,8 @@ mod ffi_rule_tests {
     #[test]
     fn stream_gates_and_sizing_answer_from_the_kernel() {
         assert_eq!(vy_norm_stale_floor(0.25), 1.0);
+        assert_eq!(vy_norm_candle_stale_after(1_800.0), 1_980.0);
+        assert_eq!(vy_norm_candle_stale_after(60.0), 90.0);
         assert_eq!(vy_norm_gap_stale(1_000.0, 600.0, 300.0), 1);
         assert_eq!(vy_norm_gap_stale(900.0, 600.0, 300.0), 0);
         assert_eq!(vy_norm_watermark(4, 2), 5);
@@ -3183,6 +3191,31 @@ pub unsafe extern "C" fn vy_norm_last_health(handle: i64, buf: *mut u8, cap: usi
         Some(Some(slot)) => ks_write(&slot.health, buf, cap),
         _ => -2,
     }
+}
+
+/// Rebase one symbol's expectation clock at a session boundary.
+///
+/// # Safety
+/// `symbol` must point to `symbol_len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn vy_norm_rebase_health(
+    handle: i64,
+    symbol: *const u8,
+    symbol_len: i64,
+    now_epoch: f64,
+) -> i32 {
+    let Ok(text) = rs_text(symbol, symbol_len) else {
+        return -1;
+    };
+    let mut slots = norm_slots();
+    let Some(index) = norm_index(handle) else {
+        return -2;
+    };
+    let Some(slot) = slots.get_mut(index).and_then(Option::as_mut) else {
+        return -2;
+    };
+    slot.gate.rebase_health(text, now_epoch);
+    0
 }
 
 /// `1` while a symbol is flagged stale (until a fresh arrival clears it).

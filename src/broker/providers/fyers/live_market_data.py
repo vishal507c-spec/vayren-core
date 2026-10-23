@@ -12,9 +12,9 @@ this adapter (single flight, bounded backoff), never by the vendor socket.
 from __future__ import annotations
 
 import logging
-import queue
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -72,8 +72,19 @@ class FyersLiveMarketData:
         self._app_id = str(app_id or "").strip()
         self._token = str(access_token or "").strip()
         self._socket_factory = socket_factory
-        self._max_queue_size = max_queue_size
-        self._queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=max_queue_size)
+        self._max_queue_size = max(1, int(max_queue_size))
+        # One ingestion history, one independent cursor per consumer. The old
+        # single Queue was drained destructively: the first session's poll
+        # consumed every symbol and silently starved the other 21. A bounded
+        # history is appended once and each consumer advances its own cursor,
+        # so polling order can never change who receives an event.
+        self._history: deque[tuple[int, dict[str, Any]]] = deque(maxlen=self._max_queue_size)
+        self._history_seq = 0
+        self._consumer_cursors: dict[str, int] = {}
+        self._consumer_delivered: dict[str, int] = {}
+        self._consumer_dropped: dict[str, int] = {}
+        self._history_lock = threading.Lock()
+        self._overflow_dropped = 0
         self._subscriptions: set[str] = set()
         self._venue_to_requested: dict[str, str] = {}
         self._timeframe: str = "1m"
@@ -236,15 +247,79 @@ class FyersLiveMarketData:
             except Exception as exc:
                 logger.error("MARKET_WS_UNSUBSCRIBE_FAILED broker=FYERS reason=%s", exc)
 
-    def poll(self) -> tuple[dict[str, Any], ...]:
-        """Drain currently available normalized quote dicts (non-blocking)."""
-        quotes: list[dict[str, Any]] = []
-        while not self._queue.empty():
-            try:
-                quotes.append(self._queue.get_nowait())
-            except queue.Empty:
-                break
-        return tuple(quotes)
+    def register_consumer(self, consumer_id: str) -> None:
+        """Register a delivery cursor starting at the current stream head.
+
+        Registration is explicit so a consumer created after a burst does
+        not replay history it never subscribed to. ``poll()`` without a
+        registration keeps the legacy behaviour of replaying the retained
+        buffer once, then returning only new arrivals.
+        """
+        if not consumer_id:
+            raise ValueError("consumer_id must be non-empty")
+        with self._history_lock:
+            self._consumer_cursors.setdefault(consumer_id, self._history_seq)
+            self._consumer_delivered.setdefault(consumer_id, 0)
+            self._consumer_dropped.setdefault(consumer_id, 0)
+
+    def unregister_consumer(self, consumer_id: str) -> None:
+        """Drop one consumer cursor; other consumers are untouched."""
+        with self._history_lock:
+            self._consumer_cursors.pop(consumer_id, None)
+            self._consumer_delivered.pop(consumer_id, None)
+            self._consumer_dropped.pop(consumer_id, None)
+
+    def poll(self, consumer_id: str | None = None) -> tuple[dict[str, Any], ...]:
+        """Return this consumer's new quotes without consuming anyone else's.
+
+        ``consumer_id=None`` is the legacy single-consumer call. It maps to
+        the reserved ``"default"`` cursor, which starts at 0 so existing
+        callers still receive everything retained, then only new arrivals.
+        """
+        cid = consumer_id or "default"
+        if self._is_closed:
+            return ()
+        with self._history_lock:
+            if cid not in self._consumer_cursors:
+                self._consumer_cursors[cid] = 0
+                self._consumer_delivered[cid] = 0
+                self._consumer_dropped[cid] = 0
+            cursor = self._consumer_cursors[cid]
+            oldest_seq = self._history[0][0] if self._history else self._history_seq + 1
+            if cursor < oldest_seq - 1:
+                # The consumer fell further behind than the bounded history.
+                # Count the loss explicitly; never pretend it saw the events.
+                missed = oldest_seq - 1 - cursor
+                self._consumer_dropped[cid] += missed
+                cursor = oldest_seq - 1
+            quotes = tuple(quote for seq, quote in self._history if seq > cursor)
+            if self._history:
+                cursor = max(cursor, self._history[-1][0])
+            self._consumer_cursors[cid] = cursor
+            self._consumer_delivered[cid] += len(quotes)
+        return quotes
+
+    @property
+    def buffered_quotes(self) -> int:
+        with self._history_lock:
+            return len(self._history)
+
+    @property
+    def overflow_dropped(self) -> int:
+        with self._history_lock:
+            return self._overflow_dropped
+
+    def consumer_stats(self) -> dict[str, dict[str, int]]:
+        """Per-consumer cursors/loss counters for the remote snapshot."""
+        with self._history_lock:
+            return {
+                cid: {
+                    "cursor": cursor,
+                    "delivered": self._consumer_delivered.get(cid, 0),
+                    "dropped": self._consumer_dropped.get(cid, 0),
+                }
+                for cid, cursor in self._consumer_cursors.items()
+            }
 
     def health(self) -> tuple[bool, str]:
         """(healthy, reason) — transport health AND genuine data flow.
@@ -451,12 +526,11 @@ class FyersLiveMarketData:
         """Stop streaming and release all resources."""
         self._is_closed = True
         self.disconnect()
-        # Drain remaining queue
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
+        with self._history_lock:
+            self._history.clear()
+            self._consumer_cursors.clear()
+            self._consumer_delivered.clear()
+            self._consumer_dropped.clear()
 
     # ── Socket callbacks ───────────────────────────────────────────────
 
@@ -517,21 +591,24 @@ class FyersLiveMarketData:
             return
 
         normalized_events = self.normalize_tick(message)
-        if normalized_events:
-            # Delivery evidence: count what actually reached us, so health
-            # can distinguish "streaming" from "socket open but silent".
-            self._messages_received += len(normalized_events)
-            self._last_message_at = time.monotonic()
-        for ev in normalized_events:
-            try:
-                self._queue.put_nowait(ev)
-            except queue.Full:
-                logger.warning("MARKET_QUEUE_OVERFLOW broker=FYERS dropping oldest tick")
-                try:
-                    self._queue.get_nowait()
-                    self._queue.put_nowait(ev)
-                except Exception:
-                    pass
+        if not normalized_events:
+            return
+        # Delivery evidence: count what actually reached us, so health can
+        # distinguish "streaming" from "socket open but silent".
+        self._messages_received += len(normalized_events)
+        self._last_message_at = time.monotonic()
+        with self._history_lock:
+            for ev in normalized_events:
+                if len(self._history) >= self._max_queue_size:
+                    self._overflow_dropped += 1
+                self._history_seq += 1
+                self._history.append((self._history_seq, ev))
+        if self._overflow_dropped and self._overflow_dropped % 1000 == 0:
+            logger.warning(
+                "MARKET_QUEUE_OVERFLOW broker=FYERS dropped=%d buffer=%d",
+                self._overflow_dropped,
+                self.buffered_quotes,
+            )
 
     # ── Payload normalization ──────────────────────────────────────────
 

@@ -180,7 +180,13 @@ impl<P: StreamSeq + Clone> StreamNormalizer<P> {
             StreamInput::Heartbeat { symbol, .. } => {
                 self.stats.heartbeats += 1;
                 self.last_heartbeat_epoch.insert(symbol.clone(), now_epoch);
-                self.stale.remove(&symbol);
+                // A heartbeat proves transport liveness, not candle
+                // completeness. Once a candle stream has delivered, only a
+                // fresh candle may clear its stale verdict; otherwise a
+                // chatty socket could mask a silent feed on every sweep.
+                if !self.last_event_epoch.contains_key(&symbol) {
+                    self.stale.remove(&symbol);
+                }
                 return Ok(observed);
             }
             StreamInput::Event(event) => (event.symbol().to_string(), event),
@@ -241,15 +247,34 @@ impl<P: StreamSeq + Clone> StreamNormalizer<P> {
         if !observed.delivered.is_empty() {
             let last_delivered = observed.delivered.last().unwrap().seq();
             self.last_seq.insert(symbol.clone(), last_delivered);
-            self.last_event_epoch.insert(symbol, now_epoch);
+            self.last_event_epoch.insert(symbol.clone(), now_epoch);
+            // A delivered event is fresh evidence, so it clears a stale flag
+            // the health sweep may have set while the feed was quiet. Without
+            // this, one stale verdict would latch forever even after the
+            // stream recovered (observed live on 2026-10-22).
+            self.stale.remove(&symbol);
             self.stats.accepted += observed.delivered.len() as u64;
         }
         Ok(observed)
     }
 
-    /// `(healthy, reason)`: heartbeat gaps and event stalls flag stale.
+    /// `(healthy, reason)`: event stalls and (before the first event)
+    /// heartbeat gaps flag stale. A delivered candle is stronger evidence
+    /// than a heartbeat, so a slow candle cadence is never reported as a
+    /// heartbeat timeout while data is still arriving.
     /// Every failing call counts (mirrors the Python increments).
     pub fn check_health(&mut self, symbol: &str, now_epoch: f64) -> (bool, &'static str) {
+        if let Some(last_event) = self.last_event_epoch.get(symbol).copied() {
+            if now_epoch - last_event > self.config.stale_after_seconds {
+                self.stats.stale_flags += 1;
+                self.stale.insert(symbol.to_string());
+                return (false, STALE_GAP_REASON);
+            }
+            // The event clock is authoritative while events exist; discard a
+            // latched stale flag as soon as the verdict is healthy again.
+            self.stale.remove(symbol);
+            return (true, "ok");
+        }
         if let Some(last_hb) = self.last_heartbeat_epoch.get(symbol).copied() {
             if now_epoch - last_hb > self.config.heartbeat_timeout_seconds {
                 self.stats.stale_flags += 1;
@@ -257,14 +282,19 @@ impl<P: StreamSeq + Clone> StreamNormalizer<P> {
                 return (false, "heartbeat timeout");
             }
         }
-        if let Some(last_event) = self.last_event_epoch.get(symbol).copied() {
-            if now_epoch - last_event > self.config.stale_after_seconds {
-                self.stats.stale_flags += 1;
-                self.stale.insert(symbol.to_string());
-                return (false, STALE_GAP_REASON);
-            }
-        }
+        self.stale.remove(symbol);
         (true, "ok")
+    }
+
+    /// Start a new expectation window for `symbol` at `now_epoch`.
+    ///
+    /// Used at the first market-open check of a trading day: no candle is
+    /// due before the open, so a Friday close must not count as stale before
+    /// Monday's first candle. The sequence watermark and buffers are
+    /// untouched — this only rebases the health clock and clears the flag.
+    pub fn rebase_health(&mut self, symbol: &str, now_epoch: f64) {
+        self.last_event_epoch.insert(symbol.to_string(), now_epoch);
+        self.stale.remove(symbol);
     }
 
     pub fn is_stale(&self, symbol: &str) -> bool {
@@ -284,6 +314,31 @@ pub const STALE_GAP_REASON: &str = "stale market data";
 /// the usable floor is one second.
 pub fn stale_floor(seconds: f64) -> f64 {
     seconds.max(1.0)
+}
+
+/// Grace added to one candle interval before a stream is called stale.
+///
+/// Candle-close feeds are not tick feeds: a 30-minute candle legitimately
+/// produces no event for 30 minutes. The window is therefore the interval
+/// plus a delivery grace proportional to the interval (10%, clamped to
+/// 30–300 seconds). This lets ordinary provider latency through, while a
+/// genuinely missing candle is detected shortly after the next one was due.
+pub const CANDLE_GRACE_FRACTION: f64 = 0.10;
+pub const CANDLE_GRACE_MIN_SECONDS: f64 = 30.0;
+pub const CANDLE_GRACE_MAX_SECONDS: f64 = 300.0;
+
+/// Staleness window for a candle-close stream of `interval_seconds`.
+///
+/// 1m → 90s, 15m → 990s, 30m → 1980s, 1d → 86,700s. A non-finite or
+/// non-positive interval falls back to the normalizer's 60-second default
+/// rather than producing a window that would flag every poll.
+pub fn candle_stale_after(interval_seconds: f64) -> f64 {
+    if !interval_seconds.is_finite() || interval_seconds <= 0.0 {
+        return NormalizerConfig::default().stale_after_seconds;
+    }
+    let grace = (interval_seconds * CANDLE_GRACE_FRACTION)
+        .clamp(CANDLE_GRACE_MIN_SECONDS, CANDLE_GRACE_MAX_SECONDS);
+    stale_floor(interval_seconds + grace)
 }
 
 /// Has the stream been quiet longer than the window? The same comparison
@@ -394,6 +449,96 @@ mod tests {
             (false, "stale market data")
         );
         assert_eq!(normalizer.stats.stale_flags, 1);
+    }
+
+    #[test]
+    fn a_delivered_event_clears_a_latched_stale_flag() {
+        let mut normalizer = StreamNormalizer::new(NormalizerConfig::default());
+        normalizer.observe(event("A", 1), 10.0).unwrap();
+        assert!(!normalizer.check_health("A", 100.0).0);
+        assert!(normalizer.is_stale("A"));
+        // The very arrival that proves the feed recovered must clear the
+        // flag, not be rejected because the previous sweep said stale.
+        let ready = normalizer.observe(event("A", 2), 100.0).unwrap();
+        assert_eq!(seqs(&ready), vec![2]);
+        assert!(!normalizer.is_stale("A"));
+        assert_eq!(normalizer.check_health("A", 100.0), (true, "ok"));
+    }
+
+    #[test]
+    fn a_healthy_check_clears_stale_even_without_a_new_event() {
+        let mut normalizer = StreamNormalizer::new(NormalizerConfig::default());
+        normalizer.observe(event("A", 1), 10.0).unwrap();
+        assert!(!normalizer.check_health("A", 100.0).0);
+        assert!(normalizer.is_stale("A"));
+        // Re-checking inside the window is healthy and must un-latch.
+        assert_eq!(normalizer.check_health("A", 50.0), (true, "ok"));
+        assert!(!normalizer.is_stale("A"));
+    }
+
+    #[test]
+    fn a_heartbeat_does_not_clear_a_stale_candle_stream() {
+        let mut normalizer = StreamNormalizer::new(NormalizerConfig::default());
+        normalizer.observe(event("A", 1), 0.0).unwrap();
+        assert_eq!(
+            normalizer.check_health("A", 61.0),
+            (false, "stale market data")
+        );
+        let (hb, now) = heartbeat("A", 62.0);
+        normalizer.observe(hb, now).unwrap();
+        assert!(
+            normalizer.is_stale("A"),
+            "transport liveness must not mask a silent candle feed"
+        );
+        assert_eq!(
+            normalizer.check_health("A", 62.0),
+            (false, "stale market data")
+        );
+    }
+
+    #[test]
+    fn fresh_candles_win_over_an_old_heartbeat() {
+        let mut normalizer = StreamNormalizer::new(NormalizerConfig::default());
+        let (hb, now) = heartbeat("A", 1.0);
+        normalizer.observe(hb, now).unwrap();
+        // A 30-minute candle arrives long after the heartbeat's 30s timeout.
+        normalizer.observe(event("A", 1), 1_800.0).unwrap();
+        assert_eq!(normalizer.check_health("A", 1_800.0), (true, "ok"));
+        assert!(!normalizer.is_stale("A"));
+    }
+
+    #[test]
+    fn a_30_minute_candle_cadence_is_not_stale() {
+        let window = candle_stale_after(1_800.0);
+        assert_eq!(window, 1_980.0);
+        let mut normalizer = StreamNormalizer::new(NormalizerConfig {
+            stale_after_seconds: window,
+            ..Default::default()
+        });
+        // Consecutive closed 30m candles arrive exactly 1,800s apart.
+        normalizer.observe(event("A", 1), 0.0).unwrap();
+        assert_eq!(normalizer.check_health("A", 1_800.0), (true, "ok"));
+        normalizer.observe(event("A", 2), 1_800.0).unwrap();
+        assert_eq!(normalizer.check_health("A", 3_600.0), (true, "ok"));
+        // The window is strict: exactly 1,980s is still fresh, one tick past
+        // it is stale.
+        assert_eq!(normalizer.check_health("A", 3_780.0), (true, "ok"));
+        assert_eq!(
+            normalizer.check_health("A", 3_780.1),
+            (false, "stale market data")
+        );
+    }
+
+    #[test]
+    fn candle_window_derivation_is_documented_and_bounded() {
+        assert_eq!(candle_stale_after(60.0), 90.0);
+        assert_eq!(candle_stale_after(900.0), 990.0);
+        assert_eq!(candle_stale_after(1_800.0), 1_980.0);
+        assert_eq!(candle_stale_after(86_400.0), 86_700.0);
+        // Invalid intervals keep the safe 60-second default.
+        assert_eq!(candle_stale_after(0.0), 60.0);
+        assert_eq!(candle_stale_after(f64::NAN), 60.0);
+        assert_eq!(candle_stale_after(f64::INFINITY), 60.0);
     }
 
     #[test]

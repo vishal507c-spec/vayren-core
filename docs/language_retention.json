@@ -200,6 +200,12 @@
       "migration_target": "crates/vayren-core/src/aggregate.rs",
       "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
     },
+    "src/execution/market_data/health_policy.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Timeframe-aware market-data health policy (2026-10-22): the numeric candle-staleness window is derived in Rust (vy_norm_candle_stale_after) and stale/rebase truth is owned by normalizer.rs. Python retains only exchange-calendar expectation anchoring (IST session window, operator-supplied holiday set, overnight/session-boundary clock) plus timeframe parsing for provider/session configuration; no numeric staleness, gap, duplicate or sequence policy is duplicated here. File role: calendar/config orchestration, not a second stale authority.",
+      "migration_target": "crates/vayren-core/src/calendar.rs",
+      "migration_condition": "When the Rust calendar kernel owns holiday-aware session windows and expectation anchors (FFI exposes is_open/closure/anchor), replace MarketCalendar with a ctypes projection; the timeframe parser remains at the config boundary."
+    },
     "src/execution/market_data/native_normalizer.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Handle-based ctypes bridge for the stream gate (vy_norm_*) plus, since 2026-09-20, its stateless rules: the staleness floor, the strict gap comparison, the stall reason wording and the sequence watermark. It packs a symbol, sequence and opaque token, drains the kernel's verdict documents (delivered/dropped tokens, the six counters, health wording) and re-materialises them as plain value tuples. No policy: watermarking, gap/duplicate accounting, reorder overflow, staleness thresholds, counters and every reason string are decided in crates/vayren-core/src/normalizer.rs. File role: bridge (no authority)",

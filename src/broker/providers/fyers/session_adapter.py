@@ -1595,9 +1595,7 @@ class FyersSessionAdapter:
             return False
         raise self._error_from_fyers_response(resp)
 
-    def stream_events(
-        self, consumer_id: str | None = None
-    ) -> tuple[dict[str, Any], ...]:
+    def stream_events(self, consumer_id: str | None = None) -> tuple[dict[str, Any], ...]:
         """Drain real-time WebSocket order/trade events first; fallback to REST poll."""
         self._require_usable()
 
@@ -1605,9 +1603,7 @@ class FyersSessionAdapter:
         with self._order_event_lock:
             if consumer_id is not None:
                 last_seq = self._consumer_cursors.get(consumer_id, 0)
-                ws_events = [
-                    e for e in self._order_events if e.get("_stream_seq", 0) > last_seq
-                ]
+                ws_events = [e for e in self._order_events if e.get("_stream_seq", 0) > last_seq]
                 self._consumer_cursors[consumer_id] = self._order_events_seq
             else:
                 ws_events = []

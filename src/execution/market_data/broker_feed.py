@@ -27,7 +27,12 @@ from collections.abc import Callable
 from typing import Any
 
 from execution.events import CandleEvent, MarketEvent
-from execution.market_data.native_normalizer import gap_reason, gap_stale, stale_floor
+from execution.market_data.native_normalizer import (
+    candle_stale_after,
+    gap_reason,
+    gap_stale,
+    stale_floor,
+)
 from execution.market_data.provider import MarketDataProvider
 from market import Bucket, bucket_start, fold_tick, session_anchor_seconds, timeframe_seconds
 
@@ -44,13 +49,21 @@ class BrokerFeedProvider(MarketDataProvider):
         timeframe: str = "15m",
         session_anchor: str = "09:15",
         clock: Callable[[], float] | None = None,
-        stale_after_s: float = 300.0,
+        stale_after_s: float | None = None,
     ) -> None:
         self._face = face
         self._timeframe = timeframe
         self._anchor_s = session_anchor_seconds(session_anchor)
         self._clock = clock or time.time
-        self._stale_after_s = stale_floor(stale_after_s)
+        # Candle-close feeds are not tick feeds: 300s would flag every 15m+
+        # timeframe as stale between legitimate candles. Rust derives the
+        # window from the timeframe unless the caller pins one explicitly.
+        self._stale_after_override = stale_after_s is not None
+        self._stale_after_s = (
+            stale_floor(stale_after_s)
+            if stale_after_s is not None
+            else candle_stale_after(float(self._size_s() or 60))
+        )
         self._subscribed: tuple[str, ...] = ()
         self._open = False
         self._dropped = False
@@ -81,6 +94,8 @@ class BrokerFeedProvider(MarketDataProvider):
 
     def open(self, symbols: tuple[str, ...], timeframe: str) -> None:
         self._timeframe = timeframe
+        if not self._stale_after_override:
+            self._stale_after_s = candle_stale_after(float(self._size_s() or 60))
         connect = getattr(self._face, "connect", None)
         if callable(connect):
             try:

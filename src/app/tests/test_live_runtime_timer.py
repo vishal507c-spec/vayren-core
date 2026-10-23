@@ -272,7 +272,14 @@ def test_stale_stored_running_status_corrected_to_stopped(tmp_path: Path) -> Non
     assert saved_data["session_timing"]["start_epoch"] is None
     assert saved_data["session_timing"]["stopped_at"] != ""
 
-    # Subsequent configure / persist_config must never revert it to RUNNING
+    # Subsequent configure / persist_config must never revert it to RUNNING.
+    # The legacy RUNNING row is a pending recovery now: setup changes are
+    # blocked until the operator explicitly closes that book with STOP.
+    from app.services.live_trading_service import LiveConfigError
+
+    with pytest.raises(LiveConfigError, match="recovery is pending"):
+        svc.configure(quantity=2.0)
+    svc.stop("operator stop")
     svc.configure(quantity=2.0)
     re_saved = json.loads(store_file.read_text(encoding="utf-8"))
     assert re_saved["session_timing"]["status"] == "STOPPED"

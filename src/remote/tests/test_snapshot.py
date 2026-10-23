@@ -287,3 +287,41 @@ def test_project_event_shape_is_scrubbed() -> None:
     )
     assert projected["name"] == "FILL"
     assert "token" not in projected
+
+
+def test_recovery_and_worker_liveness_are_projected() -> None:
+    snap = build_snapshot(
+        make_live(
+            session_status="STOPPED",
+            status_reason="gateway restart interrupted a RUNNING session",
+            worker_alive=False,
+            desired_status="RUNNING",
+            desired_state={"status": "RUNNING", "armed": True},
+            recovery={
+                "phase": "AWAITING_OPERATOR",
+                "required": True,
+                "operator_authorization_required": True,
+                "reason_code": "GATEWAY_RESTART_WHILE_RUNNING",
+                "reasons": ["operator authorization is required"],
+                "attempts": 0,
+            },
+            market_data={
+                "status": "STOPPED",
+                "exchange": "NSE Cash",
+                "timeframe": "30m",
+                "health": {"NSE:RELIANCE": {"stale_after_seconds": 1980.0}},
+                "delivery": [{"published": 22, "overflow_dropped": 0}],
+            },
+        )
+    )
+
+    assert snap["worker"]["status"] == "STOPPED"
+    assert snap["worker"]["running"] is False
+    assert snap["worker"]["alive"] is False
+    assert snap["worker"]["desired_status"] == "RUNNING"
+    assert snap["recovery"]["phase"] == "AWAITING_OPERATOR"
+    assert snap["recovery"]["required"] is True
+    assert snap["recovery"]["operator_authorization_required"] is True
+    assert snap["desired_state"]["status"] == "RUNNING"
+    assert snap["market"]["health"]["NSE:RELIANCE"]["stale_after_seconds"] == 1980.0
+    assert snap["market"]["delivery"][0]["published"] == 22

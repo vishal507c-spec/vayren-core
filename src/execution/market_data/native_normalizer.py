@@ -26,10 +26,12 @@ _REQUIRED_EXPORTS = (
     "vy_norm_last_document",
     "vy_norm_last_health",
     "vy_norm_check_health",
+    "vy_norm_rebase_health",
     "vy_norm_is_stale",
     "vy_norm_expected_seq",
     "vy_norm_stats",
     "vy_norm_stale_floor",
+    "vy_norm_candle_stale_after",
     "vy_norm_gap_stale",
     "vy_norm_watermark",
     "vy_norm_gap_reason",
@@ -138,6 +140,13 @@ class NativeStreamGate:
             raise NativeBridgeError(f"native stream health verdict is malformed: {document!r}")
         return flag == "1", reason, self.stats()
 
+    def rebase_health(self, symbol: str, now_epoch: float) -> None:
+        """Start a fresh expectation window at a session boundary."""
+        payload, length = _encode(symbol)
+        code = int(_lib.vy_norm_rebase_health(self._handle, payload, length, float(now_epoch)))
+        if code != 0:
+            raise NativeBridgeError(f"native stream gate rejected the health rebase: {code}")
+
     def is_stale(self, symbol: str) -> bool:
         payload, length = _encode(symbol)
         return self._require_bool(int(_lib.vy_norm_is_stale(self._handle, payload, length)))
@@ -204,6 +213,11 @@ def stale_floor(seconds: float) -> float:
     return float(_lib.vy_norm_stale_floor(float(seconds)))
 
 
+def candle_stale_after(interval_seconds: float) -> float:
+    """Candle-close staleness window (interval + bounded delivery grace)."""
+    return float(_lib.vy_norm_candle_stale_after(float(interval_seconds)))
+
+
 def gap_stale(now_epoch: float, last_seen: float, stale_after: float) -> bool:
     """True when the stream has been quiet longer than the window."""
     code = int(_lib.vy_norm_gap_stale(float(now_epoch), float(last_seen), float(stale_after)))
@@ -230,6 +244,7 @@ __all__ = [
     "NativeBridgeError",
     "NativeStreamGate",
     "NativeStreamStats",
+    "candle_stale_after",
     "gap_reason",
     "gap_stale",
     "stale_floor",

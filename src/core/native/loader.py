@@ -329,6 +329,15 @@ def _configure_stream_normalizer(lib: ctypes.CDLL) -> None:
     ]
     lib.vy_norm_is_stale.restype = ctypes.c_int32
     lib.vy_norm_is_stale.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_int64]
+    lib.vy_norm_rebase_health.restype = ctypes.c_int32
+    lib.vy_norm_rebase_health.argtypes = [
+        ctypes.c_int64,
+        ctypes.c_char_p,
+        ctypes.c_int64,
+        ctypes.c_double,
+    ]
+    lib.vy_norm_candle_stale_after.restype = ctypes.c_double
+    lib.vy_norm_candle_stale_after.argtypes = [ctypes.c_double]
     lib.vy_norm_expected_seq.restype = ctypes.c_int64
     lib.vy_norm_expected_seq.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_int64]
     lib.vy_norm_stats.restype = ctypes.c_int32

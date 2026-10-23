@@ -38,6 +38,7 @@ from typing import Any
 
 from app.observable import IntervalTimer, Signal
 from broker.error_taxonomy import redact
+from broker.market_data_fanout import MarketDataFanout
 from execution import (
     ExecutionMode,  # pyright: ignore[reportAttributeAccessIssue]
     LiveSession,  # pyright: ignore[reportAttributeAccessIssue]
@@ -75,6 +76,22 @@ _ACTIVITY_CAP = 500
 _TICK_MS = 1000
 #: Bounded START-time order-WebSocket proof (the adapter waits, never retries).
 _LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 8.0
+
+#: Recovery phases that mean the operator still has an interrupted run to
+#: resolve. A restart while desired==RUNNING is the normal way to enter one.
+_RECOVERY_PENDING_PHASES = frozenset({"RECOVERING", "AWAITING_OPERATOR", "BLOCKED", "FAILED"})
+_RECOVERY_PHASE_NOT_REQUIRED = "NOT_REQUIRED"
+_RECOVERY_PHASE_RECOVERING = "RECOVERING"
+_RECOVERY_PHASE_AWAITING = "AWAITING_OPERATOR"
+_RECOVERY_PHASE_BLOCKED = "BLOCKED"
+_RECOVERY_PHASE_FAILED = "FAILED"
+_RECOVERY_PHASE_COMPLETE = "COMPLETE"
+_RECOVERY_AUTH_PHASES = frozenset(
+    {_RECOVERY_PHASE_AWAITING, _RECOVERY_PHASE_BLOCKED, _RECOVERY_PHASE_FAILED}
+)
+_RECOVERY_CODE_RESTART = "GATEWAY_RESTART_WHILE_RUNNING"
+_RECOVERY_CODE_BLOCKED = "RESUME_BLOCKED"
+_RECOVERY_CODE_TICK_FAILED = "WORKER_TICK_FAILED"
 
 #: LIVE event categories — the fixed filter vocabulary the native UI renders.
 #: Every activity entry carries exactly one; unknown journal kinds land in
@@ -316,6 +333,25 @@ class LiveTradingService:
         self._last_signal: dict[str, str] = {}
         self._status = "STOPPED"
         self._status_reason = ""
+        # Desired state is durable operator intent; observed status is what
+        # this process is actually doing. They are persisted separately so a
+        # gateway restart can never silently turn an interrupted LIVE run into
+        # a clean STOPPED with no recovery story.
+        self._desired_status = "STOPPED"
+        self._desired_armed = False
+        self._recovery_phase = _RECOVERY_PHASE_NOT_REQUIRED
+        self._recovery_reason_code = ""
+        self._recovery_reasons: tuple[str, ...] = ()
+        self._recovery_interrupted_at = ""
+        self._recovery_recovered_at = ""
+        self._recovery_attempts = 0
+        self._recovery_last_error = ""
+        self._recovery_reconciliation = "NOT_RUN"
+        self._market_fanouts: list[MarketDataFanout] = []
+        # True only after this process actually started the interval worker.
+        # A manually-set RUNNING status in diagnostics/tests must not be
+        # mistaken for a live worker that died.
+        self._worker_started = False
         # Failed-START blockers are stored separately from genuine stop/error
         # reasons so they can be retired the moment the live validation no
         # longer reports them (broker reconnect, venue activation, data sync).
@@ -466,7 +502,118 @@ class LiveTradingService:
             "strategy_running": self._status == "RUNNING",
             "session_status": self._status,
             "consent_confirmed_at": str(self._confirmed_live_at or ""),
+            "recovery_phase": getattr(self, "_recovery_phase", _RECOVERY_PHASE_NOT_REQUIRED),
+            "recovery_required": getattr(self, "_recovery_phase", _RECOVERY_PHASE_NOT_REQUIRED)
+            in _RECOVERY_PENDING_PHASES,
         }
+
+    # ── desired vs observed state + recovery machine ────────────────────
+
+    @property
+    def desired_status(self) -> str:
+        """Durable operator intent, independent of what this process observes."""
+        return self._desired_status
+
+    @property
+    def recovery_pending(self) -> bool:
+        """An interrupted run still needs explicit operator authorization."""
+        return (
+            self._desired_status == "RUNNING"
+            and self._status != "RUNNING"
+            and self._recovery_phase in _RECOVERY_PENDING_PHASES
+        )
+
+    def _set_recovery(
+        self,
+        phase: str,
+        *,
+        code: str = "",
+        reasons: tuple[str, ...] = (),
+        reconciliation: str | None = None,
+        error: str = "",
+    ) -> None:
+        self._recovery_phase = phase
+        self._recovery_reason_code = code
+        self._recovery_reasons = tuple(reasons)
+        if reconciliation is not None:
+            self._recovery_reconciliation = reconciliation
+        if error:
+            self._recovery_last_error = error
+
+    def _desired_state_dict(self) -> dict[str, Any]:
+        return {
+            "status": self._desired_status,
+            "armed": bool(self._desired_armed or (self._status == "RUNNING" and self.armed)),
+            "mode": self._config.mode,
+            "strategy_name": self._config.strategy_name,
+            "symbols": list(self._config.symbols),
+            "timeframe": self._config.timeframe,
+            "updated_at": _utcnow_iso(),
+        }
+
+    def recovery_status(self) -> dict[str, Any]:
+        """Operator-visible recovery story; no secrets, no inferred success."""
+        return {
+            "phase": self._recovery_phase,
+            "required": self.recovery_pending,
+            "reason_code": self._recovery_reason_code,
+            "reasons": list(self._recovery_reasons),
+            "interrupted_at": self._recovery_interrupted_at,
+            "recovered_at": self._recovery_recovered_at,
+            "attempts": self._recovery_attempts,
+            "last_error": self._recovery_last_error,
+            "reconciliation": self._recovery_reconciliation,
+            "operator_authorization_required": self._recovery_phase in _RECOVERY_AUTH_PHASES,
+        }
+
+    def _begin_resume_attempt(self) -> None:
+        """Count one explicit operator resume attempt; never retry by itself."""
+        if self._recovery_phase in _RECOVERY_PENDING_PHASES:
+            self._recovery_attempts += 1
+
+    def _degrade(self, reason: str, *, code: str = _RECOVERY_CODE_TICK_FAILED) -> None:
+        """Stop the worker and report failure instead of a misleading RUNNING.
+
+        Desired state stays RUNNING: the operator asked for a run, this
+        process failed it, and the recovery block names the failure. Nothing
+        is retried automatically and no order is submitted on the way down.
+        """
+        if self._status != "RUNNING":
+            return
+        with contextlib.suppress(Exception):
+            self._timer.stop()
+        self._worker_started = False
+        for session in self._sessions.values():
+            with contextlib.suppress(Exception):
+                session.disarm(f"degraded: {reason}")
+        self._status = "ERROR"
+        self._status_reason = f"live worker stopped: {reason}"
+        self._blocked_start_reason = ""
+        self._desired_status = "RUNNING"
+        self._desired_armed = True
+        self._recovery_interrupted_at = _utcnow_iso()
+        self._recovery_recovered_at = ""
+        self._set_recovery(
+            _RECOVERY_PHASE_FAILED,
+            code=code,
+            reasons=(reason,),
+            reconciliation="UNKNOWN",
+            error=reason,
+        )
+        # A degraded run is not authorized to resume itself. Even though the
+        # operator consented to the original start, the next attempt needs a
+        # fresh START with confirmation after they see this failure.
+        self._confirmed_live_at = ""
+        self.invalidate_validation_cache()
+        self._record_activity(
+            self._config.strategy_name or "session",
+            "",
+            f"RECOVERY REQUIRED — {reason}",
+            "error",
+            "SYSTEM",
+        )
+        self._persist()
+        self.state_changed.emit()
 
     # ── catalog (Strategy Lab store + watchlist universe, never copied) ──
 
@@ -673,6 +820,10 @@ class LiveTradingService:
     ) -> None:
         if self._status == "RUNNING":
             raise LiveConfigError("setup is frozen while a session runs")
+        if self.recovery_pending:
+            raise LiveConfigError(
+                "a recovery is pending — resume or stop the interrupted run before changing setup"
+            )
         from strategy.registry import get_strategy_registry
 
         reg = get_strategy_registry()
@@ -1461,6 +1612,7 @@ class LiveTradingService:
         """
         if self._status == "RUNNING":
             return False, ("already running",)
+        was_pending = self.recovery_pending
         if self._config.mode == "LIVE" and confirmed:
             self.confirm_live_execution()
         self.invalidate_validation_cache()
@@ -1490,6 +1642,23 @@ class LiveTradingService:
             self._status = "STOPPED"
             self._status_reason = "; ".join(blockers)
             self._blocked_start_reason = self._status_reason
+            if was_pending:
+                self._begin_resume_attempt()
+                self._desired_status = "RUNNING"
+                self._desired_armed = True
+                self._recovery_interrupted_at = self._recovery_interrupted_at or _utcnow_iso()
+                self._recovery_recovered_at = ""
+                self._set_recovery(
+                    _RECOVERY_PHASE_BLOCKED,
+                    code=_RECOVERY_CODE_BLOCKED,
+                    reasons=blockers,
+                    reconciliation="BLOCKED",
+                )
+                # A blocked resume must not carry the failed attempt's
+                # consent into the next one.
+                self._confirmed_live_at = ""
+                self.invalidate_validation_cache()
+                self._persist()
             self._record_activity(
                 self._config.strategy_name or "session",
                 "",
@@ -1498,6 +1667,17 @@ class LiveTradingService:
             )
             self.state_changed.emit()
             return False, blockers
+        if was_pending:
+            # Durable in-progress marker: if the gateway dies while sessions
+            # are being rebuilt, the next restore still sees a pending
+            # recovery instead of mistaking the run for a clean STOP.
+            self._set_recovery(
+                _RECOVERY_PHASE_RECOVERING,
+                code=self._recovery_reason_code,
+                reasons=(*self._recovery_reasons, "operator-authorized resume in progress"),
+                reconciliation="PENDING",
+            )
+            self._persist()
         try:
             self._build_sessions()
         except LiveConfigError as exc:
@@ -1505,6 +1685,52 @@ class LiveTradingService:
             self._status = "ERROR"
             self._status_reason = str(exc)
             self._blocked_start_reason = ""
+            if was_pending or self._desired_status == "RUNNING":
+                self._begin_resume_attempt()
+                self._desired_status = "RUNNING"
+                self._desired_armed = True
+                self._recovery_interrupted_at = self._recovery_interrupted_at or _utcnow_iso()
+                self._recovery_recovered_at = ""
+                self._set_recovery(
+                    _RECOVERY_PHASE_FAILED,
+                    code=_RECOVERY_CODE_BLOCKED,
+                    reasons=(str(exc),),
+                    reconciliation="ERROR",
+                    error=str(exc),
+                )
+                self._confirmed_live_at = ""
+                self.invalidate_validation_cache()
+                self._persist()
+            self.state_changed.emit()
+            return False, (str(exc),)
+        except Exception as exc:  # noqa: BLE001 - fail closed, never crash START
+            self._teardown_sessions()
+            self._status = "ERROR"
+            self._status_reason = f"session build failed: {exc}"
+            self._blocked_start_reason = ""
+            if was_pending:
+                self._begin_resume_attempt()
+                self._desired_status = "RUNNING"
+                self._desired_armed = True
+                self._recovery_interrupted_at = self._recovery_interrupted_at or _utcnow_iso()
+                self._recovery_recovered_at = ""
+                self._set_recovery(
+                    _RECOVERY_PHASE_FAILED,
+                    code="SESSION_BUILD_FAILED",
+                    reasons=(str(exc),),
+                    reconciliation="ERROR",
+                    error=str(exc),
+                )
+                self._confirmed_live_at = ""
+                self.invalidate_validation_cache()
+            else:
+                self._desired_status = "STOPPED"
+                self._desired_armed = False
+                self._set_recovery(
+                    _RECOVERY_PHASE_NOT_REQUIRED,
+                    reconciliation="NOT_RUN",
+                )
+            self._persist()
             self.state_changed.emit()
             return False, (str(exc),)
         now = time.time()
@@ -1519,7 +1745,27 @@ class LiveTradingService:
         self._status = "RUNNING"
         self._status_reason = ""
         self._blocked_start_reason = ""
+        self._desired_status = "RUNNING"
+        self._desired_armed = True
+        if self._recovery_phase in _RECOVERY_PENDING_PHASES:
+            self._begin_resume_attempt()
+            self._recovery_recovered_at = _utcnow_iso()
+            self._recovery_last_error = ""
+            self._set_recovery(
+                _RECOVERY_PHASE_COMPLETE,
+                reasons=(),
+                reconciliation="SAFE",
+            )
+        else:
+            self._recovery_interrupted_at = ""
+            self._recovery_recovered_at = ""
+            self._recovery_last_error = ""
+            self._set_recovery(
+                _RECOVERY_PHASE_NOT_REQUIRED,
+                reconciliation="SAFE",
+            )
         self._timer.start()
+        self._worker_started = True
         self._record_session_start()
         self._persist()
         self.state_changed.emit()
@@ -1565,6 +1811,7 @@ class LiveTradingService:
     def stop(self, reason: str = "operator stop") -> None:
         """Halt immediately: no new signals; open orders stay tracked."""
         self._timer.stop()
+        self._worker_started = False
         for session in self._sessions.values():
             with contextlib.suppress(Exception):
                 session.disarm(f"stop: {reason}")
@@ -1576,6 +1823,20 @@ class LiveTradingService:
         self._status = "HALTED" if halted else "STOPPED"
         self._status_reason = reason if reason != "operator stop" else ""
         self._blocked_start_reason = ""
+        # An explicit STOP is the operator closing the book on any interrupted
+        # run: desired intent and the recovery workflow end together.
+        self._desired_status = "HALTED" if halted else "STOPPED"
+        self._desired_armed = False
+        self.armed = False
+        self._recovery_interrupted_at = ""
+        self._recovery_recovered_at = ""
+        self._recovery_attempts = 0
+        self._recovery_last_error = ""
+        self._set_recovery(
+            _RECOVERY_PHASE_NOT_REQUIRED,
+            reasons=(),
+            reconciliation="NOT_RUN",
+        )
         # Consent is per start, not per service lifetime: without this the
         # snapshot keeps hiding the consent blocker after a STOP, so START
         # renders enabled and the service then refuses it. Fresh ARM per run.
@@ -1611,20 +1872,25 @@ class LiveTradingService:
         if self._status != "RUNNING":
             return
         now = time.time()
-        try:
-            for symbol, session in self._sessions.items():
-                with contextlib.suppress(Exception):
-                    session.step(now)
-                with contextlib.suppress(Exception):
-                    self._refresh_mark(symbol)
-            self._tick_count += 1
-            if self._tick_count % 2 == 0:
-                self._drain_activity()
-            if self._tick_count % 30 == 0:
-                self._persist()
-        except Exception as exc:
-            self._status = "ERROR"
-            self._status_reason = str(exc) or "tick failed"
+        failures: list[str] = []
+        for symbol, session in self._sessions.items():
+            try:
+                session.step(now)
+            except Exception as exc:  # noqa: BLE001 - fail closed, report it
+                failures.append(f"{symbol}: {exc}")
+            with contextlib.suppress(Exception):
+                self._refresh_mark(symbol)
+        if failures:
+            # One broken session means the worker can no longer claim a
+            # healthy run. Stop everything and surface an explicit recovery
+            # state; never leave RUNNING while a session is not stepping.
+            self._degrade("session step failed — " + "; ".join(failures[:3]))
+            return
+        self._tick_count += 1
+        if self._tick_count % 2 == 0:
+            self._drain_activity()
+        if self._tick_count % 30 == 0:
+            self._persist()
         self.state_changed.emit()
 
     # ── snapshot (the ONLY data the LIVE tab reads) ─────────────────────
@@ -1673,6 +1939,8 @@ class LiveTradingService:
 
         with contextlib.suppress(Exception):
             pump_events(allow_any_thread=True)
+        if self._status == "RUNNING" and self._worker_started and not self._timer.is_running:
+            self._degrade("worker timer is not running")
         blockers = self.validate() if self._status != "RUNNING" else ()
         if self._status != "RUNNING":
             # A previous failed START must not keep describing a state that
@@ -1968,10 +2236,25 @@ class LiveTradingService:
         # constant.
         md_last_tick = ""
         md_freshness_s: float | None = None
+        md_session_health: dict[str, Any] = {}
+        for symbol, session in self._sessions.items():
+            health_fn = getattr(session, "market_data_health", None)
+            if callable(health_fn):
+                with contextlib.suppress(Exception):
+                    md_session_health[symbol] = health_fn()
+        md_delivery: list[dict[str, Any]] = []
+        for fanout in self._market_fanouts:
+            stats = fanout.stats()
+            healthy, reason = fanout.health()
+            stats["transport"] = {"healthy": bool(healthy), "reason": str(reason)}
+            md_delivery.append(stats)
 
         snap = {
             "mode": self._config.mode,
             "session_status": self._status,
+            "desired_status": self._desired_status,
+            "worker_alive": bool(self._worker_started and self._timer.is_running),
+            "recovery": self.recovery_status(),
             "status_reason": self._status_reason,
             "as_of": now_iso,
             "websocket": {
@@ -1997,6 +2280,8 @@ class LiveTradingService:
                 "last_tick_time": md_last_tick,
                 "freshness_age_s": md_freshness_s,
                 "price_source": "candle_store",
+                "health": md_session_health,
+                "delivery": md_delivery,
             },
             "risk_engine": {
                 "raw_capital": self._risk_engine.raw_capital,
@@ -2137,6 +2422,10 @@ class LiveTradingService:
 
     def _build_sessions(self) -> None:
         assert self._config.strategy_name and self._config.symbols and self._config.timeframe
+        # Tear down the previous run *before* probing the venue. The probe
+        # reuses the shared plugin face; tearing down afterwards would close
+        # the face the new sessions just connected to.
+        self._teardown_sessions()
         record = self._resolve_strategy_record(self._config.strategy_name)
         if record is None:
             available = list(self.available_strategies())
@@ -2171,6 +2460,12 @@ class LiveTradingService:
         if md_faces:
             self._feed_kind = "live"
         base_dir = self._data_dir / "live" / "sessions"
+        try:
+            from data.settings import NSE_HOLIDAYS
+
+            market_holidays = tuple(sorted(NSE_HOLIDAYS))
+        except Exception:
+            market_holidays = ()
         sessions: dict[str, LiveSession] = {}
         try:
             has_local_store = bool(self._repository.list_symbols())
@@ -2239,6 +2534,9 @@ class LiveTradingService:
                         memory_path=str(session_dir / "memory.json"),
                         kill_switch_path=str(session_dir / "kill.json"),
                         adapter_name=adapter,
+                        session_start="09:15",
+                        session_end="15:30",
+                        market_holidays=market_holidays,
                     ),
                     provider,
                     policy,
@@ -2277,15 +2575,15 @@ class LiveTradingService:
                 with contextlib.suppress(Exception):
                     session.stop()
             raise
-        self._teardown_sessions()
         self._sessions = sessions
 
     def _probe_live_venue(self, venue_id: str) -> dict[str, Any]:
         """START-time venue truth: connect + health + account, read-only.
 
         Raises LiveConfigError with the exact reason on any failure. One
-        market-data face per configured symbol is returned when the venue
-        serves MARKET_DATA, else {} (local SQLite tail applies). The probe
+        per-symbol subscription over the venue's shared market-data face is
+        returned when the venue serves MARKET_DATA, else {} (local SQLite
+        tail applies). The probe
         opens a read-only venue connection (login/session validation) but
         places no orders and changes no trading state.
         """
@@ -2361,11 +2659,40 @@ class LiveTradingService:
             "funds": dict(funds) if isinstance(funds, dict) else {},
         }
         md_faces: dict[str, Any] = {}
+        faces: dict[str, Any] = {}
         try:
+            # Ask once per symbol, then group by object identity. A static
+            # venue returns the same face every time (one multiplexed socket);
+            # a factory venue returns distinct faces, which must be preserved.
             for symbol in self._config.symbols:
-                md_faces[symbol] = record.plugin.face(Domain.MARKET_DATA)
+                faces[symbol] = record.plugin.face(Domain.MARKET_DATA)
         except Exception:
-            md_faces = {}
+            # The face may be venue-owned (StaticPlugin); this layer must
+            # never destroy it just because a later lookup failed. A
+            # factory-created, never-used object is collectable.
+            faces = {}
+        # A StaticPlugin-style venue returns one shared market-data face for
+        # every symbol. Wrapping that face per symbol gives each candle
+        # provider an independent cursor instead of letting the first poll
+        # steal every other symbol's quotes. A factory venue that truly
+        # returns distinct faces is left untouched.
+        groups: dict[int, tuple[Any, list[str]]] = {}
+        for symbol, face in faces.items():
+            key = id(face)
+            existing = groups.get(key)
+            if existing is None:
+                groups[key] = (face, [symbol])
+            else:
+                existing[1].append(symbol)
+        for face, grouped_symbols in groups.values():
+            # Always wrap, even for a single symbol: the face belongs to the
+            # venue registration and must survive this run's teardown. A
+            # provider closing a direct face would make the next START fail
+            # with a permanently closed StaticPlugin adapter.
+            fanout = MarketDataFanout(face)
+            self._market_fanouts.append(fanout)
+            for symbol in grouped_symbols:
+                md_faces[symbol] = fanout.subscription(symbol, (symbol,))
         return md_faces
 
     def _teardown_sessions(self) -> None:
@@ -2373,6 +2700,15 @@ class LiveTradingService:
             with contextlib.suppress(Exception):
                 session.stop()
         self._sessions = {}
+        # The fan-out does not own the venue face (StaticPlugin reuses it):
+        # teardown releases this run's symbols and disconnects the shared
+        # transport. The last session.stop() usually triggers it already;
+        # close() is idempotent and also covers probe failures where no
+        # session was ever constructed.
+        for fanout in self._market_fanouts:
+            with contextlib.suppress(Exception):
+                fanout.close()
+        self._market_fanouts.clear()
 
     def _load_history(self, symbol: str, timeframe: str) -> tuple[Bar, ...]:
         try:
@@ -3249,6 +3585,7 @@ class LiveTradingService:
         # Restored config NEVER auto-starts (real-money safety + paper hygiene).
         timing = data.get("session_timing")
         store_dirty = False
+        saved_status = ""
         if isinstance(timing, dict):
             self._started_at = str(timing.get("started_at", ""))
             self._stopped_at = str(timing.get("stopped_at", ""))
@@ -3260,8 +3597,10 @@ class LiveTradingService:
                 self._status_reason = "operator halt"
             else:
                 self._status = "STOPPED"
-            if saved_status == "RUNNING":
-                # Stale persisted status corrected: a restored session never starts as RUNNING.
+            if saved_status in ("RUNNING", "STARTING"):
+                # Observed state is corrected to STOPPED on restore. The
+                # operator's desired state is persisted separately below, so
+                # this correction never erases the interrupted-run fact.
                 timing["status"] = "STOPPED"
                 timing["start_epoch"] = None
                 if not self._stopped_at:
@@ -3274,6 +3613,110 @@ class LiveTradingService:
         else:
             self._status = "STOPPED"
 
+        # Desired state is the durable operator intent. Legacy files have no
+        # desired_state: a persisted RUNNING/STARTING status is read as an
+        # interrupted run, never as a clean STOP.
+        desired = data.get("desired_state")
+        desired_status = ""
+        desired_armed = False
+        if isinstance(desired, dict):
+            desired_status = str(desired.get("status", "")).upper()
+            desired_armed = bool(desired.get("armed", False))
+        if desired_status not in ("RUNNING", "STOPPED", "HALTED"):
+            desired_status = (
+                "RUNNING"
+                if saved_status in ("RUNNING", "STARTING")
+                else ("HALTED" if saved_status == "HALTED" else "STOPPED")
+            )
+            desired_armed = desired_status == "RUNNING" and (
+                saved_status in ("RUNNING", "STARTING")
+            )
+            store_dirty = True
+
+        stored_recovery = data.get("recovery")
+        stored_phase = ""
+        stored_reasons: tuple[str, ...] = ()
+        stored_code = ""
+        stored_interrupted_at = ""
+        stored_attempts = 0
+        if isinstance(stored_recovery, dict):
+            stored_phase = str(stored_recovery.get("phase", "")).upper()
+            raw_reasons = stored_recovery.get("reasons", ())
+            if isinstance(raw_reasons, (list, tuple)):
+                stored_reasons = tuple(str(item) for item in raw_reasons if str(item))
+            stored_code = str(stored_recovery.get("reason_code", ""))
+            stored_interrupted_at = str(stored_recovery.get("interrupted_at", ""))
+            try:
+                stored_attempts = max(0, int(stored_recovery.get("attempts", 0) or 0))
+            except (TypeError, ValueError):
+                stored_attempts = 0
+        # Desired RUNNING with an observed process that is not running is the
+        # definition of an interrupted run. Do not require a second marker:
+        # legacy files and a crash between status writes must not hide it.
+        interrupted = desired_status == "RUNNING"
+
+        self._desired_status = desired_status
+        self._desired_armed = desired_armed
+        if interrupted:
+            # This is the core restart guarantee: observed STOPPED, desired
+            # RUNNING, explicit operator authorization required. Nothing is
+            # started, armed or submitted by this constructor.
+            self._status = "STOPPED"
+            # A persisted RECOVERING marker is a crash *inside* a resume; the
+            # process is not recovering now, so ask the operator again rather
+            # than claiming activity that is not happening.
+            self._recovery_phase = (
+                stored_phase if stored_phase in _RECOVERY_AUTH_PHASES else _RECOVERY_PHASE_AWAITING
+            )
+            self._recovery_reason_code = stored_code or _RECOVERY_CODE_RESTART
+            self._recovery_reasons = stored_reasons or (
+                "gateway restarted while the session was marked RUNNING",
+                "operator authorization is required to resume LIVE execution",
+                "broker reconciliation and session validation run before any order",
+            )
+            self._recovery_interrupted_at = stored_interrupted_at or _utcnow_iso()
+            self._recovery_recovered_at = ""
+            self._recovery_attempts = stored_attempts
+            self._recovery_reconciliation = "PENDING"
+            self._recovery_last_error = ""
+            self._desired_armed = True
+            self._status_reason = (
+                "gateway restart interrupted a RUNNING session — explicit operator "
+                "authorization required to resume"
+            )
+            self._activity.append(
+                {
+                    "timestamp": _utcnow_iso(),
+                    "strategy": self._config.strategy_name,
+                    "symbol": "",
+                    "event": "RECOVERY REQUIRED — gateway restart while RUNNING",
+                    "status": "error",
+                    "category": "SYSTEM",
+                }
+            )
+            store_dirty = True
+        else:
+            self._recovery_phase = _RECOVERY_PHASE_NOT_REQUIRED
+            self._recovery_reason_code = ""
+            self._recovery_reasons = ()
+            self._recovery_interrupted_at = ""
+            self._recovery_recovered_at = ""
+            self._recovery_attempts = stored_attempts
+            self._recovery_last_error = ""
+            self._recovery_reconciliation = "NOT_RUN"
+
+        if isinstance(timing, dict):
+            timing["desired_status"] = self._desired_status
+            timing["armed"] = bool(self._desired_armed)
+            if str(timing.get("status", "")).upper() != self._status:
+                timing["status"] = self._status
+                if self._status != "HALTED":
+                    timing["start_epoch"] = None
+            store_dirty = True
+        data["desired_state"] = self._desired_state_dict()
+        data["recovery"] = self.recovery_status()
+        # Never rewrite the whole session file through _persist() here: it
+        # would replace the checkpoints with the (empty) in-memory sessions.
         if store_dirty:
             with contextlib.suppress(Exception):
                 self._store.save(data)
@@ -3327,6 +3770,13 @@ class LiveTradingService:
             "confirmed_account_id": self._confirmed_account_id,
         }
         checkpoints: dict[str, Any] = {}
+        stored_checkpoints = data.get("checkpoints", {})
+        if isinstance(stored_checkpoints, dict):
+            # Never silently discard persisted order/engine state before it
+            # has been reconciled. A restored-but-not-yet-started run has no
+            # sessions yet; replacing the map here would erase the only
+            # evidence of open orders.
+            checkpoints.update(stored_checkpoints)
         for symbol, session in self._sessions.items():
             with contextlib.suppress(Exception):
                 checkpoints[symbol] = session.checkpoint()
@@ -3335,12 +3785,16 @@ class LiveTradingService:
         data["activity"] = list(self._activity)[-200:]
         data["session_timing"] = {
             "status": self._status,
+            "desired_status": self._desired_status,
+            "armed": bool(self._desired_armed),
             "started_at": self._started_at,
             "stopped_at": self._stopped_at,
             "elapsed_seconds": self._elapsed_seconds,
             "signals_generated": self._signals_generated,
             "start_epoch": self._session_start_epoch,  # float Unix epoch or None
         }
+        data["desired_state"] = self._desired_state_dict()
+        data["recovery"] = self.recovery_status()
         try:
             self._store.save(data)
         except Exception as exc:  # noqa: BLE001

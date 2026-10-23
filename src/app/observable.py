@@ -185,6 +185,12 @@ class IntervalTimer:
         )
         self._thread.start()
 
+    @property
+    def is_running(self) -> bool:
+        """True while a live timer thread exists (not merely not-stopped)."""
+        thread = self._thread
+        return thread is not None and thread.is_alive()
+
     def stop(self) -> None:
         """Stop scheduling ticks and reap the thread."""
         self._stop.set()
