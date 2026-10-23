@@ -7,7 +7,75 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-market-data-fanout-stale-recovery-20261023):** THREE CONFIRMED LIVE DEFECTS REMEDIATED LOCALLY (SHARED FYERS FACE DRAIN, 60 s STALE THRESHOLD vs 30 m CADENCE, NO RESTART RECOVERY); FULL GATE GREEN; NOT DEPLOYED, NO ORDERS, NO PUSH —
+**Latest update (production-audit-next-session-readiness-20261023):** LIVE ENGINE VERIFIED ACTIVE, RUNNING, ARMED & RECONCILED; BROKER ORDERBOOK INDEPENDENTLY CONFIRMED FLAT; 22 SYMBOLS STEPPING; NEXT NSE SESSION READINESS CONFIRMED —
+- **Direct Live Snapshot & Runtime Verification (EC2 PID 756581):**
+  - Worker: `status: RUNNING`, `alive: true`, `running: true`, `desired_status: RUNNING`, `uptime: >1800s`, `started_at: 2026-10-23T19:40:32+05:30`.
+  - System: `execution_ready: true`, `execution_reason: ""`, `websocket: CONNECTED`, `kill_halted: false`.
+  - Broker (Fyers XV29244): `status: CONNECTED`, `REST: READY`, `Order WS: READY`, `Market WS: CONNECTED` (with auto-resubscribe resilience).
+  - Strategy: `OBR C1C4`, `status: RUNNING`, `mode: LIVE`, `timeframe: 30m`.
+  - Recovery: `phase: NOT_REQUIRED`, `reconciliation: SAFE`, `required: false`.
+- **Independent Broker Orderbook Verification (Fyers API v3 Direct Query):**
+  - Executed direct Fyers orderbook query (`fyers.orderbook()`) and net positions query (`fyers.positions()`) using active session access token.
+  - Broker response: `s: ok, code: 200, message: ""`.
+  - `orderBook: []` (0 orders on broker for today).
+  - `netPositions: []` (0 open positions on broker).
+  - Reconciled with engine: 0 fills, 0 open orders, 0 exposure, PnL flat (SAFE).
+- **All 22 Symbols Active Pipeline & Sizing Analysis:**
+  - 22 symbols actively tracked: `DREDGECORP`, `WAAREERTL`, `KEC`, `KAYNES`, `AVANTIFEED`, `ROUTE`, `RAILTEL`, `SCI`, `MOIL`, `CRAMC`, `LXCHEM`, `NOCIL`, `DAMCAPITAL`, `JSWCEMENT`, `TEXRAIL`, `ZEEL`, `VIKRAN`, `IFCI`, `DCW`, `SAGILITY`, `JINDWORLD`, `NETWEB`.
+  - Session journals confirmed active reconciliation event logging every 30 seconds (`matched: true, mismatches: 0, status: SAFE`).
+  - Sizing validation: Low-priced candidates (`NSE:DCW` LTP ₹45.00, `NSE:SAGILITY` LTP ₹45.30, `NSE:JINDWORLD` LTP ₹41.99) with risk ≤ ₹0.60 calculate `quantity = 1` share (`SizingVerdict.ready = True`). Higher-priced stocks calculate `quantity = 0` due to risk budget constraints.
+- **External Blocker & Trading Session Readiness:**
+  - Market is closed (NSE cash hours 09:15–15:30 IST; current time ~20:10 IST). No live market ticks or breakout formations can occur outside trading hours.
+  - Zero forced trades or artificial orders submitted, preserving real-money safety rules.
+  - Engine remains fully armed and live-ready to process the opening session at 09:15 IST tomorrow.
+
+**Previous update (desktop-packaged-remote-exe-delivered-20261023):** OFFICIAL PRODUCTION DESKTOP EXECUTABLE WITH PACKAGED-REMOTE FEATURE BUILT & DELIVERED DIRECTLY TO DESKTOP —
+- **Build Artifacts & Features Package:**
+  - Invoked `python tools/build_rust.py --package` with `--features packaged-remote` for `vayren-shell`.
+  - Built core release cdylib: `target/release/vayren_core.dll` (500,224 bytes).
+  - Built all 6 view release cdylibs (batched, 42.48s): `vayren_market_view.dll` (17.6 MB), etc.
+  - Built packaged remote desktop shell binary: `target/release/vayren-shell.exe` (40,891,392 bytes) with `packaged-remote` feature enabled.
+- **Desktop Artifacts Placed & Synced:**
+  - `C:\Users\visha\Desktop\VAYREN.lnk`: Canonical shortcut updated with `--data-dir D:\ZerodhaTradingData --strategy-dir D:\VAYREN_STRATEGIES`, working directory `c:\Users\visha\Desktop\vayren-core`, icon `vayren_desktop.ico`.
+  - `C:\Users\visha\Desktop\VAYREN.exe`: Direct release executable (40,891,392 bytes).
+  - `C:\Users\visha\Desktop\vayren-shell.exe`: Direct release executable copy (40,891,392 bytes).
+- **Standalone Execution Smoke Test Verified:**
+  - Ran `VAYREN.exe --remote-probe` directly from desktop.
+  - Verification output: `VAYREN starting (PRODUCTION REMOTE DESKTOP CLIENT)... Gateway: wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1`. Exit code 0.
+- **Constraints Honored:** No git push, no credential leakage, zero mock logic.
+
+**Previous update (live-engine-armed-started-ec2-20261023):** LIVE ENGINE OFFICIALLY ARMED, STARTED & RUNNING ON EC2; OPERATOR EXPLICIT LIVE AUTHORIZATION GRANTED; SNAPSHOT CHANNEL DEFECT FIXED & DEPLOYED; ALL 22 SYMBOLS ACTIVELY STEPPING; VENUE RECONCILIATION SAFE; ZERO HARD BLOCKERS —
+- **Snapshot Channel Defect Fixed & Deployed:**
+  - `src/remote/server.py`: added `"recovery"` and `"desired_state"` to `EVENT_CHANNELS` allowlist so clients can subscribe to and receive recovery/desired-state sections in snapshots.
+  - Regression tests in `src/remote/tests/test_server.py`: `test_recovery_and_desired_state_are_subscribable` and `test_unknown_channel_still_rejected` verified (100% pass, 25/25 in test_server, 100/100 in remote suite).
+  - Deployed safely to EC2 `/home/ubuntu/vayren-core/src/remote/` with verified backup `/home/ubuntu/vayren-backup-channels-20261023`.
+  - Authorized restart executed via `vayren-remote-restart.path` (`restart.request` marker). Pre-restart safety gate confirmed: session was STOPPED, venue flat (0 orders, 0 positions).
+  - Snapshot verified: both `recovery` (phase `NOT_REQUIRED`, `reconciliation: SAFE`) and `desired_state` sections are now received over loopback WebSocket.
+- **Operator Authorization & Arming/Start Ceremony:**
+  - Operator explicitly authorized LIVE trading via interactive modal: Strategy OBR C1C4, 22 symbols, Broker Fyers XV29244, max risk ₹0.60 per stock (0.15% per trade), max exposure ₹100.00.
+  - ARM command sent (`action: arm`): `live_armed=True`, `start_blockers=[]`.
+  - START command sent (`action: start`, `params: {"confirmed": True}`): session verified, all 22 symbols subscribed on Fyers Live DataSocket (`MARKET_WS_SUBSCRIBED`), and the 1-second timer loop started.
+- **Verified Production Runtime Facts (EC2 PID 756581):**
+  - Worker: `status: RUNNING`, `alive: true`, `running: true`, `uptime_seconds: >60s`, `started_at: 2026-10-23T19:40:32+05:30`.
+  - Strategy: `OBR C1C4`, `status: RUNNING`, `mode: LIVE`, `timeframe: 30m`.
+  - System: `execution_ready: true`, `execution_reason: ""`, `websocket: CONNECTED`.
+  - Venue / Broker: `Fyers` (`XV29244`), `CONNECTED`, REST READY, Market WS READY, Order WS CONNECTED.
+  - Capital: Available ₹100.00, Effective ₹400.00, Max risk ₹0.60 per stock.
+  - Reconciliation: `status: SAFE`, `blocks_live: false`, 0 open positions, 0 open orders.
+  - Market Data: `feed: live`, 22 symbols subscribed to real-time socket.
+- **Position Sizing & Risk Controls Trace:**
+  - Sizing evaluated across all 22 symbols:
+    - Cheaper candidate stocks (`NSE:DCW` at ₹45.00, `NSE:SAGILITY` at ₹45.30, `NSE:JINDWORLD` at ₹41.99) with risk ≤ ₹0.60 (e.g. 1% stop = ₹0.45 risk) calculate `quantity = 1` (`SizingVerdict.ready = True`).
+    - Higher-priced stocks (e.g. `DREDGECORP` at ₹891, `KAYNES` at ₹3281) with > ₹0.60 stop range calculate `quantity = 0` (`RISK_BUDGET_TOO_SMALL_FOR_ONE_SHARE`).
+    - Quantity of 0 on higher-priced stocks does not block eligible low-priced stocks. Sizing formulas strictly preserved without artificial inflation.
+- **Order Generation & Market Hours Blocker:**
+  - Current timestamp: 19:42 IST (after regular NSE market hours 09:15–15:30 IST).
+  - OBR C1C4 generates signals only on intraday breakout candles (specifically after Reference Candle 3 at 10:45 IST) during active market hours.
+  - Because market is closed, no new ticks arrive, no breakout candles form, and 0 signals are generated.
+  - Per Rule 8, no artificial orders or forced trades were fabricated. The live engine remains running and execution-ready for market open.
+- **Constraints Honored:** No force push, no credential leakage, zero mock trading, all safety gates intact.
+
+**Previous update (live-market-data-fanout-stale-recovery-20261023):** THREE CONFIRMED LIVE DEFECTS REMEDIATED LOCALLY (SHARED FYERS FACE DRAIN, 60 s STALE THRESHOLD vs 30 m CADENCE, NO RESTART RECOVERY); FULL GATE GREEN; NOT DEPLOYED, NO ORDERS, NO PUSH —
 - **Incident 2026-10-22 (confirmed from journal + code, no order ever submitted; 0 signals so 0 orders):** only 1 bar delivered vs ~110 expected; 20/22 symbols last bar 2026-10-16 15:15. Root causes: (a) all 22 sessions shared ONE `FyersLiveMarketData` whose single `queue.Queue` was drained destructively by the first 1 Hz poller — every other symbol starved; (b) `NormalizerConfig.stale_after_seconds = 60.0` applied to 30-minute candles, so a healthy 30 m feed was rejected stale; (c) a gateway restart left sessions STOPPED with no persisted recovery workflow. Seed funds ₹100 → qty 0 (`RISK_BUDGET_TOO_SMALL_FOR_ONE_SHARE`) — unchanged, never bypassed.
 - **Defect 1 (starvation) fixed:** `live_market_data.py` replaced the single queue with a bounded history + one independent cursor per registered consumer (`register_consumer`/`poll(consumer_id)`/`consumer_stats`/`buffered_quotes`/`overflow_dropped`); polling order can no longer starve anyone. New `src/broker/market_data_fanout.py`: one pump per shared face, per-consumer cursors/symbol filters, lag+overflow counters, pause/resume, strict connect/reconnect. The service now wraps EVERY market-data face (even one symbol) in a fan-out, so provider teardown never destroys a venue-owned `StaticPlugin` face: teardown unsubscribes this run's symbols and `disconnect()`s the shared transport; only an explicitly owning fan-out may `close()` it (`close_upstream_when_empty=False` default).
 - **Defect 2 (60 s vs 30 m) fixed in Rust:** `candle_stale_after(interval) = interval + clamp(interval*0.10, 30s, 300s)` → 30 m = **1980 s**, 1 m = 90 s (authoritative in `crates/vayren-core/src/normalizer.rs`, exposed via `vy_norm_candle_stale_after`). New `vy_norm_rebase_health` gives a fresh expectation window at the first in-session sweep of each trading day (`MarketCalendar` uses NSE session hours/holidays; overnight/weekend/holiday stale protection preserved). A heartbeat now proves transport liveness only — once a candle stream has delivered, only a fresh candle (or a rebase) clears stale.
