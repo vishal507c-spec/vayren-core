@@ -351,6 +351,72 @@ def test_snapshot_carries_the_authoritative_broker_session(live_server: Any) -> 
         client.close()
 
 
+def test_recovery_and_desired_state_are_subscribable(live_server: Any) -> None:
+    """The recovery sections must survive the subscription filter.
+
+    Regression: both were missing from EVENT_CHANNELS, so a client could
+    neither receive them by default nor subscribe to them explicitly.
+    """
+    server, gateway = live_server
+    gateway.live = make_live(
+        desired_state={"status": "STOPPED", "armed": False},
+        recovery={
+            "phase": "AWAITING_OPERATOR",
+            "required": True,
+            "operator_authorization_required": True,
+            "reason_code": "GATEWAY_RESTART_WHILE_RUNNING",
+            "reasons": ["operator authorization is required"],
+            "attempts": 0,
+        },
+    )
+    client, _welcome, initial = authed_client(server)
+    try:
+        initial_sections = initial["payload"]["snapshot"]
+        assert initial_sections["recovery"]["phase"] == "AWAITING_OPERATOR"
+        assert initial_sections["desired_state"]["armed"] is False
+
+        client.send_obj(
+            {
+                "type": "subscribe",
+                "v": 1,
+                "payload": {"channels": ["recovery", "desired_state"]},
+            }
+        )
+        subscribed = client.recv_obj()
+        assert subscribed is not None and subscribed["type"] == "snapshot", subscribed
+        sections = subscribed["payload"]["snapshot"]
+        assert set(sections) == {"recovery", "desired_state"}
+        assert sections["recovery"]["phase"] == "AWAITING_OPERATOR"
+        assert sections["recovery"]["operator_authorization_required"] is True
+        assert sections["desired_state"] == {"status": "STOPPED", "armed": False}
+    finally:
+        client.close()
+
+
+def test_unknown_channel_still_rejected(live_server: Any) -> None:
+    server, _gateway = live_server
+    client, _welcome, _snapshot = authed_client(server)
+    try:
+        client.send_obj(
+            {
+                "type": "subscribe",
+                "v": 1,
+                "payload": {"channels": ["recovery", "not-a-channel"]},
+            }
+        )
+        error = client.recv_obj()
+        assert error is not None and error["type"] == "error", error
+        assert error["payload"]["code"] == "BAD_MESSAGE"
+        assert error["payload"]["detail"] == "unknown channels: ['not-a-channel']"
+
+        # The rejected subscription must not poison the connection.
+        client.send_obj({"type": "ping", "v": 1, "payload": {}})
+        pong = client.recv_obj()
+        assert pong is not None and pong["type"] == "pong", pong
+    finally:
+        client.close()
+
+
 def test_sync_candles_reaches_the_backend(live_server: Any) -> None:
     """The candle-store backfill must not be an UNKNOWN_COMMAND."""
     server, gateway = live_server

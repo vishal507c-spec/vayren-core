@@ -83,6 +83,8 @@ MUTATING_ACTIONS = (
 #: Event channels a client may subscribe to (snapshot sections + event stream).
 EVENT_CHANNELS = (
     "worker",
+    "recovery",
+    "desired_state",
     "broker",
     # The authoritative unified broker session and the per-venue rows
     # (status, credential schema). These are the facts SYSTEM and LIVE both
