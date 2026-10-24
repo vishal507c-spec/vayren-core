@@ -29,8 +29,9 @@ use crate::{
     PortfolioOrder, PortfolioPosition, PortfolioRisk, ProgressStepView, RankWindow,
     ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy,
     ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup, ResearchMetric,
-    ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow, ShellScreen,
+    ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
 };
+pub use crate::ShellScreen;
 use slint::ComponentHandle;
 #[cfg(test)]
 use slint::Model;
@@ -3363,8 +3364,6 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         recon_sub: view.bar.recon_sub.into(),
         exec_label: view.bar.exec_label.into(),
         exec_tone: view.bar.exec_tone,
-        halted: view.bar.halted,
-        halt_enabled: view.bar.halt_enabled,
         inspector_open: view.bar.inspector_open,
         note: view.bar.note.into(),
         note_tone: view.bar.note_tone,
@@ -3383,7 +3382,6 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         can_start: view.setup.can_start,
         start_clickable: view.setup.start_clickable,
         can_stop: view.setup.can_stop,
-        can_arm: view.setup.can_arm,
         needs_live_confirm: view.setup.needs_live_confirm,
         confirmed_live: view.setup.confirmed_live,
         confirm_dialog_open: view.setup.confirm_dialog_open,
@@ -3399,19 +3397,24 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         universe_exchange: view.setup.universe_exchange.into(),
         pending_start: view.setup.pending_start,
         pending_stop: view.setup.pending_stop,
-        pending_halt: view.setup.pending_halt,
     });
+    let mut combo_names: Vec<String> = Vec::with_capacity(view.setup.strategy_names.len() + 1);
+    combo_names.push("— Select Strategy —".to_string());
+    combo_names.extend(view.setup.strategy_names.clone());
     ui.set_live_strategy_names(
         Rc::new(slint::VecModel::from(
-            view.setup
-                .strategy_names
+            combo_names
                 .into_iter()
                 .map(<_>::into)
                 .collect::<Vec<_>>(),
         ))
         .into(),
     );
-    ui.set_live_strategy_selected(view.setup.strategy_selected);
+    ui.set_live_strategy_selected(if view.setup.strategy_selected < 0 {
+        0
+    } else {
+        view.setup.strategy_selected + 1
+    });
     ui.set_live_timeframe_names(
         Rc::new(slint::VecModel::from(
             view.setup
@@ -3467,7 +3470,6 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         ))
         .into(),
     );
-    ui.set_live_arm_note(view.arm_note.into());
     ui.set_live_blockers(
         Rc::new(slint::VecModel::from(
             view.setup
@@ -3780,6 +3782,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         risk: view.footer.risk.into(),
         reconciliation: view.footer.reconciliation.into(),
         clock: view.footer.clock.into(),
+        snapshot_time: view.footer.snapshot_time.into(),
     });
     ui.set_live_filter_chip_selected(view.filter_chip_selected);
     ui.set_live_filter_chip_counts(view.filter_chip_counts.into());
@@ -3859,8 +3862,6 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
     }
     wire_unit!(on_live_start_requested, LiveState::start);
     wire_unit!(on_live_stop_requested, LiveState::stop);
-    wire_unit!(on_live_arm_requested, LiveState::arm);
-    wire_unit!(on_live_halt_requested, LiveState::halt);
     wire_unit!(on_live_confirm_requested, LiveState::confirm_live);
     wire_unit!(
         on_live_confirm_open_requested,
@@ -4752,14 +4753,10 @@ mod tests {
         assert_eq!(bar.exec_label, "● ENABLED");
         assert_eq!(bar.broker_label, "NOT CONFIGURED");
         assert_eq!(bar.conn_label, "Connection: N/A");
-        assert!(!bar.halted);
-        // Halt follows real state: an idle session cannot be halted.
-        assert!(!bar.halt_enabled);
         let setup = ui.get_live_setup();
         assert_eq!(setup.session_label, "● STOPPED");
         assert!(!setup.can_start); // bridge not wired: no fake run affordance
         assert!(!setup.can_stop);
-        assert!(!setup.can_arm); // venue gates fail: no fake readiness
         let gates = ui.get_live_gates();
         assert_eq!(gates.row_count(), 10);
         assert_eq!(
@@ -4907,8 +4904,6 @@ mod tests {
             recon_sub: "Positions: N/A | Orders: N/A".into(),
             exec_label: "● ENABLED".into(),
             exec_tone: 1,
-            halted: false,
-            halt_enabled: false,
             inspector_open: false,
             note: String::default().into(),
             note_tone: 0,
@@ -4926,7 +4921,6 @@ mod tests {
             can_start: false,
             start_clickable: false,
             can_stop: false,
-            can_arm: false,
             needs_live_confirm: false,
             confirmed_live: false,
             confirm_dialog_open: false,
@@ -4936,7 +4930,6 @@ mod tests {
             universe_exchange: "NSE".into(),
             pending_start: false,
             pending_stop: false,
-            pending_halt: false,
         });
         harness.set_market(LiveMarket {
             has_data: false,

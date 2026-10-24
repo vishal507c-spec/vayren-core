@@ -233,7 +233,7 @@ impl RemoteClient {
         client.send_envelope(&msg::hello(token))?;
         let welcome = client.await_type("welcome", timeout)?;
         // Record the granted role BEFORE the socket is usable for commands:
-        // the shell gates START/STOP/HALT on it, and an unparsed welcome must
+        // the shell gates START/STOP on it, and an unparsed welcome must
         // fail closed (empty role ⇒ no commands).
         if let ClientEvent::Welcome { role, .. } = &welcome {
             client.role = role.clone();

@@ -33,7 +33,6 @@ export component LiveHarness inherits Window {
     in property <[string]> timeframe-names;
     in property <int> timeframe-selected: -1;
     in property <[LiveGate]> gates;
-    in property <string> arm-note: "";
     in property <[string]> blockers;
     in property <[LiveKv]> strategy-rows;
     in property <[LiveKv]> position-rows;
@@ -97,8 +96,6 @@ export component LiveHarness inherits Window {
     callback quantity-edited(string);
     callback start-requested();
     callback stop-requested();
-    callback arm-requested();
-    callback halt-requested();
     callback confirm-requested();
     callback event-filter-changed(string);
     callback event-type-picked(string);
@@ -127,7 +124,6 @@ export component LiveHarness inherits Window {
         timeframe-names: root.timeframe-names;
         timeframe-selected: root.timeframe-selected;
         gates: root.gates;
-        arm-note: root.arm-note;
         blockers: root.blockers;
         strategy-rows: root.strategy-rows;
         position-rows: root.position-rows;
@@ -155,8 +151,6 @@ export component LiveHarness inherits Window {
         quantity-edited(t) => { root.quantity-edited(t); }
         start-requested() => { root.start-requested(); }
         stop-requested() => { root.stop-requested(); }
-        arm-requested() => { root.arm-requested(); }
-        halt-requested() => { root.halt-requested(); }
         confirm-requested() => { root.confirm-requested(); }
         event-filter-changed(t) => { root.event-filter-changed(t); }
         event-type-picked(i) => { root.event-type-picked(i); }

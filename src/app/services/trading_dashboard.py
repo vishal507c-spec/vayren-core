@@ -391,22 +391,6 @@ class LiveWorkspaceView(QWidget):
         )
         self.btn_stop.clicked.connect(self._bridge.send_stop)
 
-        self.btn_arm = QPushButton("ARM", self)
-        self.btn_arm.setStyleSheet(
-            f"background-color: {t.PANEL2}; color: {t.ACCENT}; font-weight: bold;"
-            f" padding: 6px 14px; border: 1px solid {t.ACCENT}; border-radius: 3px;"
-        )
-        self.btn_arm.clicked.connect(self._bridge.send_arm)
-
-        self.btn_halt = QPushButton("EMERGENCY HALT", self)
-        self.btn_halt.setStyleSheet(
-            f"background-color: {t.NEG}; color: {t.TEXT}; font-weight: 800;"
-            " padding: 6px 18px; border-radius: 3px;"
-        )
-        self.btn_halt.clicked.connect(
-            lambda: self._bridge.send_halt(reason="Operator EMERGENCY HALT triggered from UI")
-        )
-
         self.btn_reconcile = QPushButton("Reconcile Now", self)
         self.btn_reconcile.setStyleSheet(
             f"background-color: {t.PANEL2}; color: {t.TEXT2}; font-weight: bold;"
@@ -416,8 +400,6 @@ class LiveWorkspaceView(QWidget):
 
         act_bar.addWidget(self.btn_start)
         act_bar.addWidget(self.btn_stop)
-        act_bar.addWidget(self.btn_arm)
-        act_bar.addWidget(self.btn_halt)
         act_bar.addWidget(self.btn_reconcile)
         act_bar.addSpacing(20)
 

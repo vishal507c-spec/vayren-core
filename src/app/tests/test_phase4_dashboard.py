@@ -238,12 +238,6 @@ def test_bridge_command_dispatches(qt_app: Any) -> None:
     bridge.send_stop()
     bridge._dispatch.assert_called_with(ControlCommand.STOP)
 
-    bridge.send_arm()
-    bridge._dispatch.assert_called_with(ControlCommand.ARM)
-
-    bridge.send_halt(reason="Emergency halt")
-    bridge._dispatch.assert_called_with(ControlCommand.HALT, {"reason": "Emergency halt"})
-
     bridge.send_select_strategy("OBR C1C4", {"timeframe": "15m"})
     bridge._dispatch.assert_called_with(
         ControlCommand.SELECT_STRATEGY,

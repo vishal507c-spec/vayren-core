@@ -7,7 +7,95 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (production-audit-next-session-readiness-20261023):** LIVE ENGINE VERIFIED ACTIVE, RUNNING, ARMED & RECONCILED; BROKER ORDERBOOK INDEPENDENTLY CONFIRMED FLAT; 22 SYMBOLS STEPPING; NEXT NSE SESSION READINESS CONFIRMED —
+**Latest update (live-ui-12-audit-bugs-fixed-20261024):** COMPLETE PRODUCTION FIX FOR ALL 12 LIVE UI AUDIT DEFECTS —
+- **Bug 1 (Watchlist Alignment):** Aligned watchlist row status dot container to 14px (`Rectangle { width: 14px; Rectangle { width: 10px; height: 10px; ... } }`) to match the 14px column 1 header, resolving the 4px horizontal shift across table columns.
+- **Bug 2 (Misleading Reconciliation Footer):** Eliminated fake fallbacks (`BROKER SYNCED`, `NSE STREAM`, `30m CANDLES`). Display honest states (`NOT CONFIGURED`, `DISCONNECTED`, `NO DATA`). Removed duplicate `RECON: Recon:` prefix in `live.rs`. Display `SNAPSHOT: <time>` separately from the real-time workstation clock.
+- **Bug 3 (Broker Capital Status Color):** Removed hardcoded teal and fake `₹0.00` in the Inspector. Display `"Unavailable"` when missing, with dynamic semantic tone mapping (`root.bar.capital-tone`: teal for healthy/connected, neg/red for error, amber for warning, muted for unavailable).
+- **Bug 4 (Watchlist Search/Filter Empty State):** When symbol filtering or search yields 0 matches, display `VEmptyState` ("No symbols match") and badge "0 MATCHES". Hide strategy universe editor when filtering is active.
+- **Bug 5 (Broker Configuration Action):** Wired TopCard clicked handler and added a visible `VButton { label: "CONFIGURE BROKER"; variant: 1; clicked => { root.configure-broker(); } }` in the Inspector BROKER ACCOUNT card.
+- **Bug 6 (LiveConfirmModal Broker Name):** Replaced blind parenthesis concatenation with honest fallback (`"Broker not configured"` with negative tone) when broker name is missing, preventing malformed `" ()"` or `" (DISCONNECTED)"`.
+- **Bug 7 (Inspector Reopen Rail Overlap):** Increased workspace `padding-right` from 10px to 34px when `!root.show-inspector` (`padding-right: root.inspector-docked ? root.inspector-w + 10px : (!root.show-inspector ? 34px : 10px);`), ensuring the 28px reopen rail never obscures workspace vertical scrollbars.
+- **Bug 8 (Strategy ComboBox Selection):** Prepend `"— Select Strategy —"` at index 0 in `shell.rs` and `live-view` lib.rs, mapping index 0 to unselected (`strategy_index = None`) and indexes 1..N to strategies. In `live.slint`, highlight strategy label only when `strategy-selected > 0`, correctly handling index 0.
+- **Bug 9 (Top Status Card Text Truncation):** Reduced EC2 icon font-size to 8px in 24px circle, expanded top card widths (min 120px / max 175px), prioritized RTT before HB in wide EC2 card, and placed non-connected broker status upfront in capital card subtext.
+- **Bug 10 (Daily P&L Panel Sizing):** Wrapped Tab 4 (Daily P&L) in `VerticalLayout { vertical-stretch: 1; alignment: center; ... }` so it fills the blotter panel vertically without collapsing.
+- **Bug 11 (Live Events Filters & Search Overflow):** Wrapped category chips in `ScrollView` with `horizontal-scrollbar-policy: as-needed` and `vertical-scrollbar-policy: always-off` to prevent overflow on narrow viewports while keeping the search field accessible.
+- **Bug 12 (Stale ARM/HALT Wording Removed):** Completely purged obsolete `START/STOP/HALT are disabled on this link` from `remote_live.rs` notices and doc comments in `live.slint`, `remote_live.rs`, and `main.rs`.
+- **Verification:**
+  - `cargo test -p vayren-shell --test live_ui_defects_regression`: 22 passed, 0 failed.
+  - `cargo test -p vayren-shell --test live_render_snapshot`: 7 passed, 0 failed.
+  - `cargo test -p vayren-domain --lib live`: 109 passed, 0 failed.
+  - `python tools/validate_language_ownership.py`: PASSED (421 files checked).
+  - Python tests: `test_live_actions.py` (12 passed), `test_live_strategy_sync_and_watchlist.py` (9 passed), `test_live_broker_capital.py` (7 passed), `test_live_timeframe_authority.py` (5 passed), `test_phase4_dashboard.py` (14 passed), `test_phase3_control_plane.py` (37 passed).
+
+**Previous update (complete-arm-and-halt-removal-20261023):** COMPLETE REMOVAL OF ARM AND HALT CONCEPTS ACROSS CODEBASE —
+- **Architectural Simplification & Elimination of Redundant States:**
+  - Fully eliminated the ARM and HALT abstractions from the UI, domain models, remote protocol, control plane, state synchronization, tests, and documentation.
+  - The live trading lifecycle is now cleanly controlled by START and STOP, operator confirmation modal (`LiveConfirmModal`), venue safety gates, and risk engine limits (`KillSwitch` circuit breaker).
+- **UI Layer (Slint):**
+  - Removed `callback arm-requested();` and `callback halt-requested();` from `live.slint`, `app.slint`, `live_harness.slint`, and `live_host.slint`.
+  - Removed `halt-enabled` and `halted` properties from `LiveBar`, `can-arm` and `pending-halt` from `LiveSetup`, and `arm-note` from `LiveScreen`.
+  - Removed dedicated red HALT banner (`if root.bar.halted: Rectangle { ... }`) from `live.slint`.
+  - Updated fixtures in `live_preview.slint` and `shell.rs` (`exec-label: "LIVE READY"`).
+- **Domain Layer (`crates/vayren-domain/src/live.rs`):**
+  - Removed `backend_can_arm`, `backend_can_halt`, and `backend_arm_blockers` from `LiveState`.
+  - Removed methods `can_arm(&self)`, `can_halt(&self)`, `arm_blockers(&self)`, `arm(&mut self)`, `halt(&mut self)`, and `report_halt(&mut self)`.
+  - Removed `can_arm` and `pending_halt` from `SetupView`; removed `halt_enabled` and `halted` from `BarView`; removed `arm_note` from `LiveView`.
+  - Preserved independent safeguards: LIVE mode start strictly enforces `venue_gates_ready()` and operator confirmation (`live_confirmed`).
+- **View-Model & Shell Wiring (`crates/vayren-shell` & `crates/vayren-live-view`):**
+  - Removed `wire_unit!(on_live_arm_requested, LiveState::arm);` and `wire_unit!(on_live_halt_requested, LiveState::halt);` in `shell.rs`.
+  - Removed `wire_unit!(on_arm_requested, LiveState::arm);` and `wire_unit!(on_halt_requested, LiveState::halt);` in `vayren-live-view/src/lib.rs`.
+  - Removed property setters and struct field mappings for arm/halt.
+  - Cleaned obsolete banner pixel probe from `crates/vayren-shell/tests/live_render_snapshot.rs`.
+- **Python Backend & Control Plane:**
+  - Removed `"arm"` and `"halt"` from `MUTATING_ACTIONS` and protocol request dispatch in `src/remote/server.py`.
+  - Removed `elif name == "halt":` emergency stop dispatch and simplified `confirm_live` operator confirmation ceremony in `src/app/headless.py`. Removed global `_ARMED` flag, delegating all live authorization to authoritative `service.confirm_live_execution()` and `is_live_confirmed()`.
+  - Removed `ControlCommand.ARM` and `ControlCommand.HALT` and handlers `_handle_arm` and `_handle_halt` from `src/execution/control_plane.py`.
+  - Removed `send_arm()` and `send_halt()` methods and `ARM_CHANGED`/`EMERGENCY_HALT` listeners from `src/app/services/control_plane_bridge.py`.
+  - Removed `self.btn_arm` and `self.btn_halt` buttons from `src/app/services/trading_dashboard.py`.
+  - Removed `can_arm`, `arm_blockers`, `can_halt`, and `_arm_eligible_blockers` from `LiveTradingService`.
+- **Verification:**
+  - `cargo check -p vayren-domain`, `cargo check -p vayren-live-view`, and `cargo check -p vayren-shell` all passed with 0 errors, 0 warnings.
+  - `cargo test -p vayren-domain --lib live` passed 109/109 tests.
+  - `cargo test -p vayren-live-view` passed 5/5 tests.
+  - `cargo test -p vayren-shell --test live_ui_defects_regression` passed 10/10 tests.
+  - Python test suites passed: `pytest src/app/tests/test_live_actions.py` (12/12 passed), `pytest src/app/tests/test_phase4_dashboard.py` (passed), `pytest src/execution/tests/test_phase3_control_plane.py` (passed), `pytest src/app/tests/test_live_strategy_sync_and_watchlist.py` (9/9 passed).
+  - Ruff check and ruff format clean on all modified files.
+
+**Previous update (live-ui-visual-polish-20261023):** LIVE SCREEN VISUAL POLISH ONLY (no content/features added or removed) —
+- **Theme & chrome:** `LiveScreen.init` sets `Palette.color-scheme = ColorScheme.dark`, so native `LineEdit`/`ComboBox`/`ScrollBar` widgets render dark instead of following the workstation OS theme.
+- **Alignment:** top bar, watchlist/universe/active-strategy/selected-instrument headers, pipeline stage row, readiness rows, table headers/rows, and footer use `alignment: stretch` where a stretch spacer/column exists; universe symbol rows use `alignment: start`. Narrow top-bar row 2 now right-aligns START/STOP.
+- **Tables:** positions/orders/fills/event headers and rows share the same fixed columns; event headers normalized to uppercase (`TIME`/`LEVEL`/`EVENT`/`SYMBOL`/`SOURCE`).
+- **Pipeline chips:** replaced the single clipping row with a 3-column wrapped layout (`LivePipelineChip`, up to 3 rows / 9 steps); the selected-instrument card `min-height` reserves those rows so the final `SL PROTECTED` chip and notice stay visible at 1920/1600/1024.
+- **Verification:** `cargo test -p vayren-shell --test live_render_snapshot` — 7 passed; `cargo test -p vayren-shell` — 118 passed, 0 failed; `python tools/validate_language_ownership.py` — PASSED (421 files); offscreen snapshots inspected at 1920x1080, 1600x900, 1024x640. No behavioral/content changes.
+- **Packaging:** `python tools/build_rust.py --package` rebuilt the packaged-remote release (`target/release/vayren-shell.exe`, 40,937,472 bytes, 2026-10-24 09:20) and re-synced `C:\Users\visha\Desktop\VAYREN.lnk` (target = release exe, args `--data-dir D:\ZerodhaTradingData --strategy-dir D:\VAYREN_STRATEGIES`, workdir = repo root, icon = `tools/assets/vayren_desktop.ico`).
+
+**Previous update (live-ui-realtime-clock-and-snapshot-timestamp-20261023):** REAL-TIME CLOCK & SNAPSHOT TIMESTAMP BUGS RESOLVED (BUG 3 & BUG 4) —
+- **Root Cause & Fix (Bug 3 - Hardcoded Clock):**
+  - `crates/vayren-domain/src/live.rs#L5161`: Replaced static string `"09:47:12 IST"` with dynamic calculation `current_ist_clock()`. Implemented standard-library IST conversion (UTC + 5:30) with honest handling of invalid time and `test_clock` override capability.
+  - `crates/vayren-shell/src/main.rs`: Timer tick now updates `shell::apply_live` every 1s whenever the Live screen is open (`ui.get_active_screen() == ShellScreen::Live`), ensuring the clock ticks continuously without freezing when stopped.
+- **Root Cause & Fix (Bug 4 - Snapshot Timestamp Dropped):**
+  - `crates/vayren-shell/src/remote_live.rs`: Forwarded `as_of` from remote sections into `translated` so `state.apply_snapshot` receives and records `state.snapshot_time`.
+  - `crates/vayren-domain/src/live.rs`: Implemented `format_snapshot_time` supporting ISO-8601 (IST and UTC) and unix epoch, honestly returning empty string on missing or malformed input. Added `pub snapshot_time: String` to `FooterView`.
+  - `crates/vayren-shell/ui/live.slint` & `shell.rs`: Added `snapshot-time: string` to `LiveFooter`. In the footer status strip, displayed `SNAPSHOT: <time>` alongside the real-time workstation clock, keeping server update time and local live clock cleanly separated.
+- **Verification & Regression Tests:**
+  - Added unit tests in `crates/vayren-domain/src/live.rs`: `test_clock_is_not_hardcoded_and_updates`, `test_current_ist_clock_formatting`, `test_snapshot_timestamp_formatting_and_lifecycle`.
+  - Added regression test in `crates/vayren-shell/src/remote_live.rs`: `test_remote_live_snapshot_as_of_forwarding`.
+  - Added footer binding assertions in `crates/vayren-shell/tests/live_ui_defects_regression.rs`.
+  - All tests passed: 112 passed in `vayren-domain --lib live`; 10 passed in `live_ui_defects_regression`; 1 passed in `remote_live`; level 2 impact validation passed (270.43s).
+
+**Previous update (live-ui-broker-name-fallback-consistency-20261023):** BROKER NAME FALLBACK INCONSISTENCY RESOLVED (BUG 7) —
+- **Root Cause & Fix:**
+  - `crates/vayren-shell/ui/live.slint`: TopCard used `NOT CONFIGURED` when `root.bar.broker-label` was empty, but Inspector panel (line 2800) had hardcoded fallback `: \"FYERS\"`, and footer strip had `: \"FYERS\"`.
+  - Unified fallback policy across both sections: both TopCard and Inspector now evaluate to `root.bar.broker-label != \"\" ? root.bar.broker-label : \"NOT CONFIGURED\"`, eliminating contradictory UI states.
+  - `crates/vayren-domain/src/live.rs`: Extended broker connection status evaluation to recognize `DISCONNECTED`, `ERROR`, and `FAILED` states when `connected` boolean is omitted in backend snapshots.
+- **Verification & Regression Tests:**
+  - Added 4 unit tests in `crates/vayren-domain/src/live.rs`: `test_broker_label_configured_fyers`, `test_broker_label_empty_never_fakes_fyers`, `test_broker_label_disconnected_states`, `test_broker_label_unknown_state_honest`.
+  - Added regression tests in `crates/vayren-shell/tests/live_ui_defects_regression.rs`: `test_broker_label_consistent_between_top_card_and_inspector` and `test_broker_status_consistent_between_top_card_and_inspector`.
+  - Passed `cargo test -p vayren-domain --lib live` (109 passed).
+  - Passed `cargo test -p vayren-shell --test live_ui_defects_regression` (10 passed).
+  - Passed `python tools/benchmark.py impact --run` (235.49s).
+
+**Previous update (production-audit-next-session-readiness-20261023):** LIVE ENGINE VERIFIED ACTIVE, RUNNING, ARMED & RECONCILED; BROKER ORDERBOOK INDEPENDENTLY CONFIRMED FLAT; 22 SYMBOLS STEPPING; NEXT NSE SESSION READINESS CONFIRMED —
 - **Direct Live Snapshot & Runtime Verification (EC2 PID 756581):**
   - Worker: `status: RUNNING`, `alive: true`, `running: true`, `desired_status: RUNNING`, `uptime: >1800s`, `started_at: 2026-10-23T19:40:32+05:30`.
   - System: `execution_ready: true`, `execution_reason: ""`, `websocket: CONNECTED`, `kill_halted: false`.

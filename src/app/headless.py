@@ -496,8 +496,8 @@ def _live_action(
                 return snapshot
             note = "setup updated — readiness re-evaluated"
             # Consent binds to the reviewed setup: any setup edit voids it.
-            _ARMED[0] = False
-            service.note_armed(False)
+            if hasattr(service, "clear_live_confirmation"):
+                service.clear_live_confirmation()
 
             if broker_manager is not None:
                 try:
@@ -543,15 +543,18 @@ def _live_action(
                     except Exception:  # noqa: BLE001
                         note = f"mode {requested} not supported — mode stays {service.config.mode}"
                     else:
-                        # A mode switch voids any earlier consent (fresh ARM per setup).
-                        _ARMED[0] = False
-                        service.note_armed(False)
+                        # A mode switch voids any earlier consent.
+                        if hasattr(service, "clear_live_confirmation"):
+                            service.clear_live_confirmation()
                         note = f"mode set to {service.config.mode} — see Live Readiness"
         elif name == "start":
-            confirmed = bool(action.get("confirmed")) or _ARMED[0]
+            confirmed = bool(action.get("confirmed")) or bool(
+                getattr(service, "is_live_confirmed", lambda: False)()
+            )
             ok, reasons = service.start(confirmed=confirmed)
             if ok:
-                _ARMED[0] = False
+                if hasattr(service, "clear_live_confirmation"):
+                    service.clear_live_confirmation()
                 _LIVE_ACTION_ERRORS.pop("start", None)
                 note = "strategy started"
             else:
@@ -560,25 +563,14 @@ def _live_action(
         elif name == "stop":
             service.stop()
             _LIVE_ACTION_ERRORS.pop("start", None)
-            # A finished run voids consent: the next START needs a fresh ARM.
-            _ARMED[0] = False
-            service.note_armed(False)
+            # A finished run voids consent: the next START needs fresh consent.
+            if hasattr(service, "clear_live_confirmation"):
+                service.clear_live_confirmation()
             note = "strategy stopped"
-        elif name == "halt":
-            # HALT is the emergency stop: same teardown as STOP, but the reason
-            # is recorded so the journal and the UI say a halt happened rather
-            # than an ordinary stop.
-            service.stop(reason="operator halt")
-            _LIVE_ACTION_ERRORS.pop("start", None)
-            _ARMED[0] = False
-            service.note_armed(False)
-            note = "EXECUTION HALTED — emergency stop engaged"
-        elif name in ("arm", "confirm_live"):
-            # Arming / operator confirmation is the LIVE consent ceremony.
-            _ARMED[0] = True
-            service.note_armed(True)
+        elif name == "confirm_live":
+            # Operator confirmation is the LIVE consent ceremony.
             service.confirm_live_execution()
-            note = "armed — confirm LIVE consent on START"
+            note = "LIVE consent confirmed on START"
         elif name == "confirm_account":
             account_id = str(action.get("account_id") or "").strip()
             service.confirm_account(account_id)
@@ -821,10 +813,11 @@ def _live_action(
             # No current blocker — the recorded refusal is history, not state.
             _LIVE_ACTION_ERRORS.pop("start", None)
             snapshot["status_reason"] = str(snapshot.get("status_reason", "") or "")
-    if (_ARMED[0] or getattr(service, "is_live_confirmed", lambda: False)()) and snapshot.get(
-        "session_status"
-    ) != "RUNNING":
-        snapshot["action_note"] = note or "armed — confirm LIVE consent on START"
+    if (
+        getattr(service, "is_live_confirmed", lambda: False)()
+        and snapshot.get("session_status") != "RUNNING"
+    ):
+        snapshot["action_note"] = note or "LIVE consent confirmed on START"
         # The operator has confirmed LIVE consent, so the snapshot drops exactly those lines.
         snapshot["start_blockers"] = [
             b
@@ -839,6 +832,9 @@ def _live_action(
 
 
 #: Operator LIVE consent, consumed by the next START.
+
+
+#: Operator LIVE consent compatibility alias for legacy test teardown.
 _ARMED: list[bool] = [False]
 
 
@@ -2007,12 +2003,11 @@ def _handle_disconnect_broker(
             broker_manager.revoke_session(broker_id, request_id=request_id)
         else:
             broker_manager.disconnect_broker(broker_id, request_id=request_id)
-        # Safety: disconnect disarms LIVE consent immediately.
-        _ARMED[0] = False
+        # Safety: disconnect clears LIVE consent immediately.
         with contextlib.suppress(Exception):
             svc = _live_service(data_dir, strategy_dir, broker_manager)
-            if svc is not None:
-                svc.note_armed(False)
+            if svc is not None and hasattr(svc, "clear_live_confirmation"):
+                svc.clear_live_confirmation()
     snapshot = _system_snapshot(data_dir, broker_id, broker_manager)
     return _with_session_state(snapshot, broker_id, broker_manager)
 

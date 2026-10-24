@@ -158,8 +158,6 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         recon_sub: view.bar.recon_sub.into(),
         exec_label: view.bar.exec_label.into(),
         exec_tone: view.bar.exec_tone,
-        halted: view.bar.halted,
-        halt_enabled: view.bar.halt_enabled,
         inspector_open: view.bar.inspector_open,
         note: view.bar.note.into(),
         note_tone: view.bar.note_tone,
@@ -178,7 +176,6 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         can_start: view.setup.can_start,
         start_clickable: view.setup.start_clickable,
         can_stop: view.setup.can_stop,
-        can_arm: view.setup.can_arm,
         needs_live_confirm: view.setup.needs_live_confirm,
         confirmed_live: view.setup.confirmed_live,
         confirm_dialog_open: view.setup.confirm_dialog_open,
@@ -187,10 +184,15 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         universe_exchange: view.setup.universe_exchange.into(),
         pending_start: view.setup.pending_start,
         pending_stop: view.setup.pending_stop,
-        pending_halt: view.setup.pending_halt,
     });
-    ui.set_strategy_names(strings(view.setup.strategy_names));
-    ui.set_strategy_selected(view.setup.strategy_selected);
+    let mut combo_names = vec!["— Select Strategy —".to_string()];
+    combo_names.extend(view.setup.strategy_names.clone());
+    ui.set_strategy_names(strings(combo_names));
+    ui.set_strategy_selected(if view.setup.strategy_selected < 0 {
+        0
+    } else {
+        view.setup.strategy_selected + 1
+    });
     ui.set_timeframe_names(strings(view.setup.timeframe_names));
     ui.set_timeframe_selected(view.setup.timeframe_selected);
     ui.set_market(LiveMarket {
@@ -231,7 +233,6 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
             })
             .collect::<Vec<_>>(),
     ));
-    ui.set_arm_note(view.arm_note.into());
     ui.set_blockers(strings(view.setup.blockers));
     // Venue blockers are a DIFFERENT list from the start blockers: the
     // confirm modal's green "all gates satisfied" panel keys off this one, so
@@ -464,7 +465,7 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
             let refresh_flag = refresh.clone();
             ui.$register(move || {
                 $action(&mut strong.borrow_mut());
-                // Runtime intents (start/stop/halt/arm/mode) request a
+                // Runtime intents (start/stop/mode) request a
                 // prompt snapshot re-pull; consent/inspector re-reads are
                 // cheap regardless (harmless).
                 refresh_flag.set(true);
@@ -495,8 +496,6 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
     wire_unit!(on_refresh_stocks, LiveState::refresh_universe);
     wire_unit!(on_start_requested, LiveState::start);
     wire_unit!(on_stop_requested, LiveState::stop);
-    wire_unit!(on_arm_requested, LiveState::arm);
-    wire_unit!(on_halt_requested, LiveState::halt);
     wire_unit!(on_confirm_requested, LiveState::confirm_live);
     wire_unit!(on_confirm_open_requested, LiveState::open_confirm_dialog);
     wire_unit!(on_confirm_cancel_requested, LiveState::close_confirm_dialog);
@@ -963,8 +962,6 @@ mod tests {
         "session_status": "STOPPED",
         "broker": {"name": "NOT CONFIGURED", "connected": null, "reason": "no live venue adapter"},
         "gates": [{"name": "BROKER_ADAPTER_READY", "status": "NOT READY", "reason": "live gate off"}],
-        "can_arm": false,
-        "can_halt": false,
         "start_blockers": ["no strategy selected"],
         "kill": {"halted": false},
         "positions": [], "orders": [], "fills": [], "events": [],
@@ -979,8 +976,6 @@ mod tests {
         "session_status": "RUNNING",
         "broker": {"name": "paper", "connected": true},
         "gates": [],
-        "can_arm": false,
-        "can_halt": true,
         "start_blockers": [],
         "kill": {"halted": false},
         "positions": [{"symbol": "TEST", "side": "LONG", "quantity": 10,
@@ -1166,13 +1161,11 @@ mod tests {
             vayren_live_view_next_event(view, buf.as_mut_ptr(), buf.len()),
             0
         );
-        with_view(view, |v| v.state.borrow_mut().halt()); // can_halt true (RUNNING)
+        with_view(view, |v| v.state.borrow_mut().stop());
         let len = vayren_live_view_next_event(view, buf.as_mut_ptr(), buf.len());
-        assert!(len > 0, "halt accepted → one queued event");
+        assert!(len > 0, "stop accepted → one queued event");
         let parsed: serde_json::Value = serde_json::from_slice(&buf[..len as usize]).unwrap();
-        assert_eq!(parsed["action"], "halt");
-        // Forwarded intent did not self-apply the kill switch.
-        assert!(!with_view(view, |v| v.state.borrow().kill_halted));
+        assert_eq!(parsed["action"], "stop");
         assert_eq!(
             vayren_live_view_next_event(view, buf.as_mut_ptr(), buf.len()),
             0

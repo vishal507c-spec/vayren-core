@@ -34,7 +34,6 @@ export component LiveHostWindow inherits Window {
     in-out property <[string]> timeframe-names;
     in-out property <int> timeframe-selected: -1;
     in-out property <[LiveGate]> gates;
-    in-out property <string> arm-note: "";
     in-out property <[string]> blockers;
     // Venue safety gates, distinct from the start `blockers`: the confirm
     // modal's green "all gates satisfied" panel keys off THIS list, so an
@@ -78,8 +77,6 @@ export component LiveHostWindow inherits Window {
     callback quantity-edited(string);
     callback start-requested();
     callback stop-requested();
-    callback arm-requested();
-    callback halt-requested();
     callback confirm-requested();
     callback confirm-open-requested();
     callback confirm-cancel-requested();
@@ -107,7 +104,6 @@ export component LiveHostWindow inherits Window {
         timeframe-names: root.timeframe-names;
         timeframe-selected: root.timeframe-selected;
         gates: root.gates;
-        arm-note: root.arm-note;
         blockers: root.blockers;
         venue-blockers: root.venue-blockers;
         ws: root.ws;
@@ -150,8 +146,6 @@ export component LiveHostWindow inherits Window {
         quantity-edited(t) => { root.quantity-edited(t); }
         start-requested() => { root.start-requested(); }
         stop-requested() => { root.stop-requested(); }
-        arm-requested() => { root.arm-requested(); }
-        halt-requested() => { root.halt-requested(); }
         confirm-requested() => { root.confirm-requested(); }
         confirm-open-requested() => { root.confirm-open-requested(); }
         confirm-cancel-requested() => { root.confirm-cancel-requested(); }

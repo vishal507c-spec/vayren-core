@@ -233,49 +233,7 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     assert!(neg > px / 12000, "running: halt control missing ({neg})");
 
     // â”€â”€ HALTED state: the semantic red presence strictly grows (quiet
-    //    banner strip + EXECUTION HALTED verdicts) â”€â”€
-    let running_1440 = render_frame(&ui, &win, "running_1440x900", 1440, 900);
-    let mut halted = shell::demo_live_state_running();
-    halted.report_halt();
-    shell::apply_live(&ui, &halted);
-    let halt_shot = render_frame(&ui, &win, "halted_1440x900", 1440, 900);
-    shell::apply_live(&ui, &shell::demo_live_state());
-    // The HALT banner is a quiet strip at the very top of LiveScreen: a 3px
-    // semantic RED left edge (12px layout padding + the VBanner edge) inside
-    // its 20px height. That left edge is the ONLY red in this window — the
-    // probe must be narrow enough to exclude the command bar, whose armed STOP
-    // control is legitimately red once a session runs. A wide band silently
-    // started failing for the right reason (the bar no longer overflows and
-    // clips itself), which is how this probe came to measure the wrong thing.
-    const NAV: usize = 50;
-    let banner_edge = |buffer: &SharedPixelBuffer<slint::Rgb8Pixel>| {
-        let size = buffer.size();
-        let stride = size.width as usize;
-        buffer
-            .as_slice()
-            .iter()
-            .enumerate()
-            .filter(|(i, p)| {
-                let y = i / stride;
-                let x = i % stride;
-                // The banner's 3px semantic RED edge, and nothing else.
-                y > NAV + 2
-                    && y < NAV + 24
-                    && x >= 10
-                    && x < 18
-                    && p.r.abs_diff(240) <= 30
-                    && p.g.abs_diff(90) <= 30
-                    && p.b.abs_diff(103) <= 30
-            })
-            .count()
-    };
-    let banner_band = banner_edge(&halt_shot);
-    let plain_band = banner_edge(&running_1440);
-    assert!(
-        banner_band > 50 && plain_band == 0,
-        "halted: banner strip must paint ({banner_band} vs {plain_band})"
-    );
-
+    
     // â”€â”€ collapse tier: inspector closed vs open both render, and the
     //    frame actually recomposes (different pixel split) â”€â”€
     let mut collapsed = shell::demo_live_state();

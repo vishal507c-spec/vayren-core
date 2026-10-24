@@ -51,8 +51,6 @@ class ControlCommand(StrEnum):
 
     START = "START"
     STOP = "STOP"
-    ARM = "ARM"
-    HALT = "HALT"
     SELECT_STRATEGY = "SELECT_STRATEGY"
     SET_RISK = "SET_RISK"
     SELECT_SYMBOLS = "SELECT_SYMBOLS"
@@ -436,8 +434,6 @@ class ControlPlaneController:
         handler = {
             ControlCommand.START: self._handle_start,
             ControlCommand.STOP: self._handle_stop,
-            ControlCommand.ARM: self._handle_arm,
-            ControlCommand.HALT: self._handle_halt,
             ControlCommand.SELECT_STRATEGY: self._handle_select_strategy,
             ControlCommand.SET_RISK: self._handle_set_risk,
             ControlCommand.SELECT_SYMBOLS: self._handle_select_symbols,
@@ -560,47 +556,6 @@ class ControlPlaneController:
             command=request.command.value,
             status=CommandStatus.SUCCESS,
             data={"state": "STOPPED", "sl_protected": True, "event_seq": event.seq},
-        )
-
-    def _handle_arm(self, request: CommandRequest) -> CommandResponse:
-        """ARM command: arms live trading mode."""
-        if hasattr(self._session, "arm"):
-            self._session.arm(reason="ARM command from control plane")
-        event = self._event_stream.publish(
-            "ARM_CHANGED", {"armed": "ARMED", "reason": "operator armed"}
-        )
-        return CommandResponse(
-            request_id=request.request_id,
-            command=request.command.value,
-            status=CommandStatus.SUCCESS,
-            data={"armed": "ARMED", "event_seq": event.seq},
-        )
-
-    def _handle_halt(self, request: CommandRequest) -> CommandResponse:
-        """HALT command: emergency kill switch trip; stops all new orders immediately."""
-        reason = str(request.payload.get("reason") or "Operator HALT command")
-        kill_switch = getattr(self._session, "kill_switch", None)
-        if kill_switch is not None:
-            if hasattr(kill_switch, "engage"):
-                kill_switch.engage(reason=reason)
-            elif hasattr(kill_switch, "halt"):
-                kill_switch.halt(reason=reason)
-
-        recovery = getattr(self._session, "recovery", None)
-        if recovery is not None:
-            sm = recovery.state_machine
-            if sm.state != ExecutionState.BLOCKED:
-                sm.transition(ExecutionState.BLOCKED, reason=f"HALT command: {reason}")
-
-        event = self._event_stream.publish(
-            "EMERGENCY_HALT",
-            {"halted": True, "reason": reason, "sl_protected": True},
-        )
-        return CommandResponse(
-            request_id=request.request_id,
-            command=request.command.value,
-            status=CommandStatus.SUCCESS,
-            data={"halted": True, "reason": reason, "event_seq": event.seq},
         )
 
     def _handle_select_strategy(self, request: CommandRequest) -> CommandResponse:

@@ -26,10 +26,8 @@ export component LivePreview inherits Window {
             recon-label: "RECONCILED",
             recon-tone: 1,
             recon-sub: "Orders Aligned",
-            exec-label: "LIVE ARMED",
+            exec-label: "LIVE READY",
             exec-tone: 1,
-            halted: false,
-            halt-enabled: true,
             inspector-open: true,
             note: "",
             note-tone: 0,
@@ -66,7 +64,6 @@ export component LivePreview inherits Window {
             can-start: true,
             start-clickable: true,
             can-stop: false,
-            can-arm: true,
             needs-live-confirm: false,
             confirmed-live: true,
             confirm-dialog-open: false,
@@ -79,7 +76,6 @@ export component LivePreview inherits Window {
             universe-exchange: "NSE",
             pending-start: false,
             pending-stop: false,
-            pending-halt: false,
         };
 
         strategy-names: ["OBR C1C4", "EMA Crossover 9/21", "VWAP Mean Reversion"];

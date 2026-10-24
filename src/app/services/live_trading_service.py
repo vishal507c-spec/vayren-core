@@ -45,7 +45,7 @@ from execution import (
     SessionConfig,  # pyright: ignore[reportAttributeAccessIssue]
     SqliteTailProvider,  # pyright: ignore[reportAttributeAccessIssue]
 )
-from execution.modes import LiveArm, ModeGates  # pyright: ignore[reportMissingImports]
+from execution.modes import ModeGates  # pyright: ignore[reportMissingImports]
 from market import Bar, SymbolRepository  # pyright: ignore[reportAttributeAccessIssue]
 from risk import RiskPolicy  # pyright: ignore[reportAttributeAccessIssue]
 from risk.sizing import (
@@ -2105,7 +2105,6 @@ class LiveTradingService:
             }
         total = realized + unrealized
         exposure = sum(abs(p["quantity"]) * (p["current_price"] or 0.0) for p in positions)
-        can_halt = self._status == "RUNNING"
         running = self._status == "RUNNING"
         account = (
             dict(self._account_state)
@@ -2148,15 +2147,6 @@ class LiveTradingService:
             self._config.symbols = universe
         quotes = self._universe_quotes(universe)
         risk_status = "HALTED" if kill_halted else ("BLOCKED" if recon_blocks else "READY")
-        can_arm = self._config.mode == "LIVE" and not running and not self._arm_eligible_blockers()
-        arm_blockers = list(blockers)
-        if running and self._config.mode == "LIVE":
-            armed_states = set()
-            for session in self._sessions.values():
-                with contextlib.suppress(Exception):
-                    armed_states.add(session.armed)
-            if LiveArm.ARMED not in armed_states and LiveArm.RUNNING not in armed_states:
-                arm_blockers.append("sessions not armed")
         now_iso = _utcnow_iso()
         now_time = now_iso.split("T")[1][:8] if "T" in now_iso else ""
 
@@ -2341,9 +2331,6 @@ class LiveTradingService:
             "account": account,
             "execution": {"ready": execution_ready, "reason": execution_reason},
             "feed": feed,
-            "can_arm": can_arm,
-            "arm_blockers": arm_blockers,
-            "can_halt": can_halt,
             "lifecycle": lifecycle,
             "events": list(self._activity)[-100:],
             "quotes": quotes,
@@ -2394,19 +2381,6 @@ class LiveTradingService:
             quotes=quotes, recon_blocks=recon_blocks, recon_reason=recon_status
         )
         return snap
-
-    def _arm_eligible_blockers(self) -> list[str]:
-        """Setup blockers that also block ARMING (consent lines excluded).
-
-        Arming IS the LIVE consent ceremony, so the confirmation/consent
-        requirement must not block the ARM button itself — everything else
-        does.
-        """
-        return [
-            blocker
-            for blocker in self.validate()
-            if "confirmation" not in blocker and "consent" not in blocker
-        ]
 
     # ── session construction (same record, same engine, per-symbol) ─────
 

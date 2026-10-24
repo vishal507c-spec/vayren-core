@@ -665,13 +665,9 @@ pub struct LiveState {
     /// actions only report intent outward — the model never pre-applies a
     /// transition the backend has not confirmed.
     pub host_mode: bool,
-    /// Backend-authoritative verdicts (the service `validate()` output and
-    /// the provider's `can_arm`/`can_halt`/`arm_blockers` keys). `None`
+    /// Backend-authoritative verdicts (the service `validate()` output). `None`
     /// outside host mode keeps the locally derived fail-closed verdicts.
     pub backend_start_blockers: Option<Vec<String>>,
-    pub backend_arm_blockers: Option<Vec<String>>,
-    pub backend_can_arm: Option<bool>,
-    pub backend_can_halt: Option<bool>,
     /// True open-order count from the backend (`open_orders` key). The
     /// `orders` table is capped at the last 50 rows, so its length is NOT
     /// the open count — `None` outside host mode keeps the local length.
@@ -712,6 +708,8 @@ pub struct LiveState {
     pub eligibility: EligibilityFacts,
     /// Explicit operator confirmation dialog open state for LIVE mode.
     pub confirm_dialog_open: bool,
+    /// Explicit clock override for deterministic tests (if None, reads system time).
+    pub test_clock: Option<String>,
 }
 
 impl Default for LiveState {
@@ -785,9 +783,6 @@ impl Default for LiveState {
             bridge_wired: false,
             host_mode: false,
             backend_start_blockers: None,
-            backend_arm_blockers: None,
-            backend_can_arm: None,
-            backend_can_halt: None,
             open_order_count: None,
             host_actions: std::collections::VecDeque::new(),
             remote_commands_allowed: false,
@@ -810,6 +805,7 @@ impl Default for LiveState {
             action_note: None,
             eligibility: EligibilityFacts::default(),
             confirm_dialog_open: false,
+            test_clock: None,
         }
     }
 }
@@ -1175,54 +1171,6 @@ impl LiveState {
         ) && self.pending_action.as_deref() != Some("stop")
     }
 
-    /// HALT follows the service (`can_halt` while RUNNING or armed; in host
-    /// mode the provider's explicit `can_halt` fact wins).
-    pub fn can_halt(&self) -> bool {
-        if self.pending_action.as_deref() == Some("halt") {
-            return false;
-        }
-        if let Some(value) = self.backend_can_halt {
-            return value;
-        }
-        matches!(
-            self.session,
-            SessionStatus::Running | SessionStatus::Starting | SessionStatus::Stopping
-        )
-    }
-
-    /// Arming is LIVE-only, requires every venue gate and a clear kill
-    /// switch — the same consent rules `execution.modes` enforces. In host
-    /// mode the provider's explicit verdict is authoritative.
-    pub fn can_arm(&self) -> bool {
-        if let Some(value) = self.backend_can_arm {
-            return value && !self.kill_halted;
-        }
-        self.bridge_wired
-            && self.mode == ExecMode::Live
-            && self.venue_gates_ready()
-            && !self.kill_halted
-            && matches!(self.session, SessionStatus::Stopped | SessionStatus::Error)
-    }
-
-    pub fn arm_blockers(&self) -> Vec<String> {
-        let mut blockers: Vec<String> = self
-            .gates
-            .iter()
-            .filter(|g| !matches!(g.status, GateStatus::Ready))
-            .filter(|g| !g.reason.is_empty())
-            .map(|g| format!("{}: {}", g.name, g.reason))
-            .collect();
-        if self.mode != ExecMode::Live {
-            blockers.push(format!(
-                "mode is {} — arming applies to LIVE only",
-                self.mode.label()
-            ));
-        }
-        if blockers.is_empty() && !self.bridge_wired {
-            blockers.push("execution backend not connected".into());
-        }
-        blockers
-    }
 
     // ── actions (validate centrally; Slint only reports intent) ──────────
 
@@ -1373,6 +1321,16 @@ impl LiveState {
     }
 
     pub fn select_strategy_value(&mut self, value: &str) {
+        let trimmed = value.trim();
+        if trimmed.is_empty()
+            || trimmed == "— Select Strategy —"
+            || trimmed == "Select Strategy"
+            || trimmed == "None Selected"
+            || trimmed == "—"
+        {
+            self.strategy_index = None;
+            return;
+        }
         if let Some(i) = self.strategies.iter().position(|s| {
             s == value
                 || s.eq_ignore_ascii_case(value)
@@ -1581,69 +1539,6 @@ impl LiveState {
         self.action_note = Some("stop requested — halting ticks".into());
     }
 
-    /// HALT EXECUTION — the safety control. In host mode the request is
-    /// forwarded to the service (a fact the backend reports back); with a
-    /// native bridge the kill-switch engagement arrives via
-    /// [`LiveState::report_halt`]; without either the action is inert.
-    pub fn halt(&mut self) {
-        if !self.bridge_wired {
-            self.action_note = Some(NO_BACKEND_NOTE.into());
-            return;
-        }
-        if !self.can_halt() {
-            return;
-        }
-        if self.pending_action.as_deref() == Some("halt") {
-            return;
-        }
-        if self.host_mode {
-            self.set_pending("halt");
-            self.push_action(serde_json::json!({"action": "halt"}));
-            self.action_note = Some("halt requested — backend engaging".into());
-            return;
-        }
-        self.report_halt();
-    }
-
-    /// Bridge-fed fact: the kill switch engaged (backend already halted).
-    pub fn report_halt(&mut self) {
-        self.kill_halted = true;
-        self.session = SessionStatus::Halted;
-        self.action_note = Some("EXECUTION HALTED — reconcile before restarting".into());
-    }
-
-    pub fn arm(&mut self) {
-        if self.can_arm() {
-            // Arming is an explicit backend ceremony (journal + reason);
-            // the model records consent, never a live session.
-            if self.host_mode {
-                self.push_action(serde_json::json!({"action": "arm"}));
-                self.action_note = Some("arm requested — backend ceremony".into());
-            } else {
-                self.action_note = Some("arm requested — awaiting engine bridge ceremony".into());
-            }
-        } else {
-            // Refusals carry the exact blocking reason (module invariant):
-            // a bare "Blocked: " strands the operator with no next step.
-            // In host mode the backend's own verdict wins (its gate names
-            // are the real ones); otherwise the locally derived blockers.
-            let backend = if self.host_mode {
-                self.backend_arm_blockers.clone().unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            let reasons = if backend.is_empty() {
-                self.arm_blockers()
-            } else {
-                backend
-            };
-            self.action_note = Some(if reasons.is_empty() {
-                "Blocked: arming unavailable in this state".into()
-            } else {
-                format!("Blocked: {}", reasons.join("; "))
-            });
-        }
-    }
 
     pub fn set_event_category(&mut self, kind: &str) {
         self.event_category = kind.to_string();
@@ -1773,17 +1668,8 @@ impl LiveState {
                 self.kill_halted = h;
             }
         }
-        if v.get("can_halt").is_some() {
-            self.backend_can_halt = v.get("can_halt").and_then(|c| c.as_bool());
-        }
         if let Some(n) = v.get("open_orders").and_then(|n| n.as_u64()) {
             self.open_order_count = Some(n as usize);
-        }
-        if v.get("can_arm").is_some() {
-            self.backend_can_arm = v.get("can_arm").and_then(|c| c.as_bool());
-        }
-        if let Some(list) = v.get("arm_blockers").and_then(|a| a.as_array()) {
-            self.backend_arm_blockers = Some(list.iter().map(value_to_text).collect());
         }
         if let Some(list) = v.get("start_blockers").and_then(|a| a.as_array()) {
             self.backend_start_blockers = Some(list.iter().map(value_to_text).collect());
@@ -2877,8 +2763,6 @@ pub struct BarView {
     pub recon_sub: String,
     pub exec_label: String,
     pub exec_tone: i32,
-    pub halted: bool,
-    pub halt_enabled: bool,
     pub inspector_open: bool,
     pub note: String,
     pub note_tone: i32,
@@ -2905,7 +2789,6 @@ pub struct SetupView {
     /// Readiness itself stays fail-closed in `can_start`/`start_blockers`.
     pub start_clickable: bool,
     pub can_stop: bool,
-    pub can_arm: bool,
     pub needs_live_confirm: bool,
     pub confirmed_live: bool,
     pub confirm_dialog_open: bool,
@@ -2923,7 +2806,6 @@ pub struct SetupView {
     pub timeframe_selected: i32,
     pub pending_start: bool,
     pub pending_stop: bool,
-    pub pending_halt: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3098,6 +2980,7 @@ pub struct FooterView {
     pub risk: String,
     pub reconciliation: String,
     pub clock: String,
+    pub snapshot_time: String,
 }
 
 /// Unified eligibility panel (Phase-6/7 backend section, projected
@@ -3135,7 +3018,6 @@ pub struct LiveView {
     pub symbols: Vec<SymbolRow>,
     pub symbol_filter: String,
     pub gates: Vec<GateRow>,
-    pub arm_note: String,
     pub strategy_rows: Vec<KvRow>,
     pub position_rows: Vec<KvRow>,
     pub risk_rows: Vec<KvRow>,
@@ -3537,6 +3419,64 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (y, m as u32, d as u32)
 }
 
+/// Current live workstation clock in Asia/Kolkata (IST), formatted as `HH:MM:SS IST`.
+/// Pure standard library implementation with zero external dependencies.
+pub fn current_ist_clock() -> String {
+    format_ist_clock_from_system_time(std::time::SystemTime::now())
+}
+
+/// Format a `SystemTime` as `HH:MM:SS IST`.
+/// Asia/Kolkata is UTC + 5:30 (+19,800 seconds).
+pub fn format_ist_clock_from_system_time(now: std::time::SystemTime) -> String {
+    match now.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => {
+            let unix_secs = d.as_secs();
+            let ist_secs = (unix_secs as i64) + 19_800;
+            let day_secs = ist_secs.rem_euclid(86_400);
+            let hh = day_secs / 3600;
+            let mm = (day_secs % 3600) / 60;
+            let ss = day_secs % 60;
+            format!("{:02}:{:02}:{:02} IST", hh, mm, ss)
+        }
+        Err(_) => String::new(),
+    }
+}
+
+/// Format a server snapshot timestamp (`as_of`) for UI display as `HH:MM:SS IST`.
+/// Handles ISO-8601 strings (both IST and UTC 'Z') as well as unix epoch seconds.
+/// Returns an empty string for missing or malformed timestamps without inventing values.
+pub fn format_snapshot_time(iso: &str) -> String {
+    let trimmed = iso.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if let Some((_y, _mo, _d, hh, mm, ss)) = ist_components(trimmed) {
+        format!("{:02}:{:02}:{:02} IST", hh, mm, ss)
+    } else if let Ok(epoch_f) = trimmed.parse::<f64>() {
+        if epoch_f > 0.0 && epoch_f.is_finite() {
+            let unix_secs = epoch_f as u64;
+            format_ist_clock_from_system_time(
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix_secs),
+            )
+        } else {
+            String::new()
+        }
+    } else {
+        let parts: Vec<&str> = trimmed.split(':').collect();
+        if parts.len() == 3
+            && parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_digit()))
+        {
+            let hh: u32 = parts[0].parse().unwrap_or(99);
+            let mm: u32 = parts[1].parse().unwrap_or(99);
+            let ss: u32 = parts[2].parse().unwrap_or(99);
+            if hh < 24 && mm < 60 && ss < 60 {
+                return format!("{:02}:{:02}:{:02} IST", hh, mm, ss);
+            }
+        }
+        String::new()
+    }
+}
+
 /// Parse an IST/UTC ISO-8601 string and reformat for human display (best-effort, no chrono dep).
 /// Input:  `"2026-10-13T10:25:33+05:30"` or `"2026-10-18T03:57:15Z"`
 /// Output: `"13 Oct 2026, 10:25:33 IST"` (timestamp converted to Asia/Kolkata).
@@ -3898,7 +3838,11 @@ pub fn project(state: &LiveState) -> LiveView {
             || r_lower.contains("unreachable")
         {
             ("○ Timeout (Venue Unreachable)".into(), 3)
-        } else if state.broker.connected == Some(false) {
+        } else if state.broker.connected == Some(false)
+            || state.broker.status.trim().to_uppercase() == "DISCONNECTED"
+            || state.broker.status.trim().to_uppercase() == "ERROR"
+            || state.broker.status.trim().to_uppercase() == "FAILED"
+        {
             if !r.is_empty() {
                 (format!("○ Disconnected ({})", r), 3)
             } else {
@@ -4098,8 +4042,6 @@ pub fn project(state: &LiveState) -> LiveView {
         }
         .into(),
         exec_tone: if state.kill_halted { 3 } else { 1 },
-        halted: state.kill_halted,
-        halt_enabled: state.can_halt(),
         inspector_open: state.inspector_open,
         note: state.action_note.clone().unwrap_or_default(),
         note_tone,
@@ -4184,7 +4126,6 @@ pub fn project(state: &LiveState) -> LiveView {
         can_start: state.can_start(),
         start_clickable: state.start_clickable(),
         can_stop: state.can_stop(),
-        can_arm: state.can_arm(),
         needs_live_confirm: state.mode == ExecMode::Live
             && !state.live_confirmed
             && state.venue_gates_ready(),
@@ -4216,10 +4157,9 @@ pub fn project(state: &LiveState) -> LiveView {
         timeframe_selected: state.timeframe_index.map_or(-1, |i| i as i32),
         pending_start: state.pending_action.as_deref() == Some("start"),
         pending_stop: state.pending_action.as_deref() == Some("stop"),
-        pending_halt: state.pending_action.as_deref() == Some("halt"),
     };
 
-    // ── readiness (gate rows + arm note, exact backend reasons) ──
+    // ── readiness (gate rows, exact backend reasons) ──
     let gates = state
         .gates
         .iter()
@@ -4230,18 +4170,6 @@ pub fn project(state: &LiveState) -> LiveView {
             reason: g.reason.clone(),
         })
         .collect();
-    let arm_note = if state.can_arm() {
-        "All requirements pass — arming is available.".into()
-    } else if !state.bridge_wired && state.action_note.is_none() {
-        "No arming backend attached.".into()
-    } else {
-        let blockers = state.arm_blockers();
-        if blockers.is_empty() {
-            String::new()
-        } else {
-            format!("Blocked: {}", blockers.join("; "))
-        }
-    };
 
     // ── tables ──
     let positions: Vec<PositionRowView> = state
@@ -5147,14 +5075,22 @@ pub fn project(state: &LiveState) -> LiveView {
     };
 
     // ── FooterView ──
+    let clock = if let Some(ref c) = state.test_clock {
+        c.clone()
+    } else {
+        current_ist_clock()
+    };
+    let snap_time = format_snapshot_time(&state.snapshot_time);
+
     let footer = FooterView {
-        broker: format!("Broker: {} ({})", broker_name, state.broker.status),
-        websocket: format!("WS: {} ({})", ws.status, ws.latency),
-        market_data: format!("Data: {} ({})", md.status, md.freshness),
-        strategy: format!("Strategy: {} ({})", strategy_label, active_strat.status),
-        risk: format!("Risk: {}", risk_label),
-        reconciliation: format!("Recon: {}", state.reconciliation.status),
-        clock: "09:47:12 IST".into(),
+        broker: if broker_name.is_empty() || state.broker.status.is_empty() { "NOT CONFIGURED".into() } else { format!("{} ({})", broker_name, state.broker.status) },
+        websocket: if ws.status.is_empty() { "DISCONNECTED".into() } else if ws.latency.is_empty() || ws.latency == "—" { ws.status.clone() } else { format!("{} ({})", ws.status, ws.latency) },
+        market_data: if md.status.is_empty() { "NO DATA".into() } else if md.freshness.is_empty() || md.freshness == "—" { md.status.clone() } else { format!("{} ({})", md.status, md.freshness) },
+        strategy: if strategy_label.is_empty() || strategy_label == "None Selected" || strategy_label == "None" { "NONE".into() } else { format!("{} ({})", strategy_label, active_strat.status) },
+        risk: if risk_label.is_empty() { "INERT".into() } else { risk_label },
+        reconciliation: if state.reconciliation.status.is_empty() { "NOT CONFIGURED".into() } else { state.reconciliation.status.clone() },
+        clock,
+        snapshot_time: snap_time,
     };
 
     // ── GatewayView ──
@@ -5225,7 +5161,6 @@ pub fn project(state: &LiveState) -> LiveView {
         symbols: visible_symbols,
         symbol_filter: state.symbol_filter.clone(),
         gates,
-        arm_note,
         strategy_rows: {
             let mut sr = strategy_rows(state);
             sr.extend(runtime_rows(state));
@@ -5331,8 +5266,6 @@ mod tests {
         assert!(!st.venue_gates_ready());
         assert!(!st.can_start());
         assert!(!st.can_stop());
-        assert!(!st.can_halt());
-        assert!(!st.can_arm());
         let view = project(&st);
         // Never fabricates: no strategy, no data, no numbers.
         assert_eq!(view.bar.broker_label, "NOT CONFIGURED");
@@ -5382,10 +5315,6 @@ mod tests {
             st.action_note.as_deref(),
             Some("No execution backend attached.")
         );
-        st.halt();
-        assert!(!st.kill_halted);
-        st.arm();
-        assert!(st.action_note.as_deref().unwrap().starts_with("Blocked:"));
     }
 
     #[test]
@@ -5431,22 +5360,6 @@ mod tests {
         assert!(!st.live_confirmed);
     }
 
-    #[test]
-    fn halt_engages_kill_switch_state_and_banner() {
-        let mut st = configured(LiveState::default());
-        st.bridge_wired = true;
-        st.session = SessionStatus::Running;
-        assert!(st.can_halt());
-        st.halt();
-        assert!(st.kill_halted);
-        assert_eq!(st.session, SessionStatus::Halted);
-        let view = project(&st);
-        assert!(view.bar.halted);
-        assert_eq!(view.bar.exec_label, "■ HALTED");
-        // Halt control idles once the halt is effective (matches can_halt).
-        assert!(!st.can_halt());
-        assert!(!view.bar.halt_enabled);
-    }
 
     #[test]
     fn mode_change_blocked_while_running() {
@@ -5497,30 +5410,6 @@ mod tests {
         assert_eq!(st.quantity, 1250.0);
     }
 
-    #[test]
-    fn arm_refusal_carries_the_exact_blocking_reason() {
-        // Host mode: the backend's own verdict wins (its gate names are
-        // the real ones — not the local canonical vocabulary).
-        let mut st = configured(LiveState::default());
-        st.host_mode = true;
-        st.bridge_wired = true;
-        st.backend_can_arm = Some(false);
-        st.backend_arm_blockers = Some(vec![
-            "no live broker selected (configure in SYSTEM → BROKERS)".into(),
-        ]);
-        st.arm();
-        assert_eq!(
-            st.action_note.as_deref().unwrap(),
-            "Blocked: no live broker selected (configure in SYSTEM → BROKERS)"
-        );
-        // Local mode: the derived blockers, never a bare "Blocked: ".
-        let mut local = configured(LiveState::default());
-        local.bridge_wired = true;
-        local.arm();
-        let note = local.action_note.as_deref().unwrap();
-        assert!(note.starts_with("Blocked: "));
-        assert!(note.len() > "Blocked: ".len());
-    }
 
     #[test]
     fn multi_position_book_never_prints_flat() {
@@ -6197,8 +6086,6 @@ mod tests {
         st.apply_snapshot(&serde_json::json!({
             "mode": "PAPER",
             "session_status": "STOPPED",
-            "can_halt": false,
-            "can_arm": false,
             "start_blockers": [],
         }));
         assert!(st.host_mode && st.bridge_wired);
@@ -6431,28 +6318,6 @@ mod tests {
         assert!(st.start_clickable(), "STOPPED after a stop may start again");
     }
 
-    #[test]
-    fn halt_invokes_the_emergency_stop_mechanism() {
-        let mut st = start_ready_state();
-        st.start();
-        st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
-        st.drain_actions(); // consume the start request; HALT is what we assert
-        assert!(st.can_halt());
-        st.halt();
-        let action: serde_json::Value =
-            serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
-        assert_eq!(action["action"], "halt", "HALT must reach the kill switch");
-        assert_eq!(st.pending_action.as_deref(), Some("halt"));
-        // Backend reports the halt landed.
-        st.apply_snapshot(&serde_json::json!({
-            "session_status": "HALTED",
-            "kill": {"halted": true},
-        }));
-        assert!(st.kill_halted);
-        assert!(st.pending_action.is_none());
-        // A halted session is not silently startable again.
-        assert!(!st.start_clickable());
-    }
 
     #[test]
     fn start_without_a_backend_stays_inert_and_says_so() {
@@ -6663,15 +6528,10 @@ mod tests {
         let mut st = configured(LiveState::default());
         st.apply_snapshot(&serde_json::json!({
             "session_status": "RUNNING",
-            "can_halt": true,
-            "can_arm": false,
             "start_blockers": ["session already running"],
-            "arm_blockers": ["no live venue"],
             "status_reason": "tick failed: venue timeout",
             "kill": {"halted": false},
         }));
-        assert!(st.can_halt());
-        assert!(!st.can_arm());
         assert!(!st.can_start());
         let view = project(&st);
         assert_eq!(view.bar.exec_label, "● ENABLED");
@@ -6681,11 +6541,6 @@ mod tests {
             .blockers
             .iter()
             .any(|b| b.contains("venue timeout")));
-        // Host halt forwards instead of self-applying the kill switch.
-        st.halt();
-        let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
-        assert_eq!(action["action"], "halt");
-        assert!(!st.kill_halted); // only the backend snapshot may say HALTED
     }
 
     #[test]
@@ -6879,7 +6734,6 @@ mod tests {
             "position": {"flat": true},
         }));
         let view = project(&st);
-        assert!(view.bar.halted);
         assert_eq!(view.bar.exec_label, "■ HALTED");
         assert_eq!(view.position_rows[0].value, "FLAT");
         // Mistyped/missing sections degrade to honest absence — no crash.
@@ -8115,5 +7969,141 @@ mod tests {
             }
         }));
         assert_eq!(st.start_epoch_secs, Some(1760415933.0));
+    }
+
+    #[test]
+    fn test_broker_label_configured_fyers() {
+        let mut st = LiveState::default();
+        st.broker.name = "FYERS".into();
+        st.broker.status = "CONNECTED".into();
+        st.broker.connected = Some(true);
+        st.broker.account_id = "VA1234".into();
+        let view = project(&st);
+        assert_eq!(view.bar.broker_label, "FYERS");
+        assert_eq!(view.bar.broker_tone, 1);
+        assert_eq!(view.bar.conn_label, "● Connected · ACC: VA1234");
+        assert_eq!(view.bar.conn_tone, 1);
+    }
+
+    #[test]
+    fn test_broker_label_empty_never_fakes_fyers() {
+        let mut st = LiveState::default();
+        st.broker.name = "".into();
+        let view = project(&st);
+        assert_eq!(view.bar.broker_label, "NOT CONFIGURED");
+        assert_eq!(view.bar.broker_tone, 0);
+        assert_ne!(view.bar.broker_label, "FYERS");
+    }
+
+    #[test]
+    fn test_broker_label_disconnected_states() {
+        // 1. Configured broker that is disconnected
+        let mut st = LiveState::default();
+        st.broker.name = "FYERS".into();
+        st.broker.connected = Some(false);
+        st.broker.status = "DISCONNECTED".into();
+        let view = project(&st);
+        assert_eq!(view.bar.broker_label, "FYERS");
+        assert_eq!(view.bar.broker_tone, 3);
+        assert_eq!(view.bar.conn_label, "○ Disconnected");
+        assert_eq!(view.bar.conn_tone, 3);
+
+        // 2. Unconfigured broker marked disconnected
+        let mut st2 = LiveState::default();
+        st2.broker.name = "".into();
+        st2.broker.status = "DISCONNECTED".into();
+        let view2 = project(&st2);
+        assert_eq!(view2.bar.broker_label, "NOT CONFIGURED");
+        assert_eq!(view2.bar.broker_tone, 0);
+        assert_eq!(view2.bar.conn_label, "○ Disconnected");
+        assert_eq!(view2.bar.conn_tone, 3);
+        assert_ne!(view2.bar.broker_label, "FYERS");
+    }
+
+    #[test]
+    fn test_broker_label_unknown_state_honest() {
+        let st = LiveState::default();
+        let view = project(&st);
+        assert_eq!(view.bar.broker_label, "NOT CONFIGURED");
+        assert_eq!(view.bar.broker_tone, 0);
+        assert_eq!(view.bar.conn_label, "Connection: N/A");
+        assert_eq!(view.bar.conn_tone, 0);
+        assert_ne!(view.bar.broker_label, "FYERS");
+    }
+
+    #[test]
+    fn test_clock_is_not_hardcoded_and_updates() {
+        let mut st = LiveState::default();
+        // 1. Without test_clock override, returns dynamic current IST time
+        let view1 = project(&st);
+        assert_ne!(view1.footer.clock, "09:47:12 IST");
+        assert!(view1.footer.clock.ends_with(" IST"));
+        assert_eq!(view1.footer.clock.len(), 12); // "HH:MM:SS IST"
+
+        // 2. With explicit clock override, returns exact value
+        st.test_clock = Some("14:30:00 IST".into());
+        let view2 = project(&st);
+        assert_eq!(view2.footer.clock, "14:30:00 IST");
+    }
+
+    #[test]
+    fn test_current_ist_clock_formatting() {
+        // Unix epoch 0 = 1970-01-01 00:00:00 UTC = 05:30:00 IST
+        let time0 = std::time::UNIX_EPOCH;
+        assert_eq!(format_ist_clock_from_system_time(time0), "05:30:00 IST");
+
+        // 10:00:00 UTC = 15:30:00 IST
+        let time_10utc = std::time::UNIX_EPOCH + std::time::Duration::from_secs(36000);
+        assert_eq!(format_ist_clock_from_system_time(time_10utc), "15:30:00 IST");
+
+        // Real clock format
+        let clk = current_ist_clock();
+        assert!(clk.ends_with(" IST"));
+        assert_eq!(clk.len(), 12);
+    }
+
+    #[test]
+    fn test_snapshot_timestamp_formatting_and_lifecycle() {
+        // 1. Missing timestamp: empty, never invented
+        assert_eq!(format_snapshot_time(""), "");
+        assert_eq!(format_snapshot_time("   "), "");
+
+        // 2. Malformed timestamp: empty, never invented
+        assert_eq!(format_snapshot_time("not-a-timestamp"), "");
+        assert_eq!(format_snapshot_time("2026/99/99"), "");
+
+        // 3. Valid ISO timestamp with IST offset
+        assert_eq!(
+            format_snapshot_time("2026-10-13T10:25:33+05:30"),
+            "10:25:33 IST"
+        );
+
+        // 4. Valid ISO timestamp with UTC Z offset (+5:30)
+        assert_eq!(
+            format_snapshot_time("2026-10-18T03:57:15Z"),
+            "09:27:15 IST"
+        );
+
+        // 5. Bare HH:MM:SS format
+        assert_eq!(format_snapshot_time("12:14:25"), "12:14:25 IST");
+
+        // 6. State snapshot time projection in FooterView
+        let mut st = LiveState::default();
+        let view_initial = project(&st);
+        assert_eq!(view_initial.footer.snapshot_time, ""); // Empty initially
+
+        // Apply snapshot with valid as_of
+        st.apply_snapshot(&serde_json::json!({
+            "as_of": "2026-10-23T15:30:00Z"
+        }));
+        let view_updated = project(&st);
+        assert_eq!(view_updated.footer.snapshot_time, "21:00:00 IST");
+
+        // Apply new snapshot with new as_of
+        st.apply_snapshot(&serde_json::json!({
+            "as_of": "2026-10-23T15:45:00Z"
+        }));
+        let view_updated2 = project(&st);
+        assert_eq!(view_updated2.footer.snapshot_time, "21:15:00 IST");
     }
 }

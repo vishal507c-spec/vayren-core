@@ -339,7 +339,7 @@ def test_idempotency_cache_eviction_on_capacity() -> None:
     mgr = IdempotencyManager(max_entries=2)
     r1 = CommandResponse(request_id="r1", command="START", status=CommandStatus.SUCCESS)
     r2 = CommandResponse(request_id="r2", command="STOP", status=CommandStatus.SUCCESS)
-    r3 = CommandResponse(request_id="r3", command="ARM", status=CommandStatus.SUCCESS)
+    r3 = CommandResponse(request_id="r3", command="STOP", status=CommandStatus.SUCCESS)
 
     mgr.record_response("r1", r1)
     mgr.record_response("r2", r2)
@@ -503,24 +503,6 @@ def test_stop_command_preserves_protective_stop_losses(test_auth: ControlPlaneAu
     assert resp.data["sl_protected"] is True
     assert session.armed_state == "DISARMED"
     assert session.recovery.state_machine.state == ExecutionState.STOPPED
-
-
-def test_halt_command_engages_kill_switch_and_preserves_sl(test_auth: ControlPlaneAuth) -> None:
-    """HALT command triggers emergency kill switch, blocks all orders, preserves SLs."""
-    session = MockLiveSession(execution_state=ExecutionState.RUNNING)
-    controller = ControlPlaneController(session=session, auth=test_auth)
-
-    req = CommandRequest(
-        command=ControlCommand.HALT,
-        request_id="req-halt-1",
-        auth_token="secret_token_123",
-        payload={"reason": "Manual operator intervention"},
-    )
-    resp = controller.handle_command(req)
-    assert resp.status == CommandStatus.SUCCESS
-    assert resp.data["halted"] is True
-    assert session.kill_switch.is_halted() is True
-    assert session.recovery.state_machine.state == ExecutionState.BLOCKED
 
 
 # ── 6. Configuration Management Tests ────────────────────────────────────────

@@ -32,7 +32,6 @@ from app.services.live_trading_service import LiveTradingService  # noqa: E402
 
 @pytest.fixture()
 def dirs(tmp_path: Path) -> tuple[str, str]:
-    headless._ARMED[0] = False
     return str(tmp_path), str(tmp_path)
 
 
@@ -169,28 +168,29 @@ def test_unconfirmed_start_lists_consent_exactly_once(
         assert len(consent) == 1
 
 
-def test_arm_lifts_consent_from_the_snapshot(dirs: tuple[str, str]) -> None:
+def test_confirm_live_lifts_consent_from_the_snapshot(dirs: tuple[str, str]) -> None:
     service = _service(dirs)
     service.configure(mode="LIVE")
     p1, p2, p3 = _live_venue_stubs(service)
     with p1, p2, p3:
-        snap = _act(dirs, {"action": "arm"})
-        assert headless._ARMED[0] is True
-        assert "armed" in snap["action_note"]
+        snap = _act(dirs, {"action": "confirm_live"})
+        assert service.is_live_confirmed() is True
+        assert "LIVE consent confirmed" in snap["action_note"]
         assert not any("consent" in b or "confirmation" in b for b in snap["start_blockers"])
 
 
 def test_setup_mode_and_stop_void_consent(dirs: tuple[str, str]) -> None:
-    _act(dirs, {"action": "arm"})
-    assert headless._ARMED[0] is True
+    service = _service(dirs)
+    _act(dirs, {"action": "confirm_live"})
+    assert service.is_live_confirmed() is True
     _act(dirs, {"action": "setup", "quantity": 7.0})
-    assert headless._ARMED[0] is False
-    _act(dirs, {"action": "arm"})
+    assert service.is_live_confirmed() is False
+    _act(dirs, {"action": "confirm_live"})
     _act(dirs, {"action": "mode", "mode": "LIVE"})
-    assert headless._ARMED[0] is False
-    _act(dirs, {"action": "arm"})
+    assert service.is_live_confirmed() is False
+    _act(dirs, {"action": "confirm_live"})
     _act(dirs, {"action": "stop"})
-    assert headless._ARMED[0] is False
+    assert service.is_live_confirmed() is False
 
 
 def test_stop_clears_recorded_consent(dirs: tuple[str, str]) -> None:
@@ -237,22 +237,6 @@ def test_start_records_timing_and_stop_freezes_runtime(dirs: tuple[str, str]) ->
         assert timing2["elapsed_seconds"] == frozen_elapsed
 
 
-def test_halt_records_halted_status_and_freezes_runtime(dirs: tuple[str, str]) -> None:
-    service = _service(dirs)
-    with (
-        patch.object(service, "validate", return_value=()),
-        patch.object(service, "_build_sessions"),
-    ):
-        ok, _ = service.start()
-        assert ok
-        service.stop(reason="operator halt")
-        assert service.status == "HALTED"
-        snap = service.snapshot()
-        assert snap["session_status"] == "HALTED"
-        assert snap["session_timing"]["status"] == "HALTED"
-        assert "Total runtime:" in snap["session_timing"]["duration"]
-
-
 def test_session_timing_persists_across_reopen(dirs: tuple[str, str]) -> None:
     service = _service(dirs)
     with (
@@ -293,7 +277,7 @@ def test_stale_start_refusal_is_not_echoed_once_blockers_clear(
     headless._LIVE_ACTION_ERRORS["start"] = stale
     try:
         with patch.object(service, "validate", return_value=()):
-            snap = _act(dirs, {"action": "arm"})
+            snap = _act(dirs, {"action": "confirm_live"})
         assert "CONFIGURING" not in str(snap.get("status_reason", ""))
         assert "no live trading venue" not in str(snap.get("status_reason", ""))
         assert headless._LIVE_ACTION_ERRORS.get("start") is None
@@ -311,7 +295,7 @@ def test_recorded_start_refusal_is_replaced_by_fresh_blockers(dirs: tuple[str, s
     fresh = "no market data for NSE:RELIANCE 30m"
     try:
         with patch.object(service, "validate", return_value=(fresh,)):
-            snap = _act(dirs, {"action": "arm"})
+            snap = _act(dirs, {"action": "confirm_live"})
         assert str(snap.get("status_reason", "")) == fresh
     finally:
         headless._LIVE_ACTION_ERRORS.pop("start", None)

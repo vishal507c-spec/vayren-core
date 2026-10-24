@@ -23,7 +23,7 @@ use vayren_shell::market;
 use vayren_shell::portfolio;
 use vayren_shell::python_bridge::{BackendCommand, BackendResponse, PythonBackend};
 use vayren_shell::research_state;
-use vayren_shell::shell;
+use vayren_shell::{shell, ShellScreen};
 
 /// Paint the SYSTEM broker panel from the authoritative EC2 session — the
 /// same unified snapshot LIVE reads, so the two screens cannot disagree.
@@ -1808,7 +1808,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if std::time::Instant::now() >= next_live_timer_tick {
                     next_live_timer_tick = std::time::Instant::now() + std::time::Duration::from_secs(1);
                     let st = live_state.borrow();
-                    if st.session == live::SessionStatus::Running && st.start_epoch_secs.is_some() {
+                    if ui.get_active_screen() == ShellScreen::Live
+                        || (st.session == live::SessionStatus::Running
+                            && st.start_epoch_secs.is_some())
+                    {
                         shell::apply_live(&ui, &st);
                     }
                 }
@@ -2724,7 +2727,7 @@ fn send_remote_broker_command(
 /// connects with zero restart. No secret is ever painted or logged.
 ///
 /// Command authority: trading controls follow the gateway's granted role.
-/// A `trade` credential makes START/STOP/HALT live — each command is still
+/// A `trade` credential makes START/STOP live — each command is still
 /// authorized server-side and refused with its exact reason when a check
 /// fails — while a `read` credential leaves them honestly inert. Other
 /// workspaces (Market/Lab/Portfolio/Research, SYSTEM broker panel) render
@@ -3095,7 +3098,10 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                     next_live_timer_tick =
                         std::time::Instant::now() + std::time::Duration::from_secs(1);
                     let st = live_state.borrow();
-                    if st.session == live::SessionStatus::Running && st.start_epoch_secs.is_some() {
+                    if ui.get_active_screen() == ShellScreen::Live
+                        || (st.session == live::SessionStatus::Running
+                            && st.start_epoch_secs.is_some())
+                    {
                         shell::apply_live(&ui, &st);
                     }
                 }

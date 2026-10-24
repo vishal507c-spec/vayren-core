@@ -171,8 +171,6 @@ class ControlPlaneBridge(QObject):
             # Auto-refresh snapshot on state-changing events
             if event_type in (
                 "STATE_CHANGED",
-                "ARM_CHANGED",
-                "EMERGENCY_HALT",
                 "CONFIG_CHANGED",
                 "RISK_CONFIG_CHANGED",
                 "SYMBOLS_CHANGED",
@@ -225,12 +223,6 @@ class ControlPlaneBridge(QObject):
 
     def send_stop(self) -> CommandResponse:
         return self._dispatch(ControlCommand.STOP)
-
-    def send_arm(self) -> CommandResponse:
-        return self._dispatch(ControlCommand.ARM)
-
-    def send_halt(self, reason: str = "Operator halt") -> CommandResponse:
-        return self._dispatch(ControlCommand.HALT, {"reason": reason})
 
     def send_select_strategy(
         self, strategy_name: str, parameters: dict[str, Any] | None = None

@@ -60,8 +60,6 @@ MUTATING_ACTIONS = (
     "mode",
     "start",
     "stop",
-    "halt",
-    "arm",
     "select_symbol",
     "select_broker",
     "tick",
@@ -714,7 +712,7 @@ class RemoteServer:
             if args.get("mode") not in ("BACKTEST", "LIVE"):
                 return None
             return {"action": "mode", "mode": args["mode"]}
-        if action in ("stop", "halt", "arm", "tick", "confirm_live"):
+        if action in ("stop", "tick", "confirm_live"):
             return {"action": action}
         if action == "confirm_account":
             return {"action": "confirm_account", "account_id": args.get("account_id", "")}

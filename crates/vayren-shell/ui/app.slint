@@ -186,8 +186,6 @@ export component AppWindow inherits Window {
     callback live-quantity-edited(string);
     callback live-start-requested();
     callback live-stop-requested();
-    callback live-arm-requested();
-    callback live-halt-requested();
     callback live-confirm-requested();
     callback live-confirm-open-requested();
     callback live-confirm-cancel-requested();
@@ -607,7 +605,6 @@ export component AppWindow inherits Window {
     in-out property <[string]> live-timeframe-names;
     in-out property <int> live-timeframe-selected: -1;
     in-out property <[LiveGate]> live-gates;
-    in-out property <string> live-arm-note;
     in-out property <[string]> live-blockers;
     in-out property <[string]> live-venue-blockers;
     in-out property <[LiveKv]> live-strategy-rows;
@@ -1018,7 +1015,6 @@ export component AppWindow inherits Window {
                     timeframe-names: root.live-timeframe-names;
                     timeframe-selected: root.live-timeframe-selected;
                     gates: root.live-gates;
-                    arm-note: root.live-arm-note;
                     blockers: root.live-blockers;
                     venue-blockers: root.live-venue-blockers;
                     strategy-rows: root.live-strategy-rows;
@@ -1059,8 +1055,6 @@ export component AppWindow inherits Window {
                     quantity-edited(t) => { root.live-quantity-edited(t); }
                     start-requested() => { root.live-start-requested(); }
                     stop-requested() => { root.live-stop-requested(); }
-                    arm-requested() => { root.live-arm-requested(); }
-                    halt-requested() => { root.live-halt-requested(); }
                     confirm-requested() => { root.live-confirm-requested(); }
                     confirm-open-requested() => { root.live-confirm-open-requested(); }
                     confirm-cancel-requested() => { root.live-confirm-cancel-requested(); }

@@ -188,7 +188,6 @@ def test_5_order_safety_selection_never_starts_or_submits(
     assert snap["positions"] == []
     assert snap["orders"] == []
     assert snap["fills"] == []
-    assert snap["can_arm"] is False  # In PAPER mode, or without valid live confirmation
 
 
 def test_6_live_action_refresh_syncs_latest_saved_universe(

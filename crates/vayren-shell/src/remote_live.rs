@@ -19,7 +19,7 @@
 //!   dropped right after the `hello` frame on the initial connect; reconnects
 //!   re-resolve it instead of retaining it.
 //! - Command authority comes from the gateway's own `welcome` role: a
-//!   `trade` credential makes START/STOP/HALT live (each command still
+//!   `trade` credential makes START/STOP live (each command still
 //!   re-authorized server-side and refused with its exact reason), a `read`
 //!   credential leaves them honestly inert. The gateway authorizes every
 //!   command independently — the UI gate is presentation, never authority.
@@ -732,6 +732,26 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     if let Some(risk_engine) = sections.get("risk_engine").filter(|v| v.is_object()) {
         translated.insert("risk_engine".to_string(), risk_engine.clone());
     }
+    // Bug 4 fix: Forward `as_of` timestamp from server snapshot into translated
+    // map so that domain state `state.snapshot_time` is updated honestly.
+    if let Some(as_of) = sections.get("as_of") {
+        if let Some(s) = as_of.as_str() {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                translated.insert(
+                    "as_of".to_string(),
+                    serde_json::Value::String(trimmed.to_string()),
+                );
+            }
+        } else if let Some(n) = as_of.as_f64() {
+            if n > 0.0 && n.is_finite() {
+                translated.insert(
+                    "as_of".to_string(),
+                    serde_json::Value::String(n.to_string()),
+                );
+            }
+        }
+    }
     let stf = sections
         .get("selected_timeframe")
         .and_then(|v| v.as_str())
@@ -831,7 +851,7 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
 
     state.apply_snapshot(&serde_json::Value::Object(translated));
     // Command capability is the ROLE the gateway granted, never an optimistic
-    // guess: `bridge_wired` drives `can_start`/`can_stop`/`can_halt`, so a
+    // guess: `bridge_wired` drives `can_start`/`can_stop`, so a
     // `read` credential must stay false (controls honestly inert) while a
     // `trade` credential becomes true (controls live). The gateway re-checks
     // the role on every command, so this is presentation, not authority.
@@ -1029,7 +1049,7 @@ pub fn apply_role(state: &mut LiveState, role: &str) {
     state.action_note = if state.remote_commands_allowed {
         None
     } else {
-        Some("read-only credential — START/STOP/HALT are disabled on this link".into())
+        Some("read-only credential — START/STOP execution controls are disabled on this link".into())
     };
 }
 
@@ -1063,7 +1083,7 @@ pub enum RemoteUiUpdate {
     },
     /// The gateway answered a control command (`command_result`): `ok` plus
     /// the reason text when it was refused. This is what clears a pending
-    /// START/STOP/HALT and paints the real outcome.
+    /// START/STOP and paints the real outcome.
     CommandAck {
         action: String,
         ok: bool,
@@ -2197,5 +2217,40 @@ mod tests {
         assert_eq!(state.capital.label, "Available margin");
         // Sizing gate must stay blocked when broker balance is zero
         assert!(!state.has_valid_capital());
+    }
+
+    #[test]
+    fn test_remote_live_snapshot_as_of_forwarding() {
+        let mut sections = sections();
+        let mut state = init_remote_state();
+
+        // 1. Snapshot with as_of timestamp is forwarded into domain state
+        sections.as_object_mut().unwrap().insert(
+            "as_of".to_string(),
+            json!("2026-10-23T15:30:00+00:00"),
+        );
+        apply_remote_sections(&mut state, &sections, false);
+        assert_eq!(state.snapshot_time, "2026-10-23T15:30:00+00:00");
+
+        // 2. Subsequent snapshot with updated as_of refreshes snapshot_time
+        sections.as_object_mut().unwrap().insert(
+            "as_of".to_string(),
+            json!("2026-10-23T15:35:00+00:00"),
+        );
+        apply_remote_sections(&mut state, &sections, false);
+        assert_eq!(state.snapshot_time, "2026-10-23T15:35:00+00:00");
+
+        // 3. Snapshot without as_of does not overwrite with fabricated or empty value
+        sections.as_object_mut().unwrap().remove("as_of");
+        apply_remote_sections(&mut state, &sections, false);
+        assert_eq!(state.snapshot_time, "2026-10-23T15:35:00+00:00");
+
+        // 4. Snapshot with empty as_of does not overwrite
+        sections.as_object_mut().unwrap().insert(
+            "as_of".to_string(),
+            json!("   "),
+        );
+        apply_remote_sections(&mut state, &sections, false);
+        assert_eq!(state.snapshot_time, "2026-10-23T15:35:00+00:00");
     }
 }
