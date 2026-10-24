@@ -7,7 +7,13 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-ui-12-audit-bugs-fixed-20261024):** COMPLETE PRODUCTION FIX FOR ALL 12 LIVE UI AUDIT DEFECTS —
+**Latest update (live-ui-visual-polish-reapplied-20261024):** LIVE SCREEN VISUAL POLISH REAPPLIED ON TOP OF THE AUDIT FIXES (visual-only; no content/features added or removed) —
+- Restored the validated polish in `crates/vayren-shell/ui/live.slint`: dark native widgets (`Palette.color-scheme = ColorScheme.dark`), stretch/start alignment across top bar, stock-list/watchlist headers, universe rows, blotter tables, event filter/header/rows, inspector headers, quantity/timeframe rows, readiness/session rows, footer, `LiveTabHeader`, `LiveGateRow`, and `LiveTopCard`.
+- Pipeline chips: `LivePipelineChip` + `LivePipelineRow` render exactly three indexed steps per row (up to 3 rows); the selected-instrument card reserves `120px + ceil(steps / 3) * 22px`, so `SL PROTECTED` and the notice stay visible at 1920/1600/1024. Event headers are uppercase (`TIME`/`LEVEL`/`EVENT`/`SYMBOL`/`SOURCE`).
+- Verification: `cargo test -p vayren-shell --test live_render_snapshot` 7/7; `cargo test -p vayren-shell --test live_ui_defects_regression` 22/22; render snapshots inspected at 1920x1080, 1600x900, 1024x640, 900x700. `python tools/validate_language_ownership.py` PASSED (430 files).
+- Known pre-existing gate issues from `b90a68d` (not caused by this polish): `live_stock_row_render` asserts ComboBox index 0 while the new `"— Select Strategy —"` placeholder maps domain strategy 0 to ComboBox 1; `cargo fmt --check` reports `crates/vayren-domain/src/live.rs`. Left untouched to keep this change visual-only.
+
+**Previous update (live-ui-12-audit-bugs-fixed-20261024):** COMPLETE PRODUCTION FIX FOR ALL 12 LIVE UI AUDIT DEFECTS —
 - **Bug 1 (Watchlist Alignment):** Aligned watchlist row status dot container to 14px (`Rectangle { width: 14px; Rectangle { width: 10px; height: 10px; ... } }`) to match the 14px column 1 header, resolving the 4px horizontal shift across table columns.
 - **Bug 2 (Misleading Reconciliation Footer):** Eliminated fake fallbacks (`BROKER SYNCED`, `NSE STREAM`, `30m CANDLES`). Display honest states (`NOT CONFIGURED`, `DISCONNECTED`, `NO DATA`). Removed duplicate `RECON: Recon:` prefix in `live.rs`. Display `SNAPSHOT: <time>` separately from the real-time workstation clock.
 - **Bug 3 (Broker Capital Status Color):** Removed hardcoded teal and fake `₹0.00` in the Inspector. Display `"Unavailable"` when missing, with dynamic semantic tone mapping (`root.bar.capital-tone`: teal for healthy/connected, neg/red for error, amber for warning, muted for unavailable).

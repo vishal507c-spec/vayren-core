@@ -11,7 +11,7 @@
 
 import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton, VBanner, VEmptyState, VStatusDot } from "components.slint";
-import { LineEdit, ScrollView, ComboBox } from "std-widgets.slint";
+import { LineEdit, ScrollView, ComboBox, Palette } from "std-widgets.slint";
 
 // ── projected shapes (mirror domain live.rs) ──────────────────────────────────
 
@@ -450,7 +450,7 @@ component LiveTopCard inherits Rectangle {
         padding-left: 8px;
         padding-right: 8px;
         spacing: 6px;
-        alignment: center;
+        alignment: stretch;
 
         if root.show-icon: Rectangle {
             width: 24px;
@@ -628,7 +628,7 @@ component LiveTabHeader inherits Rectangle {
     }
 
     VerticalLayout {
-        alignment: center;
+        alignment: stretch;
         spacing: 0;
 
         Rectangle {
@@ -714,6 +714,65 @@ component LiveGateRow inherits Rectangle {
             font-weight: 500;
             overflow: elide;
         }
+    }
+}
+
+
+// One execution-pipeline stage. Three chips fit per inspector row; the
+// component keeps each stage's own reached/current/failed state so a joined
+// string can never blur the engine's verdict.
+component LivePipelineChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> reached;
+    in property <bool> current;
+    in property <bool> failed;
+
+    height: 18px;
+    border-radius: 3px;
+    background: root.failed ? VayrenPalette.neg-dim : (root.current ? VayrenPalette.live-teal-deep : (root.reached ? VayrenPalette.live-panel-deep : transparent));
+    border-width: 1px;
+    border-color: root.failed ? VayrenPalette.neg : (root.current ? VayrenPalette.live-teal : (root.reached ? VayrenPalette.live-line-soft : VayrenPalette.live-line-faint));
+
+    HorizontalLayout {
+        padding-left: 5px;
+        padding-right: 5px;
+        alignment: stretch;
+        Text {
+            text: (root.failed ? "✕ " : (root.reached ? "✓ " : "")) + root.label;
+            color: root.failed ? VayrenPalette.neg : (root.current ? VayrenPalette.live-teal : (root.reached ? VayrenPalette.text : VayrenPalette.muted));
+            font-size: 9px;
+            font-weight: root.current ? 700 : 500;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Three chips per row, left-aligned. The row owns the window into the
+// pipeline so the inspector never grows a fourth column at narrow widths.
+component LivePipelineRow inherits HorizontalLayout {
+    in property <[LivePipelineStep]> steps;
+    in property <int> first: 0;
+
+    spacing: 4px;
+    alignment: start;
+
+    if root.steps.length > root.first: LivePipelineChip {
+        label: root.steps[root.first].label;
+        reached: root.steps[root.first].reached;
+        current: root.steps[root.first].current;
+        failed: root.steps[root.first].failed;
+    }
+    if root.steps.length > root.first + 1: LivePipelineChip {
+        label: root.steps[root.first + 1].label;
+        reached: root.steps[root.first + 1].reached;
+        current: root.steps[root.first + 1].current;
+        failed: root.steps[root.first + 1].failed;
+    }
+    if root.steps.length > root.first + 2: LivePipelineChip {
+        label: root.steps[root.first + 2].label;
+        reached: root.steps[root.first + 2].reached;
+        current: root.steps[root.first + 2].current;
+        failed: root.steps[root.first + 2].failed;
     }
 }
 
@@ -1102,7 +1161,10 @@ export component LiveScreen inherits Rectangle {
     property <string> event-filter-text: "";
     property <bool> is-narrow-bar: root.width < 1320px;
 
-    init => { root.qty-text = root.setup.quantity; }
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+        root.qty-text = root.setup.quantity;
+    }
     changed setup => { if (!root.qty-dirty) { root.qty-text = root.setup.quantity; } }
     min-width: 0px;
     clip: true;
@@ -1186,7 +1248,7 @@ export component LiveScreen inherits Rectangle {
                 padding-left: 12px;
                 padding-right: 12px;
                 spacing: 6px;
-                alignment: center;
+                alignment: stretch;
 
                 // ── Group 1: Venue & Account Status ──
                 LiveTopCard {
@@ -1249,7 +1311,7 @@ export component LiveScreen inherits Rectangle {
                         padding-left: 8px;
                         padding-right: 6px;
                         spacing: 6px;
-                        alignment: center;
+                        alignment: stretch;
 
                         Text {
                             text: "STRATEGY";
@@ -1285,7 +1347,7 @@ export component LiveScreen inherits Rectangle {
                     HorizontalLayout {
                         padding: 3px;
                         spacing: 2px;
-                        alignment: center;
+                        alignment: stretch;
 
                         // LIVE indicator (only supported execution mode)
                         Rectangle {
@@ -1338,7 +1400,7 @@ export component LiveScreen inherits Rectangle {
                 HorizontalLayout {
                     height: 48px;
                     spacing: 8px;
-                    alignment: start;
+                    alignment: stretch;
 
                     LiveTopCard {
                         icon-char: "B";
@@ -1391,7 +1453,7 @@ export component LiveScreen inherits Rectangle {
                 HorizontalLayout {
                     height: 34px;
                     spacing: 8px;
-                    alignment: start;
+                    alignment: stretch;
 
                     Rectangle {
                         height: 34px;
@@ -1405,7 +1467,7 @@ export component LiveScreen inherits Rectangle {
                             padding-left: 8px;
                             padding-right: 6px;
                             spacing: 6px;
-                            alignment: center;
+                            alignment: stretch;
 
                             Text {
                                 text: "STRATEGY";
@@ -1441,7 +1503,7 @@ export component LiveScreen inherits Rectangle {
                         HorizontalLayout {
                             padding: 3px;
                             spacing: 2px;
-                            alignment: center;
+                            alignment: stretch;
 
                             // LIVE indicator (only supported execution mode)
                             Rectangle {
@@ -1505,7 +1567,7 @@ export component LiveScreen inherits Rectangle {
                 HorizontalLayout {
                     height: 22px;
                     spacing: 8px;
-                    alignment: center;
+                    alignment: stretch;
 
                     Text {
                         text: "LIVE TRADE STOCKS";
@@ -1679,7 +1741,7 @@ export component LiveScreen inherits Rectangle {
                             HorizontalLayout {
                                 height: 28px;
                                 spacing: 8px;
-                                alignment: center;
+                                alignment: stretch;
 
                                 Text {
                                     text: "STRATEGY WATCHLIST";
@@ -1867,7 +1929,7 @@ export component LiveScreen inherits Rectangle {
                                         HorizontalLayout {
                                             height: 26px;
                                             spacing: 8px;
-                                            alignment: center;
+                                            alignment: stretch;
                                             Text {
                                                 text: "STRATEGY UNIVERSE";
                                                 color: VayrenPalette.live-ink-mute;
@@ -1901,7 +1963,7 @@ export component LiveScreen inherits Rectangle {
                                             }
 
                                             HorizontalLayout {
-                                                padding-left: 8px; padding-right: 6px; spacing: 6px; alignment: center;
+                                                padding-left: 8px; padding-right: 6px; spacing: 6px; alignment: start;
                                                 Rectangle {
                                                     width: 14px;
                                                     height: 14px;
@@ -1996,7 +2058,7 @@ export component LiveScreen inherits Rectangle {
                                     background: VayrenPalette.bg1;
                                     border-radius: 4px;
                                     HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
+                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: stretch;
                                         Text { width: 90px; text: "SYMBOL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                         Text { width: 50px; text: "SIDE"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                         Text { width: 50px; text: "QTY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
@@ -2033,7 +2095,7 @@ export component LiveScreen inherits Rectangle {
                                             border-color: pos-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
                                             pos-touch := TouchArea {}
                                             HorizontalLayout {
-                                                padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
+                                                padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: stretch;
                                                 Text { width: 90px; text: pos.symbol; color: VayrenPalette.text-bright; font-size: 11.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 50px; text: pos.side; color: LiveTone.ink(pos.side-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
                                                 Text { width: 50px; text: pos.qty; color: VayrenPalette.text; font-size: 11px; font-weight: 600; vertical-alignment: center; }
@@ -2057,7 +2119,7 @@ export component LiveScreen inherits Rectangle {
                                     background: VayrenPalette.bg1;
                                     border-radius: 4px;
                                     HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
+                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: stretch;
                                         Text { width: 70px; text: "TIME"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                         Text { width: 90px; text: "ORDER ID"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                         Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
@@ -2095,7 +2157,7 @@ export component LiveScreen inherits Rectangle {
                                             border-color: ord-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
                                             ord-touch := TouchArea {}
                                             HorizontalLayout {
-                                                padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
+                                                padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: stretch;
                                                 Text { width: 70px; text: ord.time; color: VayrenPalette.muted; font-size: 10.5px; vertical-alignment: center; }
                                                 Text { width: 90px; text: ord.order-id; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 80px; text: ord.strategy; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
@@ -2120,7 +2182,7 @@ export component LiveScreen inherits Rectangle {
                                     background: VayrenPalette.bg1;
                                     border-radius: 4px;
                                     HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
+                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: stretch;
                                         Text { width: 70px; text: "TIME"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                         Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                         Text { width: 50px; text: "SIDE"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
@@ -2156,7 +2218,7 @@ export component LiveScreen inherits Rectangle {
                                             border-color: fill-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
                                             fill-touch := TouchArea {}
                                             HorizontalLayout {
-                                                padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
+                                                padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: stretch;
                                                 Text { width: 70px; text: fill.time; color: VayrenPalette.muted; font-size: 10.5px; vertical-alignment: center; }
                                                 Text { width: 80px; text: fill.symbol; color: VayrenPalette.text-bright; font-size: 11.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 50px; text: fill.side; color: LiveTone.ink(fill.side-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
@@ -2178,7 +2240,7 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 26px;
                                     spacing: 6px;
-                                    alignment: center;
+                                    alignment: stretch;
 
                                     ScrollView {
                                         horizontal-stretch: 1;
@@ -2226,12 +2288,12 @@ export component LiveScreen inherits Rectangle {
                                     background: VayrenPalette.bg1;
                                     border-radius: 4px;
                                     HorizontalLayout {
-                                        padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: center;
-                                        Text { width: 72px; text: "Time"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
-                                        Text { width: 44px; text: "Level"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
-                                        Text { horizontal-stretch: 1; text: "Event"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
-                                        Text { width: 80px; text: "Symbol"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
-                                        Text { width: 70px; text: "Source"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: stretch;
+                                        Text { width: 72px; text: "TIME"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 44px; text: "LEVEL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { horizontal-stretch: 1; text: "EVENT"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 70px; text: "SOURCE"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                     }
                                 }
 
@@ -2260,7 +2322,7 @@ export component LiveScreen inherits Rectangle {
                                             border-color: ev-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
                                             ev-touch := TouchArea {}
                                             HorizontalLayout {
-                                                padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: center;
+                                                padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: stretch;
                                                 Text { width: 72px; text: ev.time; color: VayrenPalette.muted; font-size: 10px; vertical-alignment: center;
                                                     Tooltip { text: @markdown("\{ev.timestamp}"); }
                                                 }
@@ -2337,7 +2399,7 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 22px;
                                     spacing: 6px;
-                                    alignment: center;
+                                    alignment: stretch;
 
                                     Text {
                                         text: "ACTIVE STRATEGY";
@@ -2464,7 +2526,7 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 28px;
                                     spacing: 8px;
-                                    alignment: center;
+                                    alignment: stretch;
 
                                     Text {
                                         width: 96px;
@@ -2494,7 +2556,7 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 26px;
                                     spacing: 8px;
-                                    alignment: center;
+                                    alignment: stretch;
 
                                     Text {
                                         width: 96px;
@@ -2535,7 +2597,7 @@ export component LiveScreen inherits Rectangle {
 
                         // SELECTED STOCK & EXECUTION PIPELINE
                         Rectangle {
-                            min-height: root.selected-stock.symbol != "" ? 120px : 52px;
+                            min-height: root.selected-stock.symbol != "" ? (120px + Math.ceil(root.selected-stock.pipeline.length / 3) * 22px) : 52px;
                             background: VayrenPalette.live-panel;
                             border-radius: 6px;
                             border-width: 1px;
@@ -2548,7 +2610,7 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 22px;
                                     spacing: 6px;
-                                    alignment: center;
+                                    alignment: stretch;
 
                                     Text {
                                         text: "SELECTED INSTRUMENT";
@@ -2608,7 +2670,7 @@ export component LiveScreen inherits Rectangle {
                                     // Pipeline Stage & Status
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        alignment: center;
+                                        alignment: stretch;
                                         Text { text: "STAGE:"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; vertical-alignment: center; }
                                         Text {
                                             text: root.selected-stock.pipeline-stage != "" ? root.selected-stock.pipeline-stage : (root.selected-stock.signal != "" ? ("SIGNAL: " + root.selected-stock.signal) : "MONITORING");
@@ -2634,26 +2696,22 @@ export component LiveScreen inherits Rectangle {
                                         }
                                     }
 
-                                    // Pipeline Steps Graphic (if populated)
-                                    if root.selected-stock.pipeline.length > 0: HorizontalLayout {
+                                    // Pipeline Steps Graphic (if populated) —
+                                    // three chips per row keeps every stage
+                                    // readable inside the inspector width.
+                                    if root.selected-stock.pipeline.length > 0: VerticalLayout {
                                         spacing: 4px;
-                                        alignment: start;
-                                        for step in root.selected-stock.pipeline: Rectangle {
-                                            height: 18px;
-                                            border-radius: 3px;
-                                            background: step.failed ? VayrenPalette.neg-dim : (step.current ? VayrenPalette.live-teal-deep : (step.reached ? VayrenPalette.live-panel-deep : transparent));
-                                            border-width: 1px;
-                                            border-color: step.failed ? VayrenPalette.neg : (step.current ? VayrenPalette.live-teal : (step.reached ? VayrenPalette.live-line-soft : VayrenPalette.live-line-faint));
-                                            HorizontalLayout {
-                                                padding-left: 5px; padding-right: 5px; alignment: center;
-                                                Text {
-                                                    text: (step.failed ? "✕ " : (step.reached ? "✓ " : "")) + step.label;
-                                                    color: step.failed ? VayrenPalette.neg : (step.current ? VayrenPalette.live-teal : (step.reached ? VayrenPalette.text : VayrenPalette.muted));
-                                                    font-size: 9px;
-                                                    font-weight: step.current ? 700 : 500;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
+                                        LivePipelineRow {
+                                            steps: root.selected-stock.pipeline;
+                                            first: 0;
+                                        }
+                                        if root.selected-stock.pipeline.length > 3: LivePipelineRow {
+                                            steps: root.selected-stock.pipeline;
+                                            first: 3;
+                                        }
+                                        if root.selected-stock.pipeline.length > 6: LivePipelineRow {
+                                            steps: root.selected-stock.pipeline;
+                                            first: 6;
                                         }
                                     }
 
@@ -2693,7 +2751,7 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 24px;
                                     spacing: 8px;
-                                    alignment: center;
+                                    alignment: stretch;
 
                                     Text {
                                         text: "LIVE READINESS";
@@ -2715,7 +2773,7 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 20px;
                                     spacing: 8px;
-                                    alignment: center;
+                                    alignment: stretch;
 
                                     Text {
                                         width: 96px;
@@ -2883,7 +2941,7 @@ export component LiveScreen inherits Rectangle {
                 padding-left: 12px;
                 padding-right: 12px;
                 spacing: 16px;
-                alignment: center;
+                alignment: stretch;
                 Text { text: "BROKER: " + (root.footer.broker != "" ? root.footer.broker : "NOT CONFIGURED"); color: VayrenPalette.muted; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                 Text { text: "WS: " + (root.footer.websocket != "" ? root.footer.websocket : "DISCONNECTED"); color: VayrenPalette.muted; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                 Text { text: "DATA: " + (root.footer.market-data != "" ? root.footer.market-data : "NO DATA"); color: VayrenPalette.muted; font-size: 10px; font-weight: 600; vertical-alignment: center; }
