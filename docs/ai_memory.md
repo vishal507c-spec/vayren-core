@@ -7,7 +7,22 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-ui-polish-pass-20261025):** LIVE UI POLISH PASS (visual-only; no content/features added or removed) —
+**Latest update (sunday-premarket-readiness-audit-20261025):** COMPREHENSIVE SUNDAY LIVE-READINESS AUDIT & PRE-MARKET VERIFICATION FOR MONDAY, 26 OCTOBER 2026 —
+- **Production EC2 Runtime State (100% Read-Only):**
+  - Host `100.75.185.37` (`ip-172-31-12-198.taila678c5.ts.net`), process PID `765929` (`remote.runner`) active and running in `LIVE` mode.
+  - SHA: `a7760447d182147249ba9d31dd260eeb4621ea36` (clean, compatible with desktop client).
+  - Broker: `Fyers` (Account `XV29244`), REST auth valid, available margin ₹100.00, Order WebSocket `READY`.
+  - Strategy: `OBR C1C4` (30m timeframe, 22 symbols: `DREDGECORP`, `WAAREERTL`, `KEC`, `KAYNES`, `AVANTIFEED`, `ROUTE`, `RAILTEL`, `SCI`, `MOIL`, `CRAMC`, `LXCHEM`, `NOCIL`, `DAMCAPITAL`, `JSWCEMENT`, `TEXRAIL`, `ZEEL`, `VIKRAN`, `IFCI`, `DCW`, `SAGILITY`, `JINDWORLD`, `NETWEB`).
+  - Risk limits: 1 share maximum per order (`max 1 per order`).
+- **Weekend / Sunday Off-Hours Behavior Documented:**
+  - `market_ws` leg status is `FAILED` with `stale — no market data for >1700s` due to NSE weekend closure.
+  - Confirmed fail-closed posture: Top card shows `Fyers [CONNECTED]` from REST auth, while Live safety gates strictly flag `Broker Connected` and `Account Confirmed` as `NOT READY` until live market ticks resume on Monday morning.
+- **Fail-Safe & Sandbox Verification:**
+  - All 5 execution stages verified: token validity, market data staleness cutoff (1980s), OBR C1C4 signal generation, 1-share risk ceiling, and simulated order lifecycle isolation.
+  - Fail-safe tests confirmed that expired tokens, disconnected sockets, stale bars, unconfirmed accounts, and kill-switch activations fail closed without sending real broker orders.
+  - Authoritative holiday calendar verified: Monday, 26 October 2026 is an open, regular trading session.
+
+**Previous update (live-ui-polish-pass-20261025):** LIVE UI POLISH PASS (visual-only; no content/features added or removed) —
 - **Inspector overflow fixed:** the docked inspector now scrolls at natural card height (`viewport-height: Math.max(self.height, inspector-body.preferred-height)`), so the Active Strategy card no longer clips `Signals generated` / `Orders` / `Universe`, the readiness tail is reachable, and Broker Account + `CONFIGURE BROKER` can no longer paint over the footer at 1920/1600/1366/1024.
 - **Short-viewport footer restored:** the stacked boards compress by window height (`watchlist-min-h` 150/190/220px, `blotter-min-h` 120/160/200px at `<640 / <720 / ≥720`), so the footer clock/snapshot strip stays on screen at 1024x640 and 1024x560 (it was pushed below the viewport before).
 - **Chrome polish:** the LIVE execution-mode pill is compact (84px, was a mostly-empty 168px red slab); Broker Capital card radius aligns with the other top-bar cards (8px).
