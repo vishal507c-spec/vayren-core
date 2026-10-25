@@ -1309,7 +1309,7 @@ export component LiveScreen inherits Rectangle {
                     border-radius: 6px;
                     background: VayrenPalette.live-panel;
                     border-width: 1px;
-                    border-color: root.strategy-selected >= 0 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
+                    border-color: root.strategy-selected > 0 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
 
                     HorizontalLayout {
                         padding-left: 8px;
@@ -1414,6 +1414,7 @@ export component LiveScreen inherits Rectangle {
                         tone: root.bar.broker-tone;
                         sub-text: root.bar.conn-label != "" ? root.bar.conn-label : "DISCONNECTED";
                         sub-tone: root.bar.conn-tone;
+                        clicked => { root.configure-broker(); }
                     }
 
                     LiveBrokerCapitalCard {
@@ -1465,7 +1466,7 @@ export component LiveScreen inherits Rectangle {
                         border-radius: 6px;
                         background: VayrenPalette.live-panel;
                         border-width: 1px;
-                        border-color: root.strategy-selected >= 0 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
+                        border-color: root.strategy-selected > 0 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
 
                         HorizontalLayout {
                             padding-left: 8px;
@@ -1604,7 +1605,7 @@ export component LiveScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: root.strategy-selected < 0
+                        text: root.strategy-selected <= 0
                             ? "Select a strategy above"
                             : (root.setup.stock-universe.length > 0
                                 ? (root.setup.stock-universe.length + " stocks saved")
@@ -1652,7 +1653,7 @@ export component LiveScreen inherits Rectangle {
                     height: 24px;
                     alignment: start;
                     Text {
-                        text: root.strategy-selected < 0
+                        text: root.strategy-selected <= 0
                             ? "Choose a strategy above to load its saved trading universe"
                             : "No stocks saved for this strategy · Configure and save universe in Strategy Lab";
                         font-size: 10.5px;
@@ -1953,7 +1954,7 @@ export component LiveScreen inherits Rectangle {
                                                 height: 24px;
                                                 label: "SAVE UNIVERSE";
                                                 variant: 2;
-                                                enabled: root.strategy-selected >= 0 && !root.setup.can-stop;
+                                                enabled: root.strategy-selected > 0 && !root.setup.can-stop;
                                                 clicked => { root.universe-save(); }
                                             }
                                         }
@@ -1994,10 +1995,10 @@ export component LiveScreen inherits Rectangle {
 
                                         if root.symbols.length == 0: VEmptyState {
                                             height: 72px;
-                                            title: root.strategy-selected < 0
+                                            title: root.strategy-selected <= 0
                                                 ? "No strategy selected"
                                                 : (root.filter-text != "" ? "No symbol matches the filter" : "No symbols configured for this strategy");
-                                            detail: root.strategy-selected < 0 ? "Pick a strategy to load its saved universe." : "Configure and save the universe in Strategy Lab.";
+                                            detail: root.strategy-selected <= 0 ? "Pick a strategy to load its saved universe." : "Configure and save the universe in Strategy Lab.";
                                         }
                                     }
                                 }
@@ -2869,7 +2870,7 @@ export component LiveScreen inherits Rectangle {
                                     }
                                     Text {
                                         text: root.bar.broker-label != "" ? root.bar.broker-label : "NOT CONFIGURED";
-                                        color: root.bar.broker-label != "" ? VayrenPalette.text-bright : VayrenPalette.muted;
+                                        color: root.bar.broker-label != "" && root.bar.broker-label != "NOT CONFIGURED" ? VayrenPalette.text-bright : VayrenPalette.muted;
                                         font-size: 11.5px;
                                         font-weight: 700;
                                     }

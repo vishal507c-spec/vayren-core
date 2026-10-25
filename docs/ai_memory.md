@@ -7,7 +7,28 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (sunday-premarket-readiness-audit-20261025):** COMPREHENSIVE SUNDAY LIVE-READINESS AUDIT & PRE-MARKET VERIFICATION FOR MONDAY, 26 OCTOBER 2026 —
+**Latest update (live-ui-bugs-surgical-fixes-20261025):** SURGICAL FIXES FOR LIVE UI BUGS & REGRESSION HARDENING —
+- **Bug 1 (Narrow Broker Click Handler):** Wired `clicked => { root.configure-broker(); }` on the narrow-layout (`root.is-narrow-bar`) BROKER `LiveTopCard`, enabling responsive broker configuration across narrow and wide viewport tiers.
+- **Bug 2 (Strategy Placeholder Index 0 Disconnect):** Updated index conditions in `crates/vayren-shell/ui/live.slint`:
+  - Active strategy border requires `root.strategy-selected > 0` (in both wide and narrow bars), preventing premature teal borders on placeholder index 0.
+  - Live trade stocks header and guidance strip use `<= 0` to display "Select a strategy above" and "Choose a strategy above to load its saved trading universe".
+  - SAVE UNIVERSE action button strictly requires `root.strategy-selected > 0 && !root.setup.can-stop;`.
+  - Watchlist symbols empty state uses `<= 0` to guide the operator to pick a strategy.
+- **Bug 3 (NOT CONFIGURED Broker Color):** Updated color condition in Inspector BROKER ACCOUNT card (`root.bar.broker-label != "" && root.bar.broker-label != "NOT CONFIGURED" ? VayrenPalette.text-bright : VayrenPalette.muted`), ensuring literal `"NOT CONFIGURED"` renders with muted tone rather than active bright text.
+- **Bug 4 (Regression Test Hardening):** Added regression assertions to `crates/vayren-shell/tests/live_ui_defects_regression.rs` verifying 3+ `configure-broker` call sites, strict `> 0` border highlights, `<= 0` empty-state guidance, disabled SAVE UNIVERSE on index 0, and muted broker label color.
+- **Verification:**
+  - `cargo check -p vayren-shell`: Finished with 0 errors, 0 warnings.
+  - `cargo test -p vayren-shell --test live_ui_defects_regression`: 22 passed, 0 failed.
+  - `cargo test -p vayren-shell --test live_stock_row_render`: 1 passed, 0 failed.
+  - `cargo test -p vayren-shell --test live_watchlist_from_saved_universe`: 1 passed, 0 failed.
+  - `cargo test -p vayren-shell --test live_render_snapshot`: 7 passed, 0 failed.
+  - `cargo test -p vayren-shell --test live_event_time_column`: 2 passed, 0 failed.
+  - `cargo test -p vayren-domain --lib live`: 109 passed, 0 failed.
+  - `python tools/validate_language_ownership.py`: PASSED (430 files checked).
+  - Python tests: `test_live_actions.py`, `test_live_strategy_sync_and_watchlist.py`, `test_live_broker_capital.py`, `test_live_timeframe_authority.py` (33 passed, 0 failed).
+  - `cargo fmt --check`: Clean (0 diffs).
+
+**Previous update (sunday-premarket-readiness-audit-20261025):** COMPREHENSIVE SUNDAY LIVE-READINESS AUDIT & PRE-MARKET VERIFICATION FOR MONDAY, 26 OCTOBER 2026 —
 - **Production EC2 Runtime State (100% Read-Only):**
   - Host `100.75.185.37` (`ip-172-31-12-198.taila678c5.ts.net`), process PID `765929` (`remote.runner`) active and running in `LIVE` mode.
   - SHA: `a7760447d182147249ba9d31dd260eeb4621ea36` (clean, compatible with desktop client).

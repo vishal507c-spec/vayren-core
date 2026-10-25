@@ -161,6 +161,12 @@ fn test_broker_label_consistent_between_top_card_and_inspector() {
         "Inspector must use NOT CONFIGURED fallback for empty broker-label (consistent with TopCard)"
     );
 
+    // Inspector broker label color must render muted when NOT CONFIGURED
+    assert!(
+        src.contains("color: root.bar.broker-label != \"\" && root.bar.broker-label != \"NOT CONFIGURED\" ? VayrenPalette.text-bright : VayrenPalette.muted;"),
+        "Inspector broker label must render muted when broker is NOT CONFIGURED or empty"
+    );
+
     // Neither Top Card nor Inspector may use FYERS as a fallback
     assert!(
         !src.contains("root.bar.broker-label != \"\" ? root.bar.broker-label : \"FYERS\""),
@@ -272,9 +278,14 @@ fn test_defect_5_broker_configuration_action_wired() {
         src.contains("label: \"CONFIGURE BROKER\";"),
         "Inspector must have a visible CONFIGURE BROKER button"
     );
+    // clicked => { root.configure-broker(); } must be wired across wide top card, narrow top card, and inspector
+    let matches: Vec<_> = src
+        .match_indices("clicked => { root.configure-broker(); }")
+        .collect();
     assert!(
-        src.contains("clicked => { root.configure-broker(); }"),
-        "Action must be wired to root.configure-broker()"
+        matches.len() >= 3,
+        "configure-broker must be wired in wide TopCard, narrow TopCard, and Inspector button (found {})",
+        matches.len()
     );
 }
 
@@ -310,6 +321,42 @@ fn test_defect_8_strategy_combobox_selection() {
     assert!(
         src.contains("property <string> selected-strategy: root.strategy-selected > 0 && root.strategy-selected < root.strategy-names.length ? root.strategy-names[root.strategy-selected] : \"Select Strategy\";"),
         "selected-strategy must evaluate to 'Select Strategy' when index is 0 or unselected"
+    );
+    // Border color must require strategy-selected > 0 in both wide and narrow bars
+    assert!(
+        src.contains("border-color: root.strategy-selected > 0 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;"),
+        "Strategy combobox border must only highlight when strategy-selected > 0"
+    );
+    assert!(
+        !src.contains("border-color: root.strategy-selected >= 0 ? VayrenPalette.live-teal-deep"),
+        "Strategy combobox border must never highlight on placeholder index 0"
+    );
+    // Stock list header and guidance must use <= 0
+    assert!(
+        src.contains("text: root.strategy-selected <= 0\n                            ? \"Select a strategy above\""),
+        "Stock list header must guide selection when strategy-selected <= 0"
+    );
+    assert!(
+        src.contains("text: root.strategy-selected <= 0\n                            ? \"Choose a strategy above to load its saved trading universe\""),
+        "Empty stock universe chip strip must guide selection when strategy-selected <= 0"
+    );
+    // SAVE UNIVERSE must be disabled on placeholder index 0
+    assert!(
+        src.contains("enabled: root.strategy-selected > 0 && !root.setup.can-stop;"),
+        "SAVE UNIVERSE button must require strategy-selected > 0"
+    );
+    assert!(
+        !src.contains("enabled: root.strategy-selected >= 0 && !root.setup.can-stop;"),
+        "SAVE UNIVERSE button must not be enabled when placeholder index 0 is selected"
+    );
+    // Symbols empty state must use <= 0
+    assert!(
+        src.contains("title: root.strategy-selected <= 0\n                                                ? \"No strategy selected\""),
+        "Watchlist empty state title must indicate no strategy selected when <= 0"
+    );
+    assert!(
+        src.contains("detail: root.strategy-selected <= 0 ? \"Pick a strategy to load its saved universe.\" : \"Configure and save the universe in Strategy Lab.\";"),
+        "Watchlist empty state detail must indicate pick a strategy when <= 0"
     );
 }
 
