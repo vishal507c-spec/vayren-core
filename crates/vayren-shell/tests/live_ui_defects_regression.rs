@@ -164,7 +164,9 @@ fn test_broker_status_consistent_between_top_card_and_inspector() {
 
     // Both Top Card and Inspector must use DISCONNECTED fallback when conn-label is empty
     assert!(
-        src.contains("sub-text: root.bar.conn-label != \"\" ? root.bar.conn-label : \"DISCONNECTED\";"),
+        src.contains(
+            "sub-text: root.bar.conn-label != \"\" ? root.bar.conn-label : \"DISCONNECTED\";"
+        ),
         "TopCard must use DISCONNECTED fallback for empty conn-label"
     );
     assert!(
@@ -172,7 +174,6 @@ fn test_broker_status_consistent_between_top_card_and_inspector() {
         "Inspector must use DISCONNECTED fallback for empty conn-label"
     );
 }
-
 
 // ── 12 Live UI Audit Defects Regression Tests ──
 
@@ -222,7 +223,9 @@ fn test_defect_2_reconciliation_footer_no_fake_fallbacks() {
 fn test_defect_3_broker_capital_status_color() {
     let src = include_str!("../ui/live.slint");
     assert!(
-        src.contains("text: root.bar.capital-value != \"\" ? root.bar.capital-value : \"Unavailable\";"),
+        src.contains(
+            "text: root.bar.capital-value != \"\" ? root.bar.capital-value : \"Unavailable\";"
+        ),
         "Inspector must render 'Unavailable' when broker capital value is missing"
     );
     assert!(
@@ -304,7 +307,9 @@ fn test_defect_9_top_status_card_truncation_fixes() {
         "EC2 badge icon must use 8px font-size to prevent clipping inside circle"
     );
     assert!(
-        src.contains("sub-text: (root.gateway.rtt != \"\" ? (\"RTT: \" + root.gateway.rtt) : \"RTT: N/A\")"),
+        src.contains(
+            "sub-text: (root.gateway.rtt != \"\" ? (\"RTT: \" + root.gateway.rtt) : \"RTT: N/A\")"
+        ),
         "EC2 status card sub-text must prioritize RTT before HB"
     );
     assert!(

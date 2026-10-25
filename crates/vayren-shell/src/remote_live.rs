@@ -1049,7 +1049,9 @@ pub fn apply_role(state: &mut LiveState, role: &str) {
     state.action_note = if state.remote_commands_allowed {
         None
     } else {
-        Some("read-only credential — START/STOP execution controls are disabled on this link".into())
+        Some(
+            "read-only credential — START/STOP execution controls are disabled on this link".into(),
+        )
     };
 }
 
@@ -2225,18 +2227,18 @@ mod tests {
         let mut state = init_remote_state();
 
         // 1. Snapshot with as_of timestamp is forwarded into domain state
-        sections.as_object_mut().unwrap().insert(
-            "as_of".to_string(),
-            json!("2026-10-23T15:30:00+00:00"),
-        );
+        sections
+            .as_object_mut()
+            .unwrap()
+            .insert("as_of".to_string(), json!("2026-10-23T15:30:00+00:00"));
         apply_remote_sections(&mut state, &sections, false);
         assert_eq!(state.snapshot_time, "2026-10-23T15:30:00+00:00");
 
         // 2. Subsequent snapshot with updated as_of refreshes snapshot_time
-        sections.as_object_mut().unwrap().insert(
-            "as_of".to_string(),
-            json!("2026-10-23T15:35:00+00:00"),
-        );
+        sections
+            .as_object_mut()
+            .unwrap()
+            .insert("as_of".to_string(), json!("2026-10-23T15:35:00+00:00"));
         apply_remote_sections(&mut state, &sections, false);
         assert_eq!(state.snapshot_time, "2026-10-23T15:35:00+00:00");
 
@@ -2246,10 +2248,10 @@ mod tests {
         assert_eq!(state.snapshot_time, "2026-10-23T15:35:00+00:00");
 
         // 4. Snapshot with empty as_of does not overwrite
-        sections.as_object_mut().unwrap().insert(
-            "as_of".to_string(),
-            json!("   "),
-        );
+        sections
+            .as_object_mut()
+            .unwrap()
+            .insert("as_of".to_string(), json!("   "));
         apply_remote_sections(&mut state, &sections, false);
         assert_eq!(state.snapshot_time, "2026-10-23T15:35:00+00:00");
     }

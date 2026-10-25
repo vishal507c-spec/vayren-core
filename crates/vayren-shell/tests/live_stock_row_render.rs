@@ -110,7 +110,7 @@ fn live_stock_row_renders_twenty_two_chips_and_exchange() {
     assert_eq!(chips[0], "NSE:ABB");
     assert_eq!(chips[21], "NSE:HEROMOTOCO");
     assert_eq!(ui.get_live_setup().universe_exchange, "NSE");
-    assert_eq!(ui.get_live_strategy_selected(), 0);
+    assert_eq!(ui.get_live_strategy_selected(), 1);
 
     let bar = ui.get_live_bar();
     assert_eq!(bar.capital_broker_name, "FYERS");
@@ -167,7 +167,7 @@ fn live_stock_row_renders_twenty_two_chips_and_exchange() {
 
     let empty_chips = live_chips(&ui);
     assert!(empty_chips.is_empty());
-    assert_eq!(ui.get_live_strategy_selected(), 1);
+    assert_eq!(ui.get_live_strategy_selected(), 2);
 
     ui.window().request_redraw();
     {

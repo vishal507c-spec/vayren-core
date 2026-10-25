@@ -233,7 +233,7 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     assert!(neg > px / 12000, "running: halt control missing ({neg})");
 
     // â”€â”€ HALTED state: the semantic red presence strictly grows (quiet
-    
+
     // â”€â”€ collapse tier: inspector closed vs open both render, and the
     //    frame actually recomposes (different pixel split) â”€â”€
     let mut collapsed = shell::demo_live_state();

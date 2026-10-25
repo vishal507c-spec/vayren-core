@@ -1171,7 +1171,6 @@ impl LiveState {
         ) && self.pending_action.as_deref() != Some("stop")
     }
 
-
     // ── actions (validate centrally; Slint only reports intent) ──────────
 
     /// Drain the next host action intent (JSON), if one was accepted.
@@ -1538,7 +1537,6 @@ impl LiveState {
         self.session = SessionStatus::Stopping;
         self.action_note = Some("stop requested — halting ticks".into());
     }
-
 
     pub fn set_event_category(&mut self, kind: &str) {
         self.event_category = kind.to_string();
@@ -3464,7 +3462,9 @@ pub fn format_snapshot_time(iso: &str) -> String {
     } else {
         let parts: Vec<&str> = trimmed.split(':').collect();
         if parts.len() == 3
-            && parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_digit()))
+            && parts
+                .iter()
+                .all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_digit()))
         {
             let hh: u32 = parts[0].parse().unwrap_or(99);
             let mm: u32 = parts[1].parse().unwrap_or(99);
@@ -5083,12 +5083,43 @@ pub fn project(state: &LiveState) -> LiveView {
     let snap_time = format_snapshot_time(&state.snapshot_time);
 
     let footer = FooterView {
-        broker: if broker_name.is_empty() || state.broker.status.is_empty() { "NOT CONFIGURED".into() } else { format!("{} ({})", broker_name, state.broker.status) },
-        websocket: if ws.status.is_empty() { "DISCONNECTED".into() } else if ws.latency.is_empty() || ws.latency == "—" { ws.status.clone() } else { format!("{} ({})", ws.status, ws.latency) },
-        market_data: if md.status.is_empty() { "NO DATA".into() } else if md.freshness.is_empty() || md.freshness == "—" { md.status.clone() } else { format!("{} ({})", md.status, md.freshness) },
-        strategy: if strategy_label.is_empty() || strategy_label == "None Selected" || strategy_label == "None" { "NONE".into() } else { format!("{} ({})", strategy_label, active_strat.status) },
-        risk: if risk_label.is_empty() { "INERT".into() } else { risk_label },
-        reconciliation: if state.reconciliation.status.is_empty() { "NOT CONFIGURED".into() } else { state.reconciliation.status.clone() },
+        broker: if broker_name.is_empty() || state.broker.status.is_empty() {
+            "NOT CONFIGURED".into()
+        } else {
+            format!("{} ({})", broker_name, state.broker.status)
+        },
+        websocket: if ws.status.is_empty() {
+            "DISCONNECTED".into()
+        } else if ws.latency.is_empty() || ws.latency == "—" {
+            ws.status.clone()
+        } else {
+            format!("{} ({})", ws.status, ws.latency)
+        },
+        market_data: if md.status.is_empty() {
+            "NO DATA".into()
+        } else if md.freshness.is_empty() || md.freshness == "—" {
+            md.status.clone()
+        } else {
+            format!("{} ({})", md.status, md.freshness)
+        },
+        strategy: if strategy_label.is_empty()
+            || strategy_label == "None Selected"
+            || strategy_label == "None"
+        {
+            "NONE".into()
+        } else {
+            format!("{} ({})", strategy_label, active_strat.status)
+        },
+        risk: if risk_label.is_empty() {
+            "INERT".into()
+        } else {
+            risk_label
+        },
+        reconciliation: if state.reconciliation.status.is_empty() {
+            "NOT CONFIGURED".into()
+        } else {
+            state.reconciliation.status.clone()
+        },
         clock,
         snapshot_time: snap_time,
     };
@@ -5360,7 +5391,6 @@ mod tests {
         assert!(!st.live_confirmed);
     }
 
-
     #[test]
     fn mode_change_blocked_while_running() {
         let mut st = configured(LiveState::default());
@@ -5409,7 +5439,6 @@ mod tests {
         st.set_quantity("1,250.00");
         assert_eq!(st.quantity, 1250.0);
     }
-
 
     #[test]
     fn multi_position_book_never_prints_flat() {
@@ -6317,7 +6346,6 @@ mod tests {
         assert!(st.pending_action.is_none());
         assert!(st.start_clickable(), "STOPPED after a stop may start again");
     }
-
 
     #[test]
     fn start_without_a_backend_stays_inert_and_says_so() {
@@ -8054,7 +8082,10 @@ mod tests {
 
         // 10:00:00 UTC = 15:30:00 IST
         let time_10utc = std::time::UNIX_EPOCH + std::time::Duration::from_secs(36000);
-        assert_eq!(format_ist_clock_from_system_time(time_10utc), "15:30:00 IST");
+        assert_eq!(
+            format_ist_clock_from_system_time(time_10utc),
+            "15:30:00 IST"
+        );
 
         // Real clock format
         let clk = current_ist_clock();
@@ -8079,10 +8110,7 @@ mod tests {
         );
 
         // 4. Valid ISO timestamp with UTC Z offset (+5:30)
-        assert_eq!(
-            format_snapshot_time("2026-10-18T03:57:15Z"),
-            "09:27:15 IST"
-        );
+        assert_eq!(format_snapshot_time("2026-10-18T03:57:15Z"), "09:27:15 IST");
 
         // 5. Bare HH:MM:SS format
         assert_eq!(format_snapshot_time("12:14:25"), "12:14:25 IST");

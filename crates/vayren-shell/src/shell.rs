@@ -16,6 +16,7 @@ use crate::portfolio::{self, PortfolioState};
 use crate::research_state::{self, ResearchState};
 use crate::view_model::{BrokerPanel, CapabilityStatus, Environment};
 use crate::viewport::ChartViewportZoom;
+pub use crate::ShellScreen;
 use crate::{
     AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
@@ -31,7 +32,6 @@ use crate::{
     ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup, ResearchMetric,
     ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
 };
-pub use crate::ShellScreen;
 use slint::ComponentHandle;
 #[cfg(test)]
 use slint::Model;
@@ -3403,10 +3403,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
     combo_names.extend(view.setup.strategy_names.clone());
     ui.set_live_strategy_names(
         Rc::new(slint::VecModel::from(
-            combo_names
-                .into_iter()
-                .map(<_>::into)
-                .collect::<Vec<_>>(),
+            combo_names.into_iter().map(<_>::into).collect::<Vec<_>>(),
         ))
         .into(),
     );
