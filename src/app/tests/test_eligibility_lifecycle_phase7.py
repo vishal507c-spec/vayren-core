@@ -414,14 +414,17 @@ def test_wiring_flag_roundtrip_and_persist(dirs: tuple[str, str]) -> None:
 
 
 def test_wiring_armed_mirroring(dirs: tuple[str, str]) -> None:
-    assert _service(dirs).armed is False
-    headless._live_action(dirs[0], dirs[1], {"action": "arm"})
-    assert _service(dirs).armed is True
+    # Consent ceremony (b90a68d): arming became operator LIVE consent. The
+    # consent must mirror the action lifecycle: set by confirm_live, voided
+    # by a finished run (stop) and by any setup edit.
+    assert _service(dirs).is_live_confirmed() is False
+    headless._live_action(dirs[0], dirs[1], {"action": "confirm_live"})
+    assert _service(dirs).is_live_confirmed() is True
     headless._live_action(dirs[0], dirs[1], {"action": "stop"})
-    assert _service(dirs).armed is False
-    headless._live_action(dirs[0], dirs[1], {"action": "arm"})
+    assert _service(dirs).is_live_confirmed() is False
+    headless._live_action(dirs[0], dirs[1], {"action": "confirm_live"})
     headless._live_action(dirs[0], dirs[1], {"action": "setup", "quantity": 5.0})
-    assert _service(dirs).armed is False
+    assert _service(dirs).is_live_confirmed() is False
 
 
 def test_wiring_headless_eligibility_action(dirs: tuple[str, str]) -> None:
