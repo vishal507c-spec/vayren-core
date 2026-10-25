@@ -134,6 +134,20 @@ fn test_footer_status_strip_rendered() {
     );
 }
 #[test]
+fn test_inspector_scrolls_and_short_boards_keep_the_footer() {
+    let src = include_str!("../ui/live.slint");
+    assert!(
+        src.contains("viewport-height: Math.max(self.height, inspector-body.preferred-height);"),
+        "Inspector cards must keep their natural height inside a scrollable dock"
+    );
+    assert!(
+        src.contains("min-height: root.watchlist-min-h;")
+            && src.contains("min-height: root.blotter-min-h;"),
+        "Short viewports must compress the stacked boards so the footer stays visible"
+    );
+}
+
+#[test]
 fn test_broker_label_consistent_between_top_card_and_inspector() {
     let src = include_str!("../ui/live.slint");
 

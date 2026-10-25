@@ -7,7 +7,13 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (ci-green-gate-fixes-20261025):** ALL CI GATES GREEN — RESOLVED PRE-EXISTING GATE ISSUES ACROSS RUST, TESTS, AND REPO GRAPH —
+**Latest update (live-ui-polish-pass-20261025):** LIVE UI POLISH PASS (visual-only; no content/features added or removed) —
+- **Inspector overflow fixed:** the docked inspector now scrolls at natural card height (`viewport-height: Math.max(self.height, inspector-body.preferred-height)`), so the Active Strategy card no longer clips `Signals generated` / `Orders` / `Universe`, the readiness tail is reachable, and Broker Account + `CONFIGURE BROKER` can no longer paint over the footer at 1920/1600/1366/1024.
+- **Short-viewport footer restored:** the stacked boards compress by window height (`watchlist-min-h` 150/190/220px, `blotter-min-h` 120/160/200px at `<640 / <720 / ≥720`), so the footer clock/snapshot strip stays on screen at 1024x640 and 1024x560 (it was pushed below the viewport before).
+- **Chrome polish:** the LIVE execution-mode pill is compact (84px, was a mostly-empty 168px red slab); Broker Capital card radius aligns with the other top-bar cards (8px).
+- **Verification:** `cargo test -p vayren-shell` green (132 tests; new `footer_strip_stays_on_screen_at_the_min_window` pixel regression + `test_inspector_scrolls_and_short_boards_keep_the_footer`); `cargo fmt -p vayren-shell -- --check` clean. Snapshots inspected at 1920x1080, 1600x900, 1366x768, 1024x640, 1024x560, 900x700.
+
+**Previous update (ci-green-gate-fixes-20261025):** ALL CI GATES GREEN — RESOLVED PRE-EXISTING GATE ISSUES ACROSS RUST, TESTS, AND REPO GRAPH —
 - **Test Alignment (`live_stock_row_render.rs` & `live_watchlist_from_saved_universe.rs`):** Updated ComboBox index assertions (and strategy row counts) to match the `"— Select Strategy —"` placeholder at index 0. Strategy 0 maps to UI index 1, and Strategy 1 maps to UI index 2.
 - **Rust Formatting:** Ran `cargo fmt --all` across the workspace; `cargo fmt --check` now passes 100% cleanly.
 - **Repo Graph Re-index:** Rebuilt `docs/repo_graph.json` artifact via `python tools/repo_graph.py --build`; `python tools/validate_repo_graph.py` passes with 0 unresolved entities.

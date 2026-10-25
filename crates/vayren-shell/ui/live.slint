@@ -346,7 +346,7 @@ export global LiveTiers {
     // Width each command-bar region needs to render un-elided: one status
     // card, the LIVE mode indicator and the START/STOP group.
     public pure function bar-card-width() -> length { return 150px; }
-    public pure function bar-mode-width() -> length { return 168px; }
+    public pure function bar-mode-width() -> length { return 84px; }
     public pure function bar-transport-width() -> length { return 264px; }
     public pure function bar-strategy-width() -> length { return 170px; }
     public pure function bar-capital-width() -> length { return 195px; }
@@ -512,7 +512,7 @@ component LiveBrokerCapitalCard inherits Rectangle {
     callback refresh-requested();
 
     background: VayrenPalette.live-panel;
-    border-radius: 6px;
+    border-radius: 8px;
     border-width: 1px;
     border-color: root.tone == 1 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
     min-width: 160px;
@@ -1160,6 +1160,10 @@ export component LiveScreen inherits Rectangle {
     // model and no keystroke is rewritten mid-edit.
     property <string> event-filter-text: "";
     property <bool> is-narrow-bar: root.width < 1320px;
+    // Short windows compress the two stacked boards so the footer status
+    // strip (clock / snapshot age) always stays on screen.
+    property <length> watchlist-min-h: root.height < 640px ? 150px : (root.height < 720px ? 190px : 220px);
+    property <length> blotter-min-h: root.height < 640px ? 120px : (root.height < 720px ? 160px : 200px);
 
     init => {
         Palette.color-scheme = ColorScheme.dark;
@@ -1721,7 +1725,7 @@ export component LiveScreen inherits Rectangle {
                     // execution buckets and never re-order the data.
                     Rectangle {
                         vertical-stretch: 3;
-                        min-height: 220px;
+                        min-height: root.watchlist-min-h;
                         min-width: 0px;
                         width: 100%;
                         clip: true;
@@ -2004,7 +2008,7 @@ export component LiveScreen inherits Rectangle {
                     // TABBED BLOTTER & EVENTS STREAM PANEL
                     Rectangle {
                         vertical-stretch: 2;
-                        min-height: 200px;
+                        min-height: root.blotter-min-h;
                         min-width: 0px;
                         width: 100%;
                         clip: true;
@@ -2376,8 +2380,14 @@ export component LiveScreen inherits Rectangle {
                     width: 100%;
                     height: 100%;
                     viewport-width: self.width;
+                    // The cards keep their natural height and the column
+                    // scrolls inside its own dock. Without this the viewport
+                    // collapses to the dock height, the cards squash to their
+                    // min-heights and the tail (readiness / broker actions)
+                    // paints over the footer strip.
+                    viewport-height: Math.max(self.height, inspector-body.preferred-height);
 
-                    VerticalLayout {
+                    inspector-body := VerticalLayout {
                         width: 100%;
                         padding: 10px;
                         padding-left: 4px;

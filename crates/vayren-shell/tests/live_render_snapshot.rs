@@ -340,6 +340,58 @@ fn live_chrome_is_never_cut_at_the_viewport_edge() {
     println!("edge-cut probes written to {}", out_dir().display());
 }
 
+/// The footer status strip (clock / snapshot / venue facts) must stay on the
+/// bottom of the window at the smallest supported desktop size. The old
+/// fixed board min-heights pushed the strip below the viewport, so the
+/// operator lost the clock and the connection summary exactly when the
+/// window was small.
+#[test]
+fn footer_strip_stays_on_screen_at_the_min_window() {
+    let win = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(MiniPlatform {
+        window: win.clone(),
+    }))
+    .expect("software platform installs once per test binary");
+
+    let ui = vayren_shell::AppWindow::new().unwrap();
+    shell::apply(&ui, &shell::demo_snapshot());
+    shell::apply_live(&ui, &idle_populated_state());
+    shell::select(&ui, ShellScreen::Live);
+
+    let width = 1024usize;
+    let height = 640usize;
+    let buffer = render_frame(&ui, &win, "footer_1024x640", width as u32, height as u32);
+    let rows = buffer.as_slice();
+
+    // The footer is the only full-width live-panel-deep band at the bottom.
+    let mut footer_rows = 0usize;
+    let mut footer_text = 0usize;
+    for y in (height - 26)..height {
+        let band = &rows[y * width..(y + 1) * width];
+        let deep = band
+            .iter()
+            .filter(|p| p.r.abs_diff(10) <= 2 && p.g.abs_diff(15) <= 2 && p.b.abs_diff(23) <= 2)
+            .count();
+        if deep > width / 2 {
+            footer_rows += 1;
+        }
+        footer_text += band
+            .iter()
+            .filter(|p| {
+                p.r.abs_diff(139) <= 10 && p.g.abs_diff(152) <= 10 && p.b.abs_diff(167) <= 10
+            })
+            .count();
+    }
+    assert!(
+        footer_rows >= 18,
+        "footer strip must occupy the bottom band ({footer_rows} rows)"
+    );
+    assert!(
+        footer_text > 100,
+        "footer status text must rasterize ({footer_text} glyph pixels)"
+    );
+}
+
 /// The adaptive regions must follow their tiers, so a narrow window never
 /// renders the wide form it cannot fit. Verified on the real pixels: the
 /// compact blotter tab row and the scrollable chip strip both appear, and the
