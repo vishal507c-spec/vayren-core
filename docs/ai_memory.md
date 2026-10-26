@@ -7,7 +7,14 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (eod-session-complete-20261026):** END-OF-DAY COMPLETE RECONCILIATION & LIVE AUDIT VERIFIED —
+**Latest update (live-ui-polish-2-alignment-20261026):** LIVE UI POLISH PASS 2 (visual-only; numeric-column alignment, hover, stat centering) —
+- **Numeric columns right-aligned everywhere in the blotter + watchlist** (headers AND rows; column widths unchanged): watchlist LTP/CHG%/REF HI/REF LO/BREAK LOW/ENTRY/STOP/RISK-SH/QTY/MAX RISK/PLANNED/UTIL/P&L (13 columns); Positions QTY/ENTRY/LTP/P&L/P&L %; Orders + Fills QTY/PRICE. Text columns (SYMBOL/STATUS/ELIG/SIGNAL/ORDER/POSITION/DETAIL/TIME/SIDE) stay left-aligned. Digits now line up at their right edge instead of drifting with text-left.
+- **Clear-events button hover feedback:** the blotter-tab-bar Clear chip now reacts like table rows surface/hairline flip (`clear-touch.has-hover` bg `hover` + border `live-line-soft`, text brightens) — before it had only a pointer cursor and stayed visually inert.
+- **Daily P&L stat cells centered:** `stat.label` now centers over `stat.value` inside each stat cell (label narrower than the money reads as one fact, not two columns).
+- **Scoped out deliberately:** footer stays a quiet strip (pass-1 lesson — `footer_strip_stays_on_screen_at_the_min_window` counts deep-background dominance, no new dense text); TIME column stays left (timestamp convention); widths/spacings unchanged so no layout reflow is possible.
+- **Verification:** file kept LF (0 CRLF); `cargo check -p vayren-shell` clean; 5 live UI suites green (defects 23/23 string pins intact since no pinned header text edited — STATUS 70px/DETAIL untouched), snapshot pixel buckets 8/8, `cargo fmt --check` clean, full `cargo test -p vayren-shell` green, `impact --run` L2 PASSED (62s). Changes uncommitted (local only).
+
+**Previous update (eod-session-complete-20261026):** END-OF-DAY COMPLETE RECONCILIATION & LIVE AUDIT VERIFIED —
 - **Live Trading Session Summary (Monday, 26 October 2026):**
   - **Trade 1 (Entry):** `SELL` 1 share `NSE:ZEEL-EQ` (Intraday) at `₹65.72` (Order ID: `26102600117170`, 09:59:50 IST).
   - **Trade 2 (Exit / Square-off):** `BUY` 1 share `NSE:ZEEL-EQ` (Intraday) at `₹64.75` (Order ID: `26102600288530`, 12:14:12 IST).
