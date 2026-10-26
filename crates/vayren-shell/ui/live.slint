@@ -1385,18 +1385,20 @@ export component LiveScreen inherits Rectangle {
 
                 // ── Group 3: Execution Controls & Clock ──
                 VButton {
-                    width: root.setup.pending-start ? 104px : 82px;
+                    width: 104px;
                     height: 34px;
                     label: root.setup.pending-start ? "⏳ STARTING…" : "▶ START";
+                    busy: root.setup.pending-start;
                     variant: 0;
                     enabled: root.setup.start-clickable;
                     clicked => { root.start-requested(); }
                 }
 
                 VButton {
-                    width: root.setup.pending-stop ? 100px : 72px;
+                    width: 100px;
                     height: 34px;
                     label: root.setup.pending-stop ? "⏳ STOPPING…" : "■ STOP";
+                    busy: root.setup.pending-stop;
                     variant: 3;
                     enabled: root.setup.can-stop && !root.setup.pending-stop;
                     clicked => { root.stop-requested(); }
@@ -1543,18 +1545,20 @@ export component LiveScreen inherits Rectangle {
                     Rectangle { horizontal-stretch: 1; background: transparent; }
 
                     VButton {
-                        width: root.setup.pending-start ? 104px : 82px;
+                        width: 104px;
                         height: 34px;
                         label: root.setup.pending-start ? "⏳ STARTING…" : "▶ START";
+                        busy: root.setup.pending-start;
                         variant: 0;
                         enabled: root.setup.start-clickable;
                         clicked => { root.start-requested(); }
                     }
 
                     VButton {
-                        width: root.setup.pending-stop ? 100px : 72px;
+                        width: 100px;
                         height: 34px;
                         label: root.setup.pending-stop ? "⏳ STOPPING…" : "■ STOP";
+                        busy: root.setup.pending-stop;
                         variant: 3;
                         enabled: root.setup.can-stop && !root.setup.pending-stop;
                         clicked => { root.stop-requested(); }

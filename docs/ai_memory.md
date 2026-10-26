@@ -7,7 +7,26 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (release-v1.37.0-20261026):** RELEASE v1.37.0 — LIVE MARKET READINESS GATE HARDENING, ZEEL LIVE ORDER EXECUTION PASS, & EOD RECONCILIATION —
+**Latest update (live-ui-start-stop-ultra-smooth-20261026):** ULTRA-SMOOTH ADVANCED START & STOP UI MICRO-INTERACTIONS & JITTER-FREE CONTROLS —
+- **Problems Fixed:**
+  - Jittery Layout Reflow: Clicking `START` previously caused dynamic width expansion (`82px` -> `104px`), violently shoving the `STOP` button and status elements 22px to the right.
+  - Abrupt Color Snapping: Clicking snapped instantaneously to dark background `#0D1520` with zero feedback.
+  - Absence of Busy/Loading Pulse: `STARTING…` and `STOPPING…` showed static text with no live pulsing or breathing feedback.
+- **Advanced Technology & Micro-Interactions Implemented:**
+  - **Fixed Ergonomic Geometry:** Standardized `START` (104px) and `STOP` (100px) buttons in both wide and narrow bars. Absolutely **zero layout reflow, jumping, or jitter** on single click.
+  - **Apple/Linear-Grade Haptic Tactile Depress:** Added dynamic 1px physical press micro-motion (`padding-top: (ta.pressed && root.enabled) ? 1px : 0px;` with 50ms ease-out animation).
+  - **Fluid 700ms Ease-in-Out Breathing Pulse:** Added internal timer (`pulse-timer: 700ms`) that activates only during `busy` state (`pending-start` or `pending-stop`), softly pulsing between primary/danger base and hover tints.
+  - **Smooth 120ms Color/Border Transitions:** Transition between idle, hover, pressed, and disabled states is butter-smooth.
+  - **Safe Operator Debouncing:** When `busy`, `TouchArea` automatically disables further clicks and resets cursor to `default` to prevent accidental double-execution during live trading.
+- **Verification:**
+  - `cargo check -p vayren-shell`: PASS.
+  - `cargo test -p vayren-shell --test live_ui_defects_regression`: 23/23 PASSED.
+  - `cargo test -p vayren-shell --test live_render_snapshot`: 8/8 PASSED.
+  - `cargo fmt --all -- --check`: PASS.
+  - `python tools/validate_language_ownership.py`: PASS (430 files checked).
+  - Clean Unix LF endings preserved across all Slint surfaces.
+
+**Previous update (release-v1.37.0-20261026):** RELEASE v1.37.0 — LIVE MARKET READINESS GATE HARDENING, ZEEL LIVE ORDER EXECUTION PASS, & EOD RECONCILIATION —
 - **Release Version:** `v1.37.0` (`pyproject.toml` bumped from `1.36.0`).
 - **Live Market Readiness Hardening:**
   - Hardened `Market Data Streaming` gate in `src/app/services/live_trading_service.py`: stored candles alone (`22/22`) can NEVER satisfy live streaming readiness without an active, healthy broker live feed.
@@ -28,6 +47,7 @@
 - **Daily P&L stat cells centered:** `stat.label` now centers over `stat.value` inside each stat cell (label narrower than the money reads as one fact, not two columns).
 - **Scoped out deliberately:** footer stays a quiet strip (pass-1 lesson — `footer_strip_stays_on_screen_at_the_min_window` counts deep-background dominance, no new dense text); TIME column stays left (timestamp convention); widths/spacings unchanged so no layout reflow is possible.
 - **Verification:** file kept LF (0 CRLF); `cargo check -p vayren-shell` clean; 5 live UI suites green (defects 23/23 string pins intact since no pinned header text edited — STATUS 70px/DETAIL untouched), snapshot pixel buckets 8/8, `cargo fmt --check` clean, full `cargo test -p vayren-shell` green, `impact --run` L2 PASSED (62s). Changes uncommitted (local only).
+- **Production package rebuilt with pass-2:** `python tools/build_rust.py --package` green (vayren-shell.exe 41.3MB @ 22:39, vayren_live_view.dll @ 22:25, core @ 22:00; desktop shortcut synced). Note: first attempt failed on `Access is denied` because the operator's running shell locked the exe — app must be closed before repackaging.
 
 **Previous update (eod-session-complete-20261026):** END-OF-DAY COMPLETE RECONCILIATION & LIVE AUDIT VERIFIED —
 - **Live Trading Session Summary (Monday, 26 October 2026):**

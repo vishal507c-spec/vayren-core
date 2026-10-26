@@ -17,18 +17,30 @@ export component VButton inherits Rectangle {
     // 3 danger (armed stop — semantic, never a second run affordance).
     in property <int> variant: 1;
     in property <bool> enabled: true;
+    in property <bool> busy: false;
     callback clicked();
+
+    property <bool> pulse: false;
+    pulse-timer := Timer {
+        interval: 700ms;
+        running: root.busy;
+        triggered() => { root.pulse = !root.pulse; }
+    }
 
     function fill() -> color {
         return !root.enabled ? VayrenPalette.hover
-            : ta.pressed ? VayrenPalette.pressed
+            : root.busy ? (root.variant == 0 ? (root.pulse ? VayrenPalette.accent-hover : VayrenPalette.accent) : root.variant == 3 ? (root.pulse ? VayrenPalette.neg-hover : VayrenPalette.neg) : VayrenPalette.hover)
+            : ta.pressed ? (root.variant == 0 ? VayrenPalette.accent-pressed : root.variant == 3 ? VayrenPalette.neg-pressed : VayrenPalette.pressed)
+            : ta.has-hover ? (root.variant == 0 ? VayrenPalette.accent-hover : root.variant == 3 ? VayrenPalette.neg-hover : VayrenPalette.hover)
             : root.variant == 0 ? VayrenPalette.accent
             : root.variant == 3 ? VayrenPalette.neg
-            : ta.has-hover ? VayrenPalette.hover
             : transparent;
     }
     function frame() -> color {
         return !root.enabled ? VayrenPalette.hairline
+            : root.busy ? (root.variant == 0 ? VayrenPalette.accent-hover : root.variant == 3 ? VayrenPalette.neg-hover : VayrenPalette.hairline)
+            : ta.pressed ? (root.variant == 0 ? VayrenPalette.accent-pressed : root.variant == 3 ? VayrenPalette.neg-pressed : VayrenPalette.hairline)
+            : ta.has-hover ? (root.variant == 0 ? VayrenPalette.accent-hover : root.variant == 1 ? VayrenPalette.accent-hover : root.variant == 3 ? VayrenPalette.neg-hover : VayrenPalette.hairline-soft)
             : root.variant == 0 ? VayrenPalette.accent
             : root.variant == 1 ? VayrenPalette.accent
             : root.variant == 3 ? VayrenPalette.neg
@@ -37,9 +49,9 @@ export component VButton inherits Rectangle {
     function ink() -> color {
         return !root.enabled ? VayrenPalette.faint
             : root.variant == 0 ? VayrenPalette.accent-text
-            : root.variant == 1 ? VayrenPalette.accent
-            : root.variant == 3 ? (ta.has-hover ? VayrenPalette.text : VayrenPalette.accent-text)
-            : ta.has-hover ? VayrenPalette.text : VayrenPalette.muted;
+            : root.variant == 1 ? (ta.has-hover ? VayrenPalette.text-bright : VayrenPalette.accent)
+            : root.variant == 3 ? (ta.has-hover ? VayrenPalette.text-bright : VayrenPalette.accent-text)
+            : ta.has-hover ? VayrenPalette.text-bright : VayrenPalette.muted;
     }
 
     height: VayrenDesign.h-context;
@@ -48,12 +60,18 @@ export component VButton inherits Rectangle {
     border-width: 1px;
     border-color: root.frame();
 
+    animate background { duration: root.busy ? 700ms : 120ms; easing: root.busy ? ease-in-out : ease-out; }
+    animate border-color { duration: root.busy ? 700ms : 120ms; easing: root.busy ? ease-in-out : ease-out; }
+
     ta := TouchArea {
-        enabled: root.enabled;
+        enabled: root.enabled && !root.busy;
+        mouse-cursor: (root.enabled && !root.busy) ? pointer : default;
         clicked => { root.clicked(); }
     }
     VerticalLayout {
         alignment: center;
+        padding-top: (ta.pressed && root.enabled) ? 1px : 0px;
+        animate padding-top { duration: 50ms; easing: ease-out; }
         Text {
             text: root.label;
             color: root.ink();
@@ -61,6 +79,7 @@ export component VButton inherits Rectangle {
             font-weight: 700;
             horizontal-alignment: center;
             vertical-alignment: center;
+            animate color { duration: 120ms; easing: ease-out; }
         }
     }
 }
