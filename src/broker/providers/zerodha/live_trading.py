@@ -239,12 +239,16 @@ class ZerodhaTradingAdapter:
             raise BrokerError("client order id required", code="INVALID_ORDER")
         if client_order_id in self._seen_client_ids:
             return self._seen_client_ids[client_order_id]
-        adopted = self._find_by_tag(client_order_id)
+        # Terminal orders count too: a venue order with this tag already
+        # exists (often filled), so the only safe idempotent answer is to
+        # adopt its id — scanning pending-only would place a SECOND real
+        # order after a restart or a finished first attempt.
+        adopted = self._find_by_tag(client_order_id, terminal_ok=True)
         if adopted is not None:
             self._seen_client_ids[client_order_id] = adopted
             return adopted
         quantity = self._venue_quantity(plan)
-        order_type, price = self._venue_price(plan)
+        order_type, price, trigger = self._venue_price(plan)
         kite = self._kite_client()
         sym_str = str(plan.symbol).strip()
         exchange = self._exchange
@@ -257,20 +261,23 @@ class ZerodhaTradingAdapter:
             tradingsymbol = sym_str
         tradingsymbol = tradingsymbol.removesuffix("-EQ")
         try:
-            broker_id = kite.place_order(
-                variety=kite.VARIETY_REGULAR,
-                exchange=exchange,
-                tradingsymbol=tradingsymbol,
-                transaction_type=(
+            payload: dict[str, Any] = {
+                "variety": kite.VARIETY_REGULAR,
+                "exchange": exchange,
+                "tradingsymbol": tradingsymbol,
+                "transaction_type": (
                     kite.TRANSACTION_TYPE_BUY if plan.side == "BUY" else kite.TRANSACTION_TYPE_SELL
                 ),
-                quantity=quantity,
-                product=self._product,
-                order_type=order_type,
-                price=price,
-                validity=kite.VALIDITY_DAY,
-                tag=client_order_id,
-            )
+                "quantity": quantity,
+                "product": self._product,
+                "order_type": order_type,
+                "price": price,
+                "validity": kite.VALIDITY_DAY,
+                "tag": client_order_id,
+            }
+            if trigger is not None:
+                payload["trigger_price"] = trigger
+            broker_id = kite.place_order(**payload)
         except Exception as exc:
             resolved = self._resolve_unknown_tag(client_order_id, exc)
             if resolved is not None:
@@ -383,7 +390,10 @@ class ZerodhaTradingAdapter:
             return BrokerError(f"venue rejected order: {text}", code="REJECTED")
         if name in ("NetworkException",):
             self._last_error = "venue transport failure"
-            return BrokerError(f"venue transport failure: {text}", code="DISCONNECTED")
+            # `NETWORK` keeps the caller's UNKNOWN path armed: sent-but-
+            # unconfirmed must reconcile, never REJECT — a rejected local
+            # state hides a possibly-filled venue order.
+            return BrokerError(f"venue transport failure: {text}", code="NETWORK")
         if name in ("DataException",):
             self._last_error = ""
             return BrokerError(f"venue returned unreadable data: {text}", code="BAD_RESPONSE")
@@ -391,7 +401,11 @@ class ZerodhaTradingAdapter:
         return BrokerError(f"{fallback}: {text}", code="BROKER_ERROR")
 
     def _is_terminal_miss(self, exc: Exception) -> bool:
-        text = _redact(str(exc)).lower()
+        # Classification-only read of the raw text: nothing is emitted here
+        # (emitted messages stay redacted via `_mapped`), and a constant
+        # bullet string cannot reveal the venue's own terminal words
+        # ("order is complete", "cancelled", ...).
+        text = str(exc).lower()
         return any(
             token in text
             for token in ("complete", "cancelled", "rejected", "invalid order", "not found")
@@ -408,7 +422,14 @@ class ZerodhaTradingAdapter:
             raise BrokerError(f"venue needs whole units, got {quantity}", code="INVALID_ORDER")
         return int(float(quantity))
 
-    def _venue_price(self, plan: Any) -> tuple[Any, float | None]:
+    def _venue_price(self, plan: Any) -> tuple[Any, float | None, float | None]:
+        """Map the plan to a Kite (order_type, price, trigger_price).
+
+        The venue's protective stop NEEDS a trigger: an unprotected entry
+        (SL silently dropped as "unsupported") is the worst single failure
+        this adapter can cause, so the mapping is total for every type the
+        engine plans.
+        """
         kite = self._kite_client()
         order_type = str(getattr(plan, "order_type", "MARKET") or "MARKET").upper()
         if order_type == "LIMIT":
@@ -418,9 +439,30 @@ class ZerodhaTradingAdapter:
                 raise BrokerError("limit price unreadable", code="INVALID_ORDER") from None
             if price <= 0:
                 raise BrokerError("limit price must be positive", code="INVALID_ORDER")
-            return kite.ORDER_TYPE_LIMIT, price
+            return kite.ORDER_TYPE_LIMIT, price, None
         if order_type == "MARKET":
-            return kite.ORDER_TYPE_MARKET, None
+            return kite.ORDER_TYPE_MARKET, None, None
+        if order_type in ("STOP_MARKET", "SL-M", "SLM"):
+            try:
+                trigger = float(getattr(plan, "stop_price", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                raise BrokerError("stop price unreadable", code="INVALID_ORDER") from None
+            if trigger <= 0:
+                raise BrokerError(
+                    "stop-market needs a positive trigger price", code="INVALID_ORDER"
+                )
+            return kite.ORDER_TYPE_SLM, None, trigger
+        if order_type in ("STOP_LIMIT", "SL"):
+            try:
+                limit_price = float(getattr(plan, "limit_price", 0.0) or 0.0)
+                trigger = float(getattr(plan, "stop_price", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                raise BrokerError("stop-limit prices unreadable", code="INVALID_ORDER") from None
+            if trigger <= 0 or limit_price <= 0:
+                raise BrokerError(
+                    "stop-limit needs positive trigger and limit prices", code="INVALID_ORDER"
+                )
+            return kite.ORDER_TYPE_SL, limit_price, trigger
         raise BrokerError(f"unsupported order type: {order_type}", code="UNSUPPORTED")
 
     def _order_snapshot(self) -> list[dict[str, Any]]:
@@ -451,20 +493,46 @@ class ZerodhaTradingAdapter:
             )
         return normalized
 
-    def _find_by_tag(self, tag: str) -> str | None:
+    def _find_by_tag(self, tag: str, *, terminal_ok: bool = False) -> str | None:
+        """Venue order id for a client tag.
+
+        Default keeps the live-order semantics (pending only). The
+        idempotency adopt path passes ``terminal_ok``: a COMPLETED order
+        with the same tag already exists, so the caller must adopt its id
+        instead of placing a second real order.
+        """
+        best: str | None = None
         for order in self._order_snapshot():
-            if order["tag"] == tag and order["status"] not in _TERMINAL_STATUSES:
+            if order["tag"] != tag:
+                continue
+            if order["status"] not in _TERMINAL_STATUSES:
                 return order["order_id"]
-        return None
+            if terminal_ok and best is None:
+                best = order["order_id"]
+        return best
+
+    def _is_timeout_like(self, cause: Exception) -> bool:
+        """True when the exception may mean sent-but-unconfirmed.
+
+        Classification-only read of the raw text: nothing is emitted here
+        (messages stay redacted via `_mapped`), and a constant redacted
+        string can never reveal the venue's own "timed out" words.
+        """
+        name = type(cause).__name__
+        if name in ("NetworkException", "TimeoutError", "ReadTimeout", "ConnectTimeoutError"):
+            return True
+        if isinstance(cause, (TimeoutError, OSError)):
+            return True
+        lowered = str(cause).lower()
+        return "timeout" in lowered or "timed out" in lowered
 
     def _resolve_unknown_tag(self, tag: str, cause: Exception) -> str | None:
         """Timeout path: venue truth first. Returns the broker id when the
         order actually landed, else None (caller raises the mapped error)."""
-        name = type(cause).__name__
-        if name not in ("NetworkException",) and "timeout" not in _redact(str(cause)).lower():
+        if not self._is_timeout_like(cause):
             return None
         try:
-            found = self._find_by_tag(tag)
+            found = self._find_by_tag(tag, terminal_ok=True)
         except Exception:
             return None
         if found is not None:

@@ -194,12 +194,17 @@ impl RiskStatus {
         }
     }
     pub fn from_str(value: &str) -> Self {
-        match value {
+        // Fail closed: an unrecognised status word is NOT evidence of a
+        // healthy engine. Only explicit literals (backend-quoted, trimmed)
+        // may read green.
+        let trimmed = value.trim();
+        match trimmed {
+            "READY" => RiskStatus::Ready,
             "WARNING" => RiskStatus::Warning,
             "BLOCKED" => RiskStatus::Blocked,
             "HALTED" => RiskStatus::Halted,
             "NOT READY" | "NOT_READY" => RiskStatus::NotReady,
-            _ => RiskStatus::Ready,
+            _ => RiskStatus::NotReady,
         }
     }
 }
@@ -4375,18 +4380,22 @@ pub fn project(state: &LiveState) -> LiveView {
     };
 
     // ── Market Data facts view ──
+    // Missing/unknown feed status is NEVER green: an execution workstation
+    // painting "STREAMING" over an unreported or dead feed hides the one
+    // event that can strand a naked position.
+    let md_status = if state.market_data.status.is_empty() {
+        "NOT REPORTED".to_string()
+    } else {
+        state.market_data.status.clone()
+    };
     let md = MarketDataView {
-        status: if state.market_data.status.is_empty() {
-            "STREAMING".into()
-        } else {
-            state.market_data.status.clone()
-        },
-        tone: match state.market_data.status.as_str() {
+        tone: match md_status.as_str() {
             "STREAMING" => 1,
-            "STALE" => 2,
-            "NO DATA" | "STOPPED" => 3,
-            _ => 1,
+            "STALE" | "CONNECTING" | "NOT REPORTED" => 2,
+            "NO DATA" | "STOPPED" | "ERROR" | "FAILED" | "DISCONNECTED" => 3,
+            _ => 2,
         },
+        status: md_status,
         sub: format!("{} symbols", state.market_data.subscribed_symbols),
         last_tick: if state.market_data.last_tick_time.is_empty() {
             "—".into()

@@ -267,8 +267,11 @@ class LiveSession:
         self._sl_seq = 0
         self._sl_attention: set[str] = set()
         # Fill ids already folded (venue retransmissions must never double
-        # a position or an order's filled quantity).
-        self._seen_fills: set[tuple[str, float, float]] = set()
+        # a position or an order's filled quantity). The key carries the
+        # order's PRE-fill cumulative quantity and the venue timestamp, so
+        # two genuine same-size partial prints at the same price fold
+        # separately while a retransmitted message folds once.
+        self._seen_fills: set[tuple[str, float, float, float, str]] = set()
         # Per-strategy initialization failures (see register_strategy): a
         # failed strategy is excluded from ticking, never from reporting.
         self._init_blockers: dict[str, str] = {}
@@ -276,6 +279,11 @@ class LiveSession:
         self._processed_signals: set[tuple[str, int]] = set()
         self._seen_candle_stamps: dict[str, str] = {}
         self._last_reconcile_epoch: float = 0.0
+        # Last entry intent per symbol (drives stop-protection tracker keys).
+        self._entry_intents: dict[str, str] = {}
+        # Venue cash truth is adopted at most once per attached broker (see
+        # reconcile_now) so day PnL is never reset mid-session.
+        self._capital_reseed_done = False
         # Timeframe-aware candle-completeness health. The policy is installed
         # at start() once the timeframe is known; the normalizer's staleness
         # window comes from the Rust kernel, not a 60-second literal.
@@ -715,6 +723,7 @@ class LiveSession:
                 "SIGNAL_GENERATED",
                 strategy_id=signal.strategy_id,
                 signal_id=signal.signal_id,
+                side=str(getattr(signal, "side", "") or ""),
                 event_seq=signal.event_seq,
             )
             self._emit(
@@ -1140,7 +1149,8 @@ class LiveSession:
             kind, safe_reason = classify_exception(exc)
             if (
                 kind in ("TIMEOUT", "NETWORK", "RATE_LIMITED")
-                or getattr(exc, "code", "") in ("NETWORK_ERROR", "NETWORK", "TIMEOUT")
+                or getattr(exc, "code", "")
+                in ("NETWORK_ERROR", "NETWORK", "TIMEOUT", "DISCONNECTED")
                 or isinstance(exc, (TimeoutError, ConnectionError, OSError))
                 or any(
                     k in str(exc).lower()
@@ -1181,9 +1191,31 @@ class LiveSession:
         self._last_order_epoch = now_epoch
 
     def _apply_fill(self, tracked: BrokerOrder, fill: Fill) -> None:
-        # Venue retransmissions must never double a position: the same
-        # (order, qty, price) report folds exactly once.
-        fill_key = (fill.client_order_id, float(fill.fill_qty), float(fill.fill_price))
+        # Venue retransmissions must never double a position. Two guards:
+        # (1) the delta's implied cumulative can never exceed the order's
+        # own quantity — a frame that claims more than the order could hold
+        # is a replay of a stale delta (retransmissions re-compute against
+        # a venue PRE-state the engine has already advanced past), and
+        # (2) exact-message identity keyed with the order's pre-fill
+        # cumulative: two genuine same-size partial prints on one order
+        # carry different cumulatives, so a delta-only key (the old key)
+        # silently dropped legitimate fills.
+        order_quantity = float(tracked.quantity or 0.0)
+        implied_total = float(tracked.filled_qty or 0.0) + float(fill.fill_qty)
+        if fill.fill_qty < 0.0 or (order_quantity > 0.0 and implied_total > order_quantity + 1e-9):
+            self._journal.record(
+                "FILL_DUPLICATE_IGNORED",
+                client_order_id=fill.client_order_id,
+                reason="stale retransmission: implied total exceeds the order quantity",
+            )
+            return
+        fill_key = (
+            fill.client_order_id,
+            float(tracked.filled_qty or 0.0),
+            float(fill.fill_qty),
+            float(fill.fill_price),
+            str(fill.timestamp),
+        )
         if fill_key in self._seen_fills:
             self._journal.record("FILL_DUPLICATE_IGNORED", client_order_id=fill.client_order_id)
             return
@@ -1198,13 +1230,25 @@ class LiveSession:
                 updated.client_order_id, OrderState.FILLED, reason="fill"
             )
         position = self._ledger.apply_fill(fill)
-        self._sl_tracker.on_fill(
-            intent_id=tracked.intent_id,
-            symbol=fill.symbol,
-            side=tracked.side,
-            fill_price=fill.fill_price,
-            stop_price=None,
-        )
+        # The tracker record needs the strategy's OWN stop as soon as the
+        # entry exists: a later SL placement failure must surface as
+        # PROTECTION_FAILED in the safety snapshot (never a forever-CLEAN
+        # summary while a naked position sits at the venue).
+        entry_stop = getattr(self._sized_risk.get(tracked.intent_id), "stop_price", None)
+        if tracked.intent_id.startswith("sl:"):
+            # Protective-stop fills belong to the entry's record, not a new one.
+            entry_intent = self._entry_intents.get(fill.symbol, "")
+            if entry_intent:
+                self._sl_tracker.confirm_sl(entry_intent, str(fill.broker_order_id or "triggered"))
+        else:
+            self._entry_intents[fill.symbol] = tracked.intent_id
+            self._sl_tracker.on_fill(
+                intent_id=tracked.intent_id,
+                symbol=fill.symbol,
+                side=tracked.side,
+                fill_price=fill.fill_price,
+                stop_price=entry_stop if entry_stop and entry_stop > 0 else None,
+            )
         qty, side, entry = self._ledger.strategy_state_for(fill.symbol)
         if side is None:
             # Flat is global truth (covers protective-stop exits, whose
@@ -1328,6 +1372,10 @@ class LiveSession:
             "client_order_id": client_order_id,
             "broker_order_id": broker_id,
         }
+        entry_intent = self._entry_intents.get(symbol, "")
+        if entry_intent:
+            with suppress(Exception):
+                self._sl_tracker.confirm_sl(entry_intent, str(broker_id))
         self._journal.record(
             "SL_SENT",
             symbol=symbol,
@@ -1349,6 +1397,10 @@ class LiveSession:
             "broker_order_id": None,
         }
         self._sl_attention.add(symbol)
+        entry_intent = self._entry_intents.get(symbol, "")
+        if entry_intent:
+            with suppress(Exception):
+                self._sl_tracker.mark_protection_failed(entry_intent, reason=reason)
         self._journal.record(
             "SL_FAILED", symbol=symbol, client_order_id=client_order_id, reason=reason
         )
@@ -1548,6 +1600,10 @@ class LiveSession:
             self._journal.record("SL_CLEAR_DEFERRED", symbol=symbol, reason=reason)
             return
         self._stop_protection.pop(symbol, None)
+        entry_intent = self._entry_intents.pop(symbol, None)
+        if entry_intent:
+            with suppress(Exception):
+                self._sl_tracker.close_position(entry_intent)
         self._sl_attention.discard(symbol)
         self._journal.record("SL_CLEARED", symbol=symbol, reason=reason)
 
@@ -2135,6 +2191,12 @@ class LiveSession:
             tuple(o.client_order_id for o in self._engine.open_orders()), tuple(broker_open)
         )
         self._reconciliation = ReconciliationState(positions=positions, orders=orders)
+        # Adopt the venue's own cash truth exactly once per broker (flat
+        # books only): the constructed ₹10,00,000 ledger basis otherwise
+        # feeds the risk kernel a fabricated capital the venue never had.
+        if not self._capital_reseed_done:
+            with suppress(Exception):
+                self._reseed_ledger_capital()
         verdict = self._reconciliation.verdict()
         self._journal.record(
             "RECONCILED",
@@ -2157,3 +2219,43 @@ class LiveSession:
                     continue
                 self._place_protective_stop(position.symbol)
         return self._reconciliation
+
+    def _reseed_ledger_capital(self) -> None:
+        """Adopt the venue's cash as the ledger basis (LIVE, flat, once).
+
+        Uses the adapter's ``funds()`` when present. Called only from
+        ``reconcile_now`` (bounded cadence) and only when the ledger book is
+        fully flat, so the venue number can never inflate a margined book.
+        """
+        if self._mode != ExecutionMode.LIVE or self._capital_reseed_done:
+            return
+        if not all(p.flat for p in self._ledger.all_positions()):
+            # Wait for a flat reading — do not burn the one-shot on a
+            # margined number, and do not let it drift into a mismatch.
+            return
+        funds_fn = getattr(self._broker, "funds", None)
+        if not callable(funds_fn):
+            return
+        funds = funds_fn() or {}
+        if not isinstance(funds, dict):
+            return
+        equity: float | None = None
+        for key in ("equity", "total", "available", "available_margin"):
+            raw = funds.get(key)
+            try:
+                value = float(raw)  # pyright: ignore[reportArgumentType]
+            except (TypeError, ValueError):
+                continue
+            if value > 0.0:
+                equity = value
+                break
+        if equity is None or not self._ledger.reseed_capital(equity):
+            # Either the venue withheld usable funds or the book flipped mid
+            # call: the next reconciliation retries while still flat.
+            return
+        self._capital_reseed_done = True
+        self._journal.record(
+            "CAPITAL_RESEEDED",
+            broker=self._broker.name if self._broker else "",
+            equity=equity,
+        )

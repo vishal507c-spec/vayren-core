@@ -36,7 +36,22 @@ const TRANSITIONS: &[(i32, &[i32])] = &[
     // and UNKNOWN itself have no exits.
     (CREATED, &[VALIDATED, REJECTED, UNKNOWN]),
     (VALIDATED, &[SUBMITTED, REJECTED, EXPIRED, UNKNOWN]),
-    (SUBMITTED, &[ACKNOWLEDGED, REJECTED, EXPIRED, UNKNOWN]),
+    // SUBMITTED reaches the fill states directly: real venues deliver the
+    // first fill without a separate Ack frame (poll-only adapters diff an
+    // orderbook whose first sighting may already be TRADED/COMPLETE). The
+    // venue fill is the authoritative fact; a missing Ack frame must never
+    // orphan a fill.
+    (
+        SUBMITTED,
+        &[
+            ACKNOWLEDGED,
+            PARTIALLY_FILLED,
+            FILLED,
+            REJECTED,
+            EXPIRED,
+            UNKNOWN,
+        ],
+    ),
     (
         ACKNOWLEDGED,
         &[
@@ -158,6 +173,10 @@ mod tests {
         assert!(is_legal_transition(CREATED, VALIDATED));
         assert!(is_legal_transition(VALIDATED, SUBMITTED));
         assert!(is_legal_transition(SUBMITTED, ACKNOWLEDGED));
+        // Fill-before-ack is a real venue fact (poll-only adapters), not a
+        // jump: the fill carries the execution truth the Ack never did.
+        assert!(is_legal_transition(SUBMITTED, PARTIALLY_FILLED));
+        assert!(is_legal_transition(SUBMITTED, FILLED));
         assert!(is_legal_transition(ACKNOWLEDGED, PARTIALLY_FILLED));
         assert!(is_legal_transition(PARTIALLY_FILLED, FILLED));
         assert!(is_legal_transition(ACKNOWLEDGED, CANCEL_PENDING));
@@ -187,6 +206,6 @@ mod tests {
 
     #[test]
     fn edge_count_is_pinned() {
-        assert_eq!(transition_edge_count(), 37);
+        assert_eq!(transition_edge_count(), 39);
     }
 }

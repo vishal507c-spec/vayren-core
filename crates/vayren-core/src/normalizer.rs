@@ -301,6 +301,15 @@ impl<P: StreamSeq + Clone> StreamNormalizer<P> {
         self.stale.contains(symbol)
     }
 
+    /// Wall-clock age of the last event for `symbol`, `None` when that
+    /// symbol has never delivered — the risk engine's freshness gate uses
+    /// the real number (or "unknown"), never a fake-zero.
+    pub fn event_age_seconds(&self, symbol: &str, now_epoch: f64) -> Option<f64> {
+        self.last_event_epoch
+            .get(symbol)
+            .map(|last| (now_epoch - *last).max(0.0))
+    }
+
     pub fn expected_seq(&self, symbol: &str) -> i64 {
         self.last_seq.get(symbol).copied().unwrap_or(0) + 1
     }

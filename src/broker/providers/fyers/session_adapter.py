@@ -1783,7 +1783,9 @@ class FyersSessionAdapter:
         rows = self._required_rows(body, "orderBook", "orders")
         return [self._normalized_order(row) for row in rows if isinstance(row, dict)]
 
-    def _find_by_tag(self, tag: str, *, bypass_circuit: bool = False) -> str | None:
+    def _find_by_tag(
+        self, tag: str, *, bypass_circuit: bool = False, terminal_ok: bool = False
+    ) -> str | None:
         """Return an active broker order for ``tag``; read failures propagate.
 
         This is the pre-submit duplicate check. Treating an unreadable order
@@ -1795,17 +1797,24 @@ class FyersSessionAdapter:
         found here — the previous status mapping treated it as terminal and
         let a duplicate order through.
 
+        ``terminal_ok`` is for the timeout path only: a FINISHED order still
+        proves the tag reached the venue, so the resolver adopts its id
+        instead of sending a second order for a possibly-filled first one.
+
         ``bypass_circuit`` is used only for a risk-reducing order: its
         duplicate check must still run (and still fail loudly), it just may
         not be refused by an already-open read circuit.
         """
+        best: str | None = None
         for order in self._order_snapshot(bypass_circuit=bypass_circuit):
             if order["client_order_id"] != tag:
                 continue
             if order["status"] in _TERMINAL_STATUS_NAMES:
+                if terminal_ok and best is None:
+                    best = order["broker_order_id"]
                 continue
             return order["broker_order_id"]
-        return None
+        return best
 
     def _is_protective_exit(self, plan: Any, client_order_id: str) -> bool:
         """True when this order is the execution engine's protective stop.
@@ -1872,7 +1881,7 @@ class FyersSessionAdapter:
         if "timeout" not in msg and "network" not in name.lower() and "oserror" not in name.lower():
             return None
         try:
-            found = self._find_by_tag(tag, bypass_circuit=bypass_circuit)
+            found = self._find_by_tag(tag, bypass_circuit=bypass_circuit, terminal_ok=True)
         except Exception:
             return None
         if found is not None:

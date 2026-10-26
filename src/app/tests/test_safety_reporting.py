@@ -96,18 +96,30 @@ def test_market_data_never_claims_a_fresh_tick_stamp(tmp_path: Path) -> None:
     assert md["price_source"] == "candle_store"
 
 
-def _market_data_gate(tmp_path: Path, reason_rows: list[dict[str, Any]], feed: str):
+def _market_data_gate(
+    tmp_path: Path,
+    reason_rows: list[dict[str, Any]],
+    feed: str,
+    *,
+    mode: str = "BACKTEST",
+    view: dict[str, Any] | None = None,
+    snap_extra: dict[str, Any] | None = None,
+):
     """Build the real gate row from a real service (no live session, no broker)."""
     from app.services.live_trading_service import LiveTradingService
 
     data_dir = tmp_path / "gate-data"
     strat_dir = tmp_path / "gate-strategies"
-    data_dir.mkdir()
-    strat_dir.mkdir()
+    data_dir.mkdir(exist_ok=True)
+    strat_dir.mkdir(exist_ok=True)
     service = LiveTradingService(data_dir=data_dir, strategy_dir=strat_dir)
+    service.configure(mode=mode)
+    snap = {"feed": feed}
+    if snap_extra:
+        snap.update(snap_extra)
     return next(
         g
-        for g in service._readiness_gates({"feed": feed}, {}, reason_rows)
+        for g in service._readiness_gates(snap, view or {}, reason_rows)
         if g["name"] == "Market Data Streaming"
     )
 
@@ -133,6 +145,65 @@ def test_market_data_gate_says_no_live_feed_when_there_is_none(tmp_path: Path) -
     assert gate["status"] == "READY"
     assert "candle store 1/1" in gate["reason"]
     assert "no live feed" in gate["reason"]
+
+
+def test_market_data_gate_live_mode_rejects_stored_candles_alone(tmp_path: Path) -> None:
+    """Stored candles alone can NEVER satisfy live streaming readiness in LIVE mode."""
+    gate = _market_data_gate(tmp_path, [{"status": "AVAILABLE"}], "none", mode="LIVE")
+    assert gate["status"] == "NOT READY"
+    assert "candle store 1/1" in gate["reason"]
+    assert "no live feed" in gate["reason"]
+
+
+def test_market_data_gate_live_mode_rejects_degraded_market_ws(tmp_path: Path) -> None:
+    """A degraded or stale market WS leg must not paint green in LIVE mode."""
+    view = {"checks": {"market_data": "FAILED: stale — no market data for 120s"}}
+    gate = _market_data_gate(tmp_path, [{"status": "AVAILABLE"}], "live", mode="LIVE", view=view)
+    assert gate["status"] == "NOT READY"
+    assert "FAILED: stale" in gate["reason"]
+
+
+def test_market_data_gate_live_mode_ready_when_feed_and_store_healthy(tmp_path: Path) -> None:
+    """LIVE streaming is READY when both candle store and live feed are healthy."""
+    view = {"checks": {"market_data": "READY"}}
+    snap_extra = {"market_data": {"delivery": [{"transport": {"healthy": True, "reason": "ok"}}]}}
+    gate = _market_data_gate(
+        tmp_path, [{"status": "AVAILABLE"}], "live", mode="LIVE", view=view, snap_extra=snap_extra
+    )
+    assert gate["status"] == "READY"
+
+
+def test_arming_gate_reports_correct_wording_and_consent_states(tmp_path: Path) -> None:
+    """Arming gate guides operator to START dialog instead of obsolete ARM button."""
+    from app.services.live_trading_service import LiveTradingService
+
+    data_dir = tmp_path / "arming-data"
+    strat_dir = tmp_path / "arming-strategies"
+    data_dir.mkdir(exist_ok=True)
+    strat_dir.mkdir(exist_ok=True)
+    service = LiveTradingService(data_dir=data_dir, strategy_dir=strat_dir)
+    service.configure(mode="LIVE")
+
+    def get_arming_gate() -> dict[str, Any]:
+        return next(g for g in service._readiness_gates({}, {}, []) if g["name"] == "Arming")
+
+    # 1. Stopped, unconfirmed: NOT READY, explains confirmation needed on START
+    gate = get_arming_gate()
+    assert gate["status"] == "NOT READY"
+    assert "confirm in START dialog" in gate["reason"]
+    assert "arm before START" not in gate["reason"]
+
+    # 2. Confirmed via modal: READY, states consent confirmed
+    service.confirm_live_execution()
+    gate = get_arming_gate()
+    assert gate["status"] == "READY"
+    assert "operator consent confirmed" in gate["reason"]
+
+    # 3. Running: READY, states running
+    service._status = "RUNNING"
+    gate = get_arming_gate()
+    assert gate["status"] == "READY"
+    assert "sessions armed and running" in gate["reason"]
 
 
 # ── Worker timing comes from the nested session_timing ───────────────────

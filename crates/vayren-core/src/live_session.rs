@@ -58,7 +58,8 @@ use crate::execution::{
 use crate::execution_engine::{
     arm_transition, check_live_readiness, plan_order, reconcile_orders, reconcile_positions,
     verdict_of, ContractView, ExecutionEngine, ExecutionMode, ExecutionPreferences, Ledger,
-    LifecycleState, LiveArm, ModeGates, OrderSnapshot, PlanIntent, ReconReport, StrategyLifecycle,
+    LifecycleState, LiveArm, Mismatch, ModeGates, OrderSnapshot, PlanIntent, ReconReport,
+    StrategyLifecycle,
 };
 use crate::execution_events::{
     CandleEvent, HeartbeatEvent, MarketEvent, OrderAcknowledged, OrderFill, OrderPlanned,
@@ -978,7 +979,7 @@ impl LiveSession {
             equity: snapshot.equity,
             available_capital: snapshot.available_capital,
             spread_pct: spread,
-            data_age_seconds: Some(0.0),
+            data_age_seconds: self.normalizer.event_age_seconds(&signal.symbol, now_epoch),
             broker_healthy: self.broker.as_mut().map(|b| b.health().0).unwrap_or(false),
             orders_today: self.orders_today,
             last_order_epoch: self.last_order_epoch,
@@ -1206,11 +1207,26 @@ impl LiveSession {
                 .transition(&updated.client_order_id, order_state::FILLED, "fill")
         };
         if let Err(reason) = transitioned {
+            // The venue fill is the fact; a missing Ack frame must never
+            // orphan it (engine already folded the quantity). Align through
+            // reconcile — the state machine's venue-truth exit — then keep
+            // going to the ledger, or else the book stays flat while the
+            // engine reports fully filled.
+            let target = if fill.partial {
+                "PARTIALLY_FILLED"
+            } else {
+                "FILLED"
+            };
+            let _ = self.engine.reconcile(
+                &updated.client_order_id,
+                target,
+                updated.filled_qty,
+                "fill aligns venue state",
+            );
             self.journal.record(
-                "BROKER_EVENT_IGNORED",
+                "BROKER_EVENT_LAGGED",
                 vec![("reason".to_string(), field_str(reason))],
             );
-            return;
         }
         let position = self.ledger.apply_fill(
             &fill.symbol,
@@ -1433,8 +1449,25 @@ impl LiveSession {
             Err(reason) => {
                 self.journal.record(
                     "RECONCILE_ERROR",
-                    vec![("reason".to_string(), field_str(reason))],
+                    vec![("reason".to_string(), field_str(&reason))],
                 );
+                // A read that never happened is NOT a clean comparison:
+                // keeping the previous (default-matched) reconciliation
+                // reports blockless READY on venue truth never fetched (the
+                // Python path blocks here). Fail closed to a transport
+                // mismatch that reconciliation readiness must answer.
+                let mut reconciliation = SessionReconciliation::matched();
+                reconciliation.orders = ReconReport {
+                    matched: false,
+                    mismatches: vec![Mismatch {
+                        kind: "orders",
+                        id: "all".to_string(),
+                        local: "transport_error".to_string(),
+                        broker: format!("reconcile transport error: {reason}"),
+                    }],
+                    checked_at: String::new(),
+                };
+                self.reconciliation = reconciliation;
                 return;
             }
         };
@@ -1443,8 +1476,20 @@ impl LiveSession {
             Err(reason) => {
                 self.journal.record(
                     "RECONCILE_ERROR",
-                    vec![("reason".to_string(), field_str(reason))],
+                    vec![("reason".to_string(), field_str(&reason))],
                 );
+                let mut reconciliation = SessionReconciliation::matched();
+                reconciliation.orders = ReconReport {
+                    matched: false,
+                    mismatches: vec![Mismatch {
+                        kind: "orders",
+                        id: "all".to_string(),
+                        local: "transport_error".to_string(),
+                        broker: format!("reconcile transport error: {reason}"),
+                    }],
+                    checked_at: String::new(),
+                };
+                self.reconciliation = reconciliation;
                 return;
             }
         };

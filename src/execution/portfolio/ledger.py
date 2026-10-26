@@ -70,6 +70,23 @@ class PositionLedger:
         else:
             self._positions[pos.symbol] = pos
 
+    def reseed_capital(self, total_equity: float) -> bool:
+        """Adopt the venue's own cash truth as the ledger basis.
+
+        Allowed ONLY while the book is fully flat: with open positions the
+        venue number mixes margin into the reading, so adopting it would
+        double-count. On success the realized/day-PnL accumulators reset —
+        they are folded into the new basis, otherwise equity would count
+        them twice. Returns ``False`` (and changes nothing) otherwise.
+        """
+        equity = float(total_equity)
+        if not equity > 0.0 or any(not p.flat for p in self._positions.values()):
+            return False
+        self._starting_capital = equity
+        self._realized.clear()
+        self._day_pnl = 0.0
+        return True
+
     def adopt_positions(self, positions: list[Position] | tuple[Position, ...]) -> None:
         """Reset and replace all positions with authoritative broker positions."""
         self._positions.clear()

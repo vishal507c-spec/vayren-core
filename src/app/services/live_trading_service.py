@@ -3322,7 +3322,50 @@ class LiveTradingService:
                 "local": "local tail only",
             }.get(live_feed, "no live feed")
             reason = f"{store_reason}; {feed_label}"
-            if not missing and not nodata:
+            if self._config.mode == "LIVE":
+                if live_feed != "live" or missing or nodata:
+                    gates.append(
+                        {
+                            "name": "Market Data Streaming",
+                            "status": "NOT READY",
+                            "reason": reason,
+                        }
+                    )
+                else:
+                    unhealthy_transport = any(
+                        not d.get("transport", {}).get("healthy", True)
+                        for d in (snap.get("market_data") or {}).get("delivery", [])
+                    )
+                    md_check = str((view.get("checks") or {}).get("market_data", ""))
+                    if unhealthy_transport or md_check.startswith("FAILED"):
+                        fail_reason = (
+                            md_check
+                            if md_check.startswith("FAILED")
+                            else next(
+                                (
+                                    d.get("transport", {}).get("reason", "")
+                                    for d in (snap.get("market_data") or {}).get("delivery", [])
+                                    if not d.get("transport", {}).get("healthy", True)
+                                ),
+                                "feed degraded",
+                            )
+                        )
+                        gates.append(
+                            {
+                                "name": "Market Data Streaming",
+                                "status": "NOT READY",
+                                "reason": f"{store_reason}; {fail_reason}",
+                            }
+                        )
+                    else:
+                        gates.append(
+                            {
+                                "name": "Market Data Streaming",
+                                "status": "READY",
+                                "reason": reason,
+                            }
+                        )
+            elif not missing and not nodata:
                 gates.append(
                     {
                         "name": "Market Data Streaming",
@@ -3416,12 +3459,20 @@ class LiveTradingService:
                     "reason": "sessions armed and running",
                 }
             )
+        elif self.is_live_confirmed():
+            gates.append(
+                {
+                    "name": "Arming",
+                    "status": "READY",
+                    "reason": "operator consent confirmed",
+                }
+            )
         else:
             gates.append(
                 {
                     "name": "Arming",
                     "status": "NOT READY",
-                    "reason": "DISARMED — arm before START",
+                    "reason": "disarmed — confirm in START dialog to authorize",
                 }
             )
         return gates
