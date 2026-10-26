@@ -7,7 +7,30 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (monday-live-market-readiness-20261025):** MONDAY LIVE-MARKET READINESS & AUDIT FIXES —
+**Latest update (production-ec2-deployment-verified-20261026):** EC2 PRODUCTION DEPLOYMENT & LIVE READINESS GATE VERIFICATION COMPLETE —
+- **Production Commit:** `f5496b10833736227a3d1d3411f9fdfd42495bcd` (`fix(live): harden market data gate, correct arming text, and sweep money-path invariants`).
+- **EC2 Deployment Execution:**
+  - Pull method: `git pull --ff-only origin main` on host `vayren` (`100.75.185.37`, `ip-172-31-12-198`).
+  - Pre-restart test suite: `pytest src/app/tests/test_safety_reporting.py src/remote/tests/test_server.py` passed 100% (44 passed in 2.21s).
+  - Service restart: `sudo systemctl restart vayren-remote.service` completed cleanly with exit code 0.
+  - Active PID: `780846` (`/home/ubuntu/vayren-core/.venv/bin/python -m remote.runner`).
+- **Live Authentication & Sockets on EC2:**
+  - `FyersAutoAuth`: Automated login verified with TOTP/PIN, new access token acquired and validated.
+  - Sockets connected: `ORDER_WS_CONNECTED broker=FYERS` and `MARKET_WS_CONNECTED broker=FYERS`.
+- **Live Readiness Gates Post-Restart (Verified via loopback WebSocket probe at `127.0.0.1:8765`):**
+  - `Gate: Market Data Streaming` -> `NOT READY`, reason: `candle store 22/22; no live feed`. Confirms the fix is LIVE in production: stored candles alone (22/22) can NEVER satisfy live streaming readiness without active live tick feed.
+  - `Gate: Arming` -> `NOT READY`, reason: `disarmed — confirm in START dialog to authorize`. Legacy `DISARMED — arm before START` text successfully eliminated.
+  - `Gate: Broker Connected` -> `READY`, reason: `Fyers connected (ACC: XV29244)`.
+  - `Gate: Credentials Valid` -> `READY`, reason: `credentials stored`.
+  - `Gate: Account Confirmed` -> `READY`, reason: `account XV29244 confirmed`.
+  - `Gate: Strategy Ready` -> `READY`, reason: `OBR C1C4 ready — 30m`.
+  - `Gate: Risk Engine Ready` -> `READY`, reason: `max 1 per order`.
+  - `Gate: Reconciliation Synced` -> `READY`, reason: `positions: 0 | orders: 0`.
+  - `Gate: Environment (LIVE)` -> `READY`, reason: `LIVE mode selected`.
+  - Safety Blockers: `live confirmation required (explicit operator consent)`.
+- **Pre-Market Status:** As expected pre-open, trading remains strictly disabled and fail-closed until live ticks arrive at pre-open (09:00 IST) and operator provides consent in the START dialog. Zero real orders placed.
+
+**Previous update (monday-live-market-readiness-20261025):** MONDAY LIVE-MARKET READINESS & AUDIT FIXES —
 - **Bug Fix 1 (Market Data Streaming gate green on stored candles alone):** In `src/app/services/live_trading_service.py::_readiness_gates`, in `LIVE` mode, stored candles alone (`candle store 22/22`) can NEVER satisfy live streaming readiness. If `live_feed != "live"` or symbols are missing/nodata, gate is strictly `NOT READY` (reason: `candle store N/M; no live feed`). Furthermore, even when `live_feed == "live"`, gate checks fanout transport health (`d.get("transport", {}).get("healthy")`) and broker checks (`market_data`); any staleness or failure flags `NOT READY` with the failure reason.
 - **Bug Fix 2 (Misleading legacy "DISARMED — arm before START"):** In `src/app/services/live_trading_service.py::_readiness_gates`, replaced the obsolete `DISARMED — arm before START` (residue of pre-20261023 standalone ARM button) with honest actionable state: `NOT READY` with `reason="disarmed — confirm in START dialog to authorize"` when unconfirmed, and `READY` with `reason="operator consent confirmed"` when confirmed via modal, or `reason="sessions armed and running"` when running. Zero safety gates bypassed.
 - **Regression Tests Added (`src/app/tests/test_safety_reporting.py`):**
