@@ -75,7 +75,7 @@ _WARMUP_BARS = 120
 _ACTIVITY_CAP = 500
 _TICK_MS = 1000
 #: Bounded START-time order-WebSocket proof (the adapter waits, never retries).
-_LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 8.0
+_LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 1.0
 
 #: Recovery phases that mean the operator still has an interrupted run to
 #: resolve. A restart while desired==RUNNING is the normal way to enter one.

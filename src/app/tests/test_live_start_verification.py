@@ -202,7 +202,7 @@ def test_immediate_disconnect_before_start_blocks_live(service: LiveTradingServi
 
     assert not ok
     assert any("order stream not verified" in r for r in reasons), reasons
-    assert manager.verify_calls == [("fyers", 8.0)]
+    assert manager.verify_calls == [("fyers", 1.0)]
     build.assert_not_called()
 
 
@@ -216,7 +216,7 @@ def test_healthy_fresh_stream_with_consent_proceeds(service: LiveTradingService)
         ):
             ok, reasons = service.start(confirmed=True)
         assert ok, reasons
-        assert manager.verify_calls == [("fyers", 8.0)]
+        assert manager.verify_calls == [("fyers", 1.0)]
         build.assert_called_once()
     finally:
         service.stop("test cleanup")

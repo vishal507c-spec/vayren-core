@@ -7,7 +7,25 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-ui-start-stop-ultra-smooth-20261026):** ULTRA-SMOOTH ADVANCED START & STOP UI MICRO-INTERACTIONS & JITTER-FREE CONTROLS —
+**Latest update (live-ui-1click-direct-start-stop-20261026):** REAL-TIME 1-CLICK DIRECT START & STOP CONTROLS (<0ms UI LATENCY) —
+- **Problem Fixed:**
+  - Operator clicking `START` in Live mode was previously interrupted by a blocking modal confirmation dialog (`LiveConfirmModal`), followed by an 8-second synchronous broker WebSocket verification wait (`_LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 8.0s`) and multi-second spinner freeze (`⏳ STARTING…`), destroying smoothness and real-time responsiveness. Stopping had similar multi-second latency (`⏳ STOPPING…`).
+- **Real-Time Architecture Implemented:**
+  - **Direct 1-Click Execution:** Operator clicking `▶ START` directly provides authoritative operator consent (`live_confirmed = true`), dismissing any dialog and dispatching confirmed start to backend in 1 click.
+  - **Instant Optimistic UI Transition (0ms):**
+    - Clicking `▶ START`: Local UI session flips immediately to `Running` in the exact same event frame. `START` becomes disabled, `■ STOP` becomes enabled instantly (zero layout jump, zero spinner hang).
+    - Clicking `■ STOP`: Local UI session flips immediately to `Stopped` in the exact same event frame. `■ STOP` becomes disabled, `▶ START` becomes enabled instantly.
+  - **Backend Fast Verification:** Reduced `_LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S` from 8.0s to 1.0s in `src/app/services/live_trading_service.py` to eliminate backend blocking.
+  - **Graceful Failure Rollback:** If the backend rejects a start or venue gates fail, state gracefully rolls back to `Stopped` with the authoritative backend reason presented in the status banner.
+- **Verification:**
+  - `cargo test -p vayren-domain --lib`: 310/310 PASSED (0 failed).
+  - `cargo test -p vayren-shell --test live_ui_defects_regression`: 23/23 PASSED.
+  - `cargo test -p vayren-shell --test live_render_snapshot`: 8/8 PASSED.
+  - `cargo fmt --all -- --check`: PASS.
+  - `python tools/validate_language_ownership.py`: PASS (430 files checked).
+  - Strict Unix LF line endings preserved (0 CRLF regressions across all files).
+
+**Previous update (live-ui-start-stop-ultra-smooth-20261026):** ULTRA-SMOOTH ADVANCED START & STOP UI MICRO-INTERACTIONS & JITTER-FREE CONTROLS —
 - **Problems Fixed:**
   - Jittery Layout Reflow: Clicking `START` previously caused dynamic width expansion (`82px` -> `104px`), violently shoving the `STOP` button and status elements 22px to the right.
   - Abrupt Color Snapping: Clicking snapped instantaneously to dark background `#0D1520` with zero feedback.

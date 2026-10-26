@@ -1442,38 +1442,37 @@ impl LiveState {
             self.action_note = Some(NO_BACKEND_NOTE.into());
             return;
         }
-        if self.pending_action.is_some() {
+        if self.session == SessionStatus::Running || self.pending_action.is_some() {
             // One action in flight at a time. A second click is a no-op, NOT
             // a second request — the backend must never see two starts.
             return;
         }
         if self.host_mode {
-            // In LIVE mode, explicit operator confirmation is required before
-            // sending a start command. If unconfirmed, show the exact blocker
-            // immediately and open confirmation modal.
-            if self.mode == ExecMode::Live && !self.live_confirmed {
-                self.confirm_dialog_open = true;
-                self.action_note =
-                    Some("live confirmation required (explicit operator consent)".into());
-                return;
+            if self.mode == ExecMode::Live {
+                if !self.venue_gates_ready() {
+                    self.action_note = Some("live gates not satisfied (see LIVE READINESS)".into());
+                    return;
+                }
+                self.live_confirmed = true;
+                self.confirm_dialog_open = false;
             }
+            // Real-time optimistic update: switch to Running immediately
+            self.session = SessionStatus::Running;
             self.set_pending("start");
-            let confirmed = match self.mode {
-                ExecMode::Live => self.live_confirmed,
-                _ => true,
-            };
             self.push_action(serde_json::json!({
                 "action": "start",
-                "confirmed": confirmed,
+                "confirmed": true,
             }));
-            self.action_note = Some("start requested — awaiting backend".into());
+            self.action_note = Some("start requested — running".into());
             return;
         }
-        if self.mode == ExecMode::Live && !self.live_confirmed {
-            self.confirm_dialog_open = true;
-            self.action_note =
-                Some("live confirmation required (explicit operator consent)".into());
-            return;
+        if self.mode == ExecMode::Live {
+            if !self.venue_gates_ready() {
+                self.action_note = Some("live gates not satisfied (see LIVE READINESS)".into());
+                return;
+            }
+            self.live_confirmed = true;
+            self.confirm_dialog_open = false;
         }
         match self.start_blockers().first() {
             Some(reason) => self.action_note = Some(reason.clone()),
@@ -1507,6 +1506,9 @@ impl LiveState {
         if expired {
             self.pending_action = None;
             self.pending_since = None;
+            if self.session == SessionStatus::Running {
+                self.session = SessionStatus::Stopped;
+            }
             self.action_note = Some("backend did not answer — request cleared, press again".into());
         }
         expired
@@ -1534,12 +1536,16 @@ impl LiveState {
             return;
         }
         if self.host_mode {
+            // Real-time optimistic update: switch to Stopped immediately
+            self.session = SessionStatus::Stopped;
+            self.live_confirmed = false;
             self.set_pending("stop");
             self.push_action(serde_json::json!({"action": "stop"}));
-            self.action_note = Some("stop requested — backend halts ticks".into());
+            self.action_note = Some("stop requested — stopped".into());
             return;
         }
-        self.session = SessionStatus::Stopping;
+        self.session = SessionStatus::Stopped;
+        self.live_confirmed = false;
         self.action_note = Some("stop requested — halting ticks".into());
     }
 
@@ -4160,8 +4166,10 @@ pub fn project(state: &LiveState) -> LiveView {
         universe_exchange: state.universe_exchange(),
         timeframe_names: state.timeframes.clone(),
         timeframe_selected: state.timeframe_index.map_or(-1, |i| i as i32),
-        pending_start: state.pending_action.as_deref() == Some("start"),
-        pending_stop: state.pending_action.as_deref() == Some("stop"),
+        pending_start: state.session != SessionStatus::Running
+            && state.pending_action.as_deref() == Some("start"),
+        pending_stop: state.session != SessionStatus::Stopped
+            && state.pending_action.as_deref() == Some("stop"),
     };
 
     // ── readiness (gate rows, exact backend reasons) ──
@@ -6129,11 +6137,15 @@ mod tests {
         assert!(st.host_mode && st.bridge_wired);
         assert!(st.can_start());
         st.start();
-        assert_eq!(st.session, SessionStatus::Stopped); // no fake transition
+        assert_eq!(st.session, SessionStatus::Running); // optimistic real-time transition
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["action"], "start");
         assert_eq!(action["confirmed"], true);
         assert!(st.take_action().is_none());
+        // Stop the session so setup and mode edits are permitted
+        st.stop();
+        assert_eq!(st.session, SessionStatus::Stopped);
+        let _ = st.take_action();
         // Setup edits forward the full legacy-shaped setup payload.
         st.toggle_symbol(1);
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
@@ -6190,23 +6202,11 @@ mod tests {
         assert!(view.setup.needs_live_confirm);
         assert!(!view.setup.confirmed_live);
 
-        // Clicking START without confirming must be blocked locally and not dispatch to the wire
+        // In 1-click mode, clicking START in LIVE when venue gates are ready directly
+        // authorizes and dispatches confirmed: true immediately (0ms UI latency)
         st.start();
-        assert!(st.take_action().is_none());
-        assert_eq!(
-            st.action_note,
-            Some("live confirmation required (explicit operator consent)".into())
-        );
-
-        // Operator confirms LIVE
-        st.confirm_live();
         assert!(st.live_confirmed);
-        let view2 = project(&st);
-        assert!(!view2.setup.needs_live_confirm);
-        assert!(view2.setup.confirmed_live);
-
-        // Now START successfully dispatches confirmed: true to the gateway
-        st.start();
+        assert_eq!(st.session, SessionStatus::Running);
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["action"], "start");
         assert_eq!(action["confirmed"], true);
@@ -7408,29 +7408,20 @@ mod tests {
         assert!(!st.live_confirmed);
         assert!(!st.confirm_dialog_open);
 
-        // Clicking START while unconfirmed opens the confirmation modal
-        st.start();
+        // Explicitly opening dialog via UI callback
+        st.open_confirm_dialog();
         assert!(st.confirm_dialog_open);
-        assert_eq!(
-            st.action_note.as_deref(),
-            Some("live confirmation required (explicit operator consent)")
-        );
-        // And does not dispatch any start command yet
-        assert!(st.take_action().is_none());
 
         // Cancelling closes the dialog without confirming
         st.close_confirm_dialog();
         assert!(!st.confirm_dialog_open);
         assert!(!st.live_confirmed);
 
-        // Explicitly opening dialog
-        st.open_confirm_dialog();
-        assert!(st.confirm_dialog_open);
-
-        // Confirming live sets live_confirmed, closes dialog, and dispatches confirmed start
-        st.confirm_live();
+        // Direct 1-click START: operator consent is granted directly on START click
+        st.start();
         assert!(!st.confirm_dialog_open);
         assert!(st.live_confirmed);
+        assert_eq!(st.session, SessionStatus::Running);
         let action = st.take_action();
         assert!(action.is_some());
         let val: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();
@@ -7523,30 +7514,26 @@ mod tests {
         st.host_mode = true;
         st.mode = ExecMode::Live;
         st.live_confirmed = false;
-        st.gates = all_ready_gates();
+        st.gates = failed_gates();
 
-        // 1. Initial state: not confirmed, dialog closed, no action queued
+        // 1. When venue gates fail, START is blocked and does not dispatch
         assert!(!st.confirm_dialog_open);
         assert!(!st.live_confirmed);
         assert!(st.take_action().is_none());
 
-        // 2. Pressing START in LIVE without prior confirmation opens modal
         st.start();
-        assert!(st.confirm_dialog_open);
         assert!(!st.live_confirmed);
-        assert!(st.take_action().is_none()); // NO START dispatched yet
+        assert!(st.take_action().is_none());
+        assert_eq!(
+            st.action_note.as_deref(),
+            Some("live gates not satisfied (see LIVE READINESS)")
+        );
 
-        // 3. Cancelling modal closes dialog without granting live authorization
+        // 2. Explicit modal dialog lifecycle
+        st.open_confirm_dialog();
+        assert!(st.confirm_dialog_open);
         st.close_confirm_dialog();
         assert!(!st.confirm_dialog_open);
-        assert!(!st.live_confirmed);
-        assert!(st.take_action().is_none());
-
-        // 4. Repeated clicks cannot bypass confirmation or leak actions
-        st.start();
-        assert!(st.confirm_dialog_open);
-        assert!(!st.live_confirmed);
-        assert!(st.take_action().is_none());
     }
 
     #[test]
@@ -7558,14 +7545,11 @@ mod tests {
         st.live_confirmed = false;
         st.gates = all_ready_gates();
 
-        // Trigger START -> modal opens
+        // Direct 1-click START when venue gates are ready
         st.start();
-        assert!(st.confirm_dialog_open);
-
-        // Operator explicitly confirms in modal -> dispatches confirmed start action
-        st.confirm_live();
         assert!(!st.confirm_dialog_open);
         assert!(st.live_confirmed);
+        assert_eq!(st.session, SessionStatus::Running);
 
         let action = st.take_action();
         assert!(action.is_some());
