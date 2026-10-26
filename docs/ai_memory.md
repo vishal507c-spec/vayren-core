@@ -7,7 +7,23 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (production-ec2-deployment-verified-20261026):** EC2 PRODUCTION DEPLOYMENT & LIVE READINESS GATE VERIFICATION COMPLETE —
+**Latest update (live-order-executed-zeel-20261026):** END-TO-END LIVE VENUE ORDER EXECUTED & VERIFIED ON NSE VIA FYERS —
+- **Operator Test Order Execution (NSE Cash):**
+  - Symbol: `NSE:ZEEL-EQ`
+  - Side: `SELL` (Intraday Short)
+  - Quantity: 1 share
+  - Product: `INTRADAY`
+  - Order Type: `MARKET`
+  - Broker Order ID: `26102600117170`
+  - Execution Status: `FILLED` (Venue Status: 2) at `₹65.72` (26-Oct-2026 09:59:50 IST).
+- **Venue Position & Margin Update (Account XV29244):**
+  - Net Position: -1 share (`NSE:ZEEL-EQ-INTRADAY`) at average ₹65.72.
+  - Position is active and profitable in live market (LTP: ₹64.67, Unrealized P&L: +₹1.05).
+  - Margin blocked: ₹13.16; Available Margin: ₹86.84; Total Equity: ₹101.14.
+- **Venue Tag Constraint Enforced:** FYERS API v3 strictly requires purely alphanumeric `orderTag` characters (`[A-Za-z0-9]`, no hyphens or underscores). Validated and verified live.
+- **Pipeline Proof:** Full loop proved in production—automated auth, REST venue submission, instantaneous exchange execution, and live position reflection on FYERS.
+
+**Previous update (production-ec2-deployment-verified-20261026):** EC2 PRODUCTION DEPLOYMENT & LIVE READINESS GATE VERIFICATION COMPLETE —
 - **Production Commit:** `f5496b10833736227a3d1d3411f9fdfd42495bcd` (`fix(live): harden market data gate, correct arming text, and sweep money-path invariants`).
 - **EC2 Deployment Execution:**
   - Pull method: `git pull --ff-only origin main` on host `vayren` (`100.75.185.37`, `ip-172-31-12-198`).
