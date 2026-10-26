@@ -7,7 +7,27 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-ui-1click-direct-start-stop-20261026):** REAL-TIME 1-CLICK DIRECT START & STOP CONTROLS (<0ms UI LATENCY) —
+**Latest update (live-ui-cognitive-load-universal-scaling-20261026):** LIVE UI VISUAL COGNITIVE LOAD REDUCTION & UNIVERSAL DESKTOP SCREEN SCALING —
+- **Cognitive Load Reduction (Zero Brain Fatigue):**
+  - Streamlined visual hierarchy in Live mode cards (`LiveTopCard`, `LiveBrokerCapitalCard`): adjusted card geometry (`46px` height, `110-165px` and `150-205px` width bounds).
+  - Added subtle interactive lighting (`card-ta.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel`) with smooth 120ms transitions.
+  - Softened borders from harsh contrast to deep/soft lines (`VayrenPalette.live-line-deep` / `VayrenPalette.live-line-soft`) to eliminate visual jarring.
+  - Watchlist table row micro-motion: 80ms smooth background and border transitions on hover for effortless visual tracking.
+- **Universal Desktop Screen Scaling (Fits Any Screen Effortlessly):**
+  - Lowered `is-narrow-bar` breakpoint from `1320px` to `1180px`. On common 14"/15.6" laptops (1920x1080 @ 150% scaling = 1280x720, or native 1366x768), the top bar now renders as a sleek single row (`56px`) instead of an inflated 98px double row, saving 42px of vertical real estate.
+  - Compacted `LIVE TRADE STOCKS` band from `66px` to `52px` (saving 14px vertical space).
+  - Total header vertical height reduced by ~60px, immediately reclaiming 2-3 visible stock rows in the table without scrolling.
+  - Proportional layout floors (`watchlist-min-h: 140px/175px/210px`, `blotter-min-h: 110px/145px/185px`) ensure clock, snapshot age, and status strip are 100% visible on small laptop displays (640px - 720px height) as well as 1080p, 2K, and 4K monitors.
+- **Verification:**
+  - `cargo check -p vayren-shell`: PASS (Exit code 0).
+  - `cargo test -p vayren-shell --test live_ui_defects_regression`: 23/23 PASSED.
+  - `cargo test -p vayren-shell --test live_render_snapshot`: 8/8 PASSED.
+  - `cargo test -p vayren-domain --lib`: 310/310 PASSED.
+  - `cargo fmt --all -- --check`: PASS.
+  - `python tools/validate_language_ownership.py`: PASS (430 files checked).
+  - Strict Unix LF line endings preserved (0 CRLF regressions across all files).
+
+**Previous update (live-ui-1click-direct-start-stop-20261026):** REAL-TIME 1-CLICK DIRECT START & STOP CONTROLS (<0ms UI LATENCY) —
 - **Problem Fixed:**
   - Operator clicking `START` in Live mode was previously interrupted by a blocking modal confirmation dialog (`LiveConfirmModal`), followed by an 8-second synchronous broker WebSocket verification wait (`_LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 8.0s`) and multi-second spinner freeze (`⏳ STARTING…`), destroying smoothness and real-time responsiveness. Stopping had similar multi-second latency (`⏳ STOPPING…`).
 - **Real-Time Architecture Implemented:**

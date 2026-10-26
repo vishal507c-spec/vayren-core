@@ -435,16 +435,18 @@ component LiveTopCard inherits Rectangle {
     in property <bool> show-icon: true;
     callback clicked();
 
-    background: VayrenPalette.live-panel;
+    background: card-ta.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel;
     border-radius: 8px;
     border-width: 1px;
-    border-color: VayrenPalette.live-line-soft;
-    min-width: 120px;
-    max-width: 175px;
-    height: 48px;
+    border-color: card-ta.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-line-deep;
+    min-width: 110px;
+    max-width: 165px;
+    height: 46px;
     clip: true;
+    animate background { duration: 120ms; }
+    animate border-color { duration: 120ms; }
 
-    TouchArea {
+    card-ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
@@ -514,14 +516,21 @@ component LiveBrokerCapitalCard inherits Rectangle {
     in property <string> last-updated: "";
     callback refresh-requested();
 
-    background: VayrenPalette.live-panel;
+    background: cap-ta.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel;
     border-radius: 8px;
     border-width: 1px;
-    border-color: root.tone == 1 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
-    min-width: 160px;
-    max-width: 215px;
-    height: 48px;
+    border-color: root.tone == 1 ? VayrenPalette.live-teal-deep : (cap-ta.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-line-deep);
+    min-width: 150px;
+    max-width: 205px;
+    height: 46px;
     clip: true;
+    animate background { duration: 120ms; }
+    animate border-color { duration: 120ms; }
+
+    cap-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.refresh-requested(); }
+    }
 
     HorizontalLayout {
         padding-left: 8px;
@@ -1172,11 +1181,12 @@ export component LiveScreen inherits Rectangle {
     // the backend normalises the query, so the field never binds to the
     // model and no keystroke is rewritten mid-edit.
     property <string> event-filter-text: "";
-    property <bool> is-narrow-bar: root.width < 1320px;
-    // Short windows compress the two stacked boards so the footer status
-    // strip (clock / snapshot age) always stays on screen.
-    property <length> watchlist-min-h: root.height < 640px ? 150px : (root.height < 720px ? 190px : 220px);
-    property <length> blotter-min-h: root.height < 640px ? 120px : (root.height < 720px ? 160px : 200px);
+    property <bool> is-narrow-bar: root.width < 1180px;
+    // Responsive desktop scaling: proportional floors ensure the footer status
+    // strip stays on screen on 1366x768 and 1280x720 laptops while maximizing
+    // table visibility.
+    property <length> watchlist-min-h: root.height < 640px ? 140px : (root.height < 720px ? 175px : 210px);
+    property <length> blotter-min-h: root.height < 640px ? 110px : (root.height < 720px ? 145px : 185px);
 
     init => {
         Palette.color-scheme = ColorScheme.dark;
@@ -1252,7 +1262,7 @@ export component LiveScreen inherits Rectangle {
 
         // ══ 1. TOP STATUS & CONTROL BAR ══════════════════════════════════════
         Rectangle {
-            height: root.is-narrow-bar ? 98px : 58px;
+            height: root.is-narrow-bar ? 92px : 56px;
             min-width: 0px;
             width: 100%;
             background: VayrenPalette.live-topbar;
@@ -1570,7 +1580,7 @@ export component LiveScreen inherits Rectangle {
 
         // ══ 1b. STRATEGY STOCK LIST (read-only; managed in Strategy Lab) ══════
         Rectangle {
-            height: 66px;
+            height: 52px;
             min-width: 0px;
             width: 100%;
             background: VayrenPalette.live-panel-deep;
@@ -1581,9 +1591,9 @@ export component LiveScreen inherits Rectangle {
             VerticalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
-                padding-top: 6px;
-                padding-bottom: 6px;
-                spacing: 4px;
+                padding-top: 4px;
+                padding-bottom: 4px;
+                spacing: 3px;
 
                 // Row 1: Header Row (Heading, exchange, count on left; Read-only badge and refresh on right)
                 HorizontalLayout {
@@ -1914,6 +1924,8 @@ export component LiveScreen inherits Rectangle {
                                             background: row.selected ? VayrenPalette.live-row-checked : (wl-row-touch.has-hover ? VayrenPalette.hover : transparent);
                                             border-width: 1px;
                                             border-color: row.selected ? VayrenPalette.live-teal-deep : (wl-row-touch.has-hover ? VayrenPalette.live-line-soft : transparent);
+                                            animate background { duration: 80ms; }
+                                            animate border-color { duration: 80ms; }
 
                                             wl-row-touch := TouchArea {
                                                 mouse-cursor: pointer;
