@@ -7,7 +7,22 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-ui-polish-2-alignment-20261026):** LIVE UI POLISH PASS 2 (visual-only; numeric-column alignment, hover, stat centering) —
+**Latest update (release-v1.37.0-20261026):** RELEASE v1.37.0 — LIVE MARKET READINESS GATE HARDENING, ZEEL LIVE ORDER EXECUTION PASS, & EOD RECONCILIATION —
+- **Release Version:** `v1.37.0` (`pyproject.toml` bumped from `1.36.0`).
+- **Live Market Readiness Hardening:**
+  - Hardened `Market Data Streaming` gate in `src/app/services/live_trading_service.py`: stored candles alone (`22/22`) can NEVER satisfy live streaming readiness without an active, healthy broker live feed.
+  - Corrected legacy `Arming — NOT READY` wording to honest, actionable operator consent states.
+  - 19 regression tests added and passed cleanly in `src/app/tests/test_safety_reporting.py`.
+- **End-to-End Live Venue Execution Pass (NSE Cash via FYERS):**
+  - Live order test executed for `NSE:ZEEL-EQ`: Short Sell 1 share @ ₹65.72 (`FILLED` at 09:59:50 IST, Broker ID `26102600117170`).
+  - Square-off executed: Buy 1 share @ ₹64.75 (`FILLED` at 12:14:12 IST, Broker ID `26102600288530`).
+  - Net Realized Profit booked: `+₹0.97`.
+  - Final Position Book: `0` (FLAT / Zero open exposure).
+- **Session Reconciliation & Governance:**
+  - Reconciliation verdict: `SYNCED` (`blocks_live: False`).
+  - All CI validators and governance tests 100% green (`validate_language_ownership` 430/430 files, `validate_repo_graph` 0 unresolved, `vayren-domain` 109/109, `live_ui_defects_regression` 23/23, `live_render_snapshot` 8/8).
+
+**Previous update (live-ui-polish-2-alignment-20261026):** LIVE UI POLISH PASS 2 (visual-only; numeric-column alignment, hover, stat centering) —
 - **Numeric columns right-aligned everywhere in the blotter + watchlist** (headers AND rows; column widths unchanged): watchlist LTP/CHG%/REF HI/REF LO/BREAK LOW/ENTRY/STOP/RISK-SH/QTY/MAX RISK/PLANNED/UTIL/P&L (13 columns); Positions QTY/ENTRY/LTP/P&L/P&L %; Orders + Fills QTY/PRICE. Text columns (SYMBOL/STATUS/ELIG/SIGNAL/ORDER/POSITION/DETAIL/TIME/SIDE) stay left-aligned. Digits now line up at their right edge instead of drifting with text-left.
 - **Clear-events button hover feedback:** the blotter-tab-bar Clear chip now reacts like table rows surface/hairline flip (`clear-touch.has-hover` bg `hover` + border `live-line-soft`, text brightens) — before it had only a pointer cursor and stayed visually inert.
 - **Daily P&L stat cells centered:** `stat.label` now centers over `stat.value` inside each stat cell (label narrower than the money reads as one fact, not two columns).
