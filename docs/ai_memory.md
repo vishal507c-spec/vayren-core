@@ -19,13 +19,22 @@
     - Tuned `ORDER_WS_STABLE_SECONDS = 120.0` to match observed production connection cycles (40–65s), ensuring competing reconnect loops properly increment flaps.
     - Updated `_note_ws_flap` to count consecutive connection failures (`connected_at is None`) towards `ORDER_WS_FLAP_LIMIT = 3`, protecting the order-health gate against continuous 403 or handshake failures.
   - `src/broker/tests/test_fyers_websocket.py`: Added 5 focused unit tests covering singleton reuse, SDK AttributeError handling, flap thresholds, and consecutive connect failures.
-- **Verification:**
+- **Verification & Deployment:**
   - `pytest src/broker/tests/test_fyers_websocket.py -q`: 41/41 PASSED in 0.75s.
   - `pytest src/broker/tests/ -q`: 353/353 PASSED in ~60s.
   - `ruff check`: All checks PASSED (0 errors).
   - `pyright`: 0 errors, 0 warnings across touched files.
   - `python tools/validate_language_ownership.py`: PASSED (431 files checked).
   - `cargo check --workspace`: PASSED (Exit code 0).
+  - **Production Deployment:** Deployed commit `b529d46` to EC2 (`vayren` / `100.75.185.37`). `vayren-remote.service` restarted cleanly (PID `818739`). Singleton reuse verified in production: exactly 1 Order WS and 1 Market WS connected across all 22 discovered symbols, with zero recurring disconnects.
+  - **GitHub Actions CI Gate (100% Green ✓):** Run `40558085821` on `main` passed completely in 9m43s:
+    - `✓ validators in 38s`
+    - `✓ quality in 53s`
+    - `✓ test-shard-pure in 1m3s`
+    - `✓ test-shard-stateful in 2m34s`
+    - `✓ test-shard-rust-shell in 5m45s`
+    - `✓ build-test in 9m33s`
+    - `✓ CI gate in 3s`
 
 **Previous update (fyers-intraday-sell-first-short-entry-20261027):** INTRADAY SELL-FIRST SHORT ENTRY ENABLEMENT IN TRADING ENGINE —
 - **Root Cause Identified:**
