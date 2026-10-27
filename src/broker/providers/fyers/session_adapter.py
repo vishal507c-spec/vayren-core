@@ -254,6 +254,7 @@ def _safe_close_order_ws(ws: Any) -> None:
     # 2. Defensively supply joinable running_thread if None to avoid SDK AttributeError
     # in order_ws.py line 444 (self.running_thread.join()).
     if getattr(ws, "running_thread", None) is None:
+
         class _NoOpJoinable:
             def join(self, timeout: float | None = None) -> None:
                 pass
@@ -697,9 +698,7 @@ class FyersSessionAdapter:
         """
         connected_at = self._order_ws_connected_at
         now = time.monotonic()
-        if connected_at is not None and (
-            now - connected_at >= ORDER_WS_STABLE_SECONDS
-        ):
+        if connected_at is not None and (now - connected_at >= ORDER_WS_STABLE_SECONDS):
             self._order_ws_flaps = 0
             return
         if connected_at is None:

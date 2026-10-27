@@ -1146,7 +1146,6 @@ def test_verify_order_stream_does_not_restart_a_cooldown_socket() -> None:
     adapter.disconnect()
 
 
-
 def test_safe_close_order_ws_handles_sdk_none_running_thread(caplog: Any) -> None:
     """Official SDK crashes close_connection with AttributeError when running_thread is None.
 
