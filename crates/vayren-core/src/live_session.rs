@@ -905,12 +905,34 @@ impl LiveSession {
         now_epoch: f64,
     ) -> Result<(), String> {
         let (ledger_qty, _, _) = self.ledger.strategy_state_for(&signal.symbol);
-        if signal.side == Side::Buy && ledger_qty > 0.0 {
-            return Ok(());
-        }
-        if signal.side == Side::Sell && ledger_qty <= 0.0 {
-            return Ok(());
-        }
+        let (quantity, target) = match signal.side {
+            Side::Buy => {
+                if ledger_qty > 0.0 {
+                    return Ok(()); // already long — single-position model skips re-entry
+                }
+                if ledger_qty < 0.0 {
+                    // covering open short position
+                    (ledger_qty.abs(), 0.0)
+                } else {
+                    // opening new long position
+                    let qty = self.default_quantity(&signal.symbol, signal.price);
+                    (qty, ledger_qty + qty)
+                }
+            }
+            Side::Sell => {
+                if ledger_qty < 0.0 {
+                    return Ok(()); // already short — single-position model skips re-entry
+                }
+                if ledger_qty > 0.0 {
+                    // exiting open long position
+                    (ledger_qty.abs(), 0.0)
+                } else {
+                    // opening new short position
+                    let qty = self.default_quantity(&signal.symbol, signal.price);
+                    (qty, ledger_qty - qty)
+                }
+            }
+        };
         self.contexts[index].intent_seq += 1;
         let intent_seq = self.contexts[index].intent_seq;
         let intent_id = make_intent_id(
@@ -919,12 +941,6 @@ impl LiveSession {
             signal.event_seq,
             intent_seq,
         );
-        let (quantity, target) = if signal.side == Side::Buy {
-            let quantity = self.default_quantity(&signal.symbol, signal.price);
-            (quantity, ledger_qty + quantity)
-        } else {
-            (ledger_qty.abs(), 0.0)
-        };
         let stale = self.normalizer.is_stale(&signal.symbol);
         let broker_ok = self.broker.as_mut().map(|b| b.health().0).unwrap_or(false);
         let posture = self.adaptive.evaluate(stale, !broker_ok);

@@ -783,20 +783,43 @@ class LiveSession:
         self._processed_signals.add(sig_key)
         ledger_qty, side, _ = self._ledger.strategy_state_for(signal.symbol)
         raw_side = str(signal.side).upper()
-        if raw_side == "BUY" and ledger_qty > 0:
-            return  # already long — single-position model skips re-entry
-        if raw_side in ("SELL", "CLOSE") and ledger_qty <= 0:
-            return  # nothing to exit in the single-position model
+
+        if raw_side == "CLOSE":
+            if ledger_qty == 0:
+                return  # nothing to exit in the single-position model
+            effective_side = "SELL" if ledger_qty > 0 else "BUY"
+            is_entry = False
+        elif raw_side == "BUY":
+            if ledger_qty > 0:
+                return  # already long — single-position model skips re-entry
+            if ledger_qty < 0:
+                # Covering open short position
+                effective_side = "BUY"
+                is_entry = False
+            else:
+                # Opening new long position
+                effective_side = "BUY"
+                is_entry = True
+        elif raw_side == "SELL":
+            if ledger_qty < 0:
+                return  # already short — single-position model skips re-entry
+            if ledger_qty > 0:
+                # Exiting open long position
+                effective_side = "SELL"
+                is_entry = False
+            else:
+                # Opening new short position
+                effective_side = "SELL"
+                is_entry = True
+        else:
+            return
+
         context.intent_seq += 1
         intent_id = make_intent_id(
             signal.strategy_id, signal.strategy_version, signal.event_seq, context.intent_seq
         )
-        if raw_side == "CLOSE":
-            effective_side = "SELL" if ledger_qty > 0 else "BUY"
-            quantity = abs(ledger_qty)
-            target = 0.0
-        elif raw_side == "BUY":
-            effective_side = "BUY"
+
+        if is_entry:
             if self._mode == ExecutionMode.LIVE:
                 sized = self._live_sized_quantity(intent_id, signal, now_epoch, context=context)
                 if sized is None:
@@ -807,9 +830,8 @@ class LiveSession:
                 resolved_stop = self._resolve_signal_stop(signal, context)
                 if resolved_stop is not None and resolved_stop > 0:
                     self._stop_levels[signal.symbol] = resolved_stop
-            target = ledger_qty + quantity
-        else:  # SELL
-            effective_side = "SELL"
+            target = (ledger_qty + quantity) if effective_side == "BUY" else (ledger_qty - quantity)
+        else:
             quantity = abs(ledger_qty)
             target = 0.0
         posture = self._confidence.evaluate(self._confidence_input(signal.symbol))
@@ -1032,7 +1054,8 @@ class LiveSession:
             return ("ORDER_BLOCKED", "reconciliation blocks live")
         if not plan.symbol:
             return ("ORDER_BLOCKED", "invalid symbol")
-        if live and plan.side == "BUY" and intent.intent_id not in self._sized_risk:
+        is_entry = intent.target_position_qty != 0.0
+        if live and is_entry and intent.intent_id not in self._sized_risk:
             return ("ORDER_BLOCKED", "risk not validated for live order")
         if self._engine.by_intent(intent.intent_id) is not None:
             return ("ORDER_BLOCKED", f"duplicate intent: {intent.intent_id}")
@@ -1235,6 +1258,8 @@ class LiveSession:
         # PROTECTION_FAILED in the safety snapshot (never a forever-CLEAN
         # summary while a naked position sits at the venue).
         entry_stop = getattr(self._sized_risk.get(tracked.intent_id), "stop_price", None)
+        if entry_stop is None or entry_stop <= 0:
+            entry_stop = self._stop_levels.get(fill.symbol)
         if tracked.intent_id.startswith("sl:"):
             # Protective-stop fills belong to the entry's record, not a new one.
             entry_intent = self._entry_intents.get(fill.symbol, "")

@@ -7,7 +7,37 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-ui-cognitive-load-universal-scaling-20261026):** LIVE UI VISUAL COGNITIVE LOAD REDUCTION & UNIVERSAL DESKTOP SCREEN SCALING —
+**Latest update (fyers-intraday-sell-first-short-entry-20261027):** INTRADAY SELL-FIRST SHORT ENTRY ENABLEMENT IN TRADING ENGINE —
+- **Root Cause Identified:**
+  - In `src/execution/runtime/session.py` (`_handle_signal`):
+    - `if raw_side in ("SELL", "CLOSE") and ledger_qty <= 0: return` prematurely blocked any SELL signal when flat (`ledger_qty == 0`), assuming all SELL signals were exits for existing long positions.
+    - Quantity for SELL was hardcoded as `quantity = abs(ledger_qty)` and `target = 0.0`, resulting in 0 quantity if flat.
+    - `_pre_order_checks` line 1035 checked only `plan.side == "BUY"` for sized risk validation.
+- **Surgical Solution Implemented:**
+  - Symmetrically distinguished entries from exits:
+    - `raw_side == "SELL"` when `ledger_qty == 0` -> Short entry: sized via `_live_sized_quantity` (risk budget 0.15%, stop at `refHigh`), `effective_side = "SELL"`, `target = -quantity`.
+    - `raw_side == "SELL"` when `ledger_qty > 0` -> Long exit: `effective_side = "SELL"`, `quantity = abs(ledger_qty)`, `target = 0.0`.
+    - `raw_side == "SELL"` when `ledger_qty < 0` -> Re-entry skipped (already short).
+    - `raw_side == "BUY"` when `ledger_qty < 0` -> Short cover exit: `effective_side = "BUY"`, `quantity = abs(ledger_qty)`, `target = 0.0`.
+    - `raw_side == "BUY"` when `ledger_qty == 0` -> Long entry: existing logic preserved verbatim.
+    - `raw_side == "BUY"` when `ledger_qty > 0` -> Re-entry skipped (already long).
+    - `raw_side == "CLOSE"` -> Exits long or covers short depending on sign of `ledger_qty`; returns if flat.
+  - Pre-order check gate (`_pre_order_checks`): `is_entry = intent.target_position_qty != 0.0` ensures both BUY and SELL short entries are validated for sized risk, while all exits (BUY covers and SELL closes) safely bypass.
+  - Stop protection resolution on fill (`_apply_fill`): fallback to `self._stop_levels.get(fill.symbol)` ensures the protective stop order placed at the broker is accurately sized with strategy-provided stop. For short positions (`position.quantity < 0`), `_place_protective_stop` generates `side = "BUY"`, `order_type = "STOP_MARKET"`.
+  - FYERS adapter compliance verified: `_venue_product` outputs `"INTRADAY"`, `_venue_side` maps `SELL` to `-1`, `BUY` (protective stop / cover) to `1`.
+  - Rust twin `crates/vayren-core/src/live_session.rs` updated in exact parity.
+- **Verification:**
+  - `src/execution/tests/test_short_entry.py`: 10/10 PASSED.
+  - `pytest src/execution/tests`: 246/246 PASSED.
+  - `pytest src/strategy/tests`: 209/209 PASSED (OBR C1C4 strategy untouched).
+  - `pytest src/risk/tests`: 28/28 PASSED (Risk rules untouched).
+  - `pytest src/broker/tests`: 346/346 PASSED.
+  - `cargo check -p vayren-core`: PASSED (0 errors).
+  - `cargo check --workspace`: PASSED (0 errors).
+  - `python tools/validate_language_ownership.py`: PASSED (431 files checked).
+  - `ruff check src/execution`: All checks passed.
+
+**Previous update (live-ui-cognitive-load-universal-scaling-20261026):** LIVE UI VISUAL COGNITIVE LOAD REDUCTION & UNIVERSAL DESKTOP SCREEN SCALING —
 - **Cognitive Load Reduction (Zero Brain Fatigue):**
   - Streamlined visual hierarchy in Live mode cards (`LiveTopCard`, `LiveBrokerCapitalCard`): adjusted card geometry (`46px` height, `110-165px` and `150-205px` width bounds).
   - Added subtle interactive lighting (`card-ta.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel`) with smooth 120ms transitions.
