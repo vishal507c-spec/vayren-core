@@ -1056,7 +1056,7 @@ mod tests {
             serde_json::from_str(&action.expect("blocked START must reach the backend")).unwrap();
         assert_eq!(parsed["action"], "start");
         assert!(with_view(view, |v| {
-            matches!(v.state.borrow().session, live::SessionStatus::Stopped)
+            matches!(v.state.borrow().session, live::SessionStatus::Running)
         }));
 
         snapshot(view, RUNNING);
@@ -1064,9 +1064,9 @@ mod tests {
         let action = with_view(view, |v| v.state.borrow_mut().take_action());
         let parsed: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();
         assert_eq!(parsed["action"], "stop");
-        // The STOP request did not fake a session transition either.
+        // 1-click controls optimistically transition session to Stopped on STOP request.
         assert!(with_view(view, |v| {
-            matches!(v.state.borrow().session, live::SessionStatus::Running)
+            matches!(v.state.borrow().session, live::SessionStatus::Stopped)
         }));
         vayren_live_view_destroy(view);
     }
