@@ -2339,7 +2339,7 @@ mod tests {
     }
 
     #[test]
-    fn sell_with_flat_position_skips() {
+    fn sell_with_flat_position_enters_short() {
         let mut signal = buy_signal();
         signal.side = Side::Sell;
         let (mut session, journal, _) = session_with(
@@ -2363,8 +2363,41 @@ mod tests {
         );
         start_ready(&mut session, warmup, FakeBroker::paper());
         assert_eq!(session.step(1_786_000_000.0).unwrap(), 1);
-        assert!(journal.borrow().has("SIGNAL_GENERATED"));
-        assert!(!journal.borrow().has("ORDER_PLANNED"));
+        let journal = journal.borrow();
+        assert!(journal.has("SIGNAL_GENERATED"));
+        assert!(journal.has("ORDER_PLANNED"));
+        assert_eq!(session.orders_today(), 1);
+    }
+
+    #[test]
+    fn sell_with_short_position_skips_reentry() {
+        let mut signal = buy_signal();
+        signal.side = Side::Sell;
+        let (mut session, journal, _) = session_with(
+            vec![signal],
+            vec![candle("A", 1)],
+            FakeBroker::paper(),
+            permissive_policy(),
+        );
+        let mut warmup = HashMap::new();
+        warmup.insert(
+            "strat".to_string(),
+            vec![Bar::new(
+                "A",
+                "2026-01-01 09:15:00",
+                99.0,
+                101.0,
+                98.0,
+                100.0,
+                1000,
+            )],
+        );
+        start_ready(&mut session, warmup, FakeBroker::paper());
+        session.ledger.apply_fill("A", Side::Sell, 10.0, 100.0, 0.0);
+        assert_eq!(session.step(1_786_000_000.0).unwrap(), 1);
+        let journal = journal.borrow();
+        assert!(journal.has("SIGNAL_GENERATED"));
+        assert!(!journal.has("ORDER_PLANNED"));
         assert_eq!(session.orders_today(), 0);
     }
 
