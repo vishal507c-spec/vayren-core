@@ -8,6 +8,7 @@ order execution: ``place_order``, ``cancel_order``, ``modify_order``,
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import re
@@ -175,7 +176,7 @@ _ORDER_INTENT_MEMORY_LIMIT = 2000
 ORDER_WS_SUBSCRIPTION = "OnOrders,OnTrades"
 
 #: A connection shorter than this never carried an order update.
-ORDER_WS_STABLE_SECONDS = 30.0
+ORDER_WS_STABLE_SECONDS = 120.0
 #: Consecutive short-lived connections before the socket is abandoned.
 ORDER_WS_FLAP_LIMIT = 3
 #: After abandoning the socket, wait this long before a cold start again.
@@ -233,6 +234,58 @@ class _AccountSnapshotFetch:
         self.positions: tuple[dict[str, Any], ...] = ()
         self.orders: tuple[dict[str, Any], ...] = ()
         self.error: Exception | None = None
+
+
+def _safe_close_order_ws(ws: Any) -> None:
+    """Safely close FyersOrderSocket handling SDK AttributeError without leaking threads.
+
+    The official fyers_apiv3 SDK (order_ws.py:444) calls self.running_thread.join()
+    without checking if self.running_thread is None, raising AttributeError and
+    abandoning t.join() and ping_thread.join(). This leaks background socket and ping
+    threads as zombies that continually fight for the single-user session.
+    """
+    if ws is None:
+        return
+    # 1. Stop SDK auto-reconnect loop so on_close doesn't re-dial
+    if hasattr(ws, "restart_flag"):
+        with contextlib.suppress(Exception):
+            ws.restart_flag = False
+
+    # 2. Defensively supply joinable running_thread if None to avoid SDK AttributeError
+    # in order_ws.py line 444 (self.running_thread.join()).
+    if getattr(ws, "running_thread", None) is None:
+        class _NoOpJoinable:
+            def join(self, timeout: float | None = None) -> None:
+                pass
+
+        with contextlib.suppress(Exception):
+            ws.running_thread = _NoOpJoinable()
+
+    # 3. Close connection and handle SDK AttributeError specifically without hiding others
+    if hasattr(ws, "close_connection"):
+        try:
+            ws.close_connection()
+        except AttributeError as exc:
+            # The official fyers_apiv3 SDK calls self.running_thread.join() on None.
+            # Only intercept this specific SDK flaw; do not hide unrelated exceptions.
+            if "'NoneType' object has no attribute 'join'" in str(exc) or (
+                hasattr(exc, "name") and exc.name == "join"
+            ):
+                logger.info(
+                    "ORDER_WS_CLOSE_HANDLED broker=FYERS reason=SDK running_thread None bypassed"
+                )
+                t = getattr(ws, "t", None)
+                if t is not None and hasattr(t, "join") and getattr(t, "is_alive", lambda: False)():
+                    t.join(timeout=2.0)
+                ping_thread = getattr(ws, "ping_thread", None)
+                if (
+                    ping_thread is not None
+                    and hasattr(ping_thread, "join")
+                    and getattr(ping_thread, "is_alive", lambda: False)()
+                ):
+                    ping_thread.join(timeout=2.0)
+            else:
+                raise
 
 
 class FyersSessionAdapter:
@@ -599,8 +652,7 @@ class FyersSessionAdapter:
         """Disconnect and cleanup FyersOrderSocket."""
         if self._order_ws is not None:
             try:
-                if hasattr(self._order_ws, "close_connection"):
-                    self._order_ws.close_connection()
+                _safe_close_order_ws(self._order_ws)
             except Exception as exc:
                 logger.warning("ORDER_WS_CLOSE_WARN broker=FYERS reason=%s", exc)
         self._order_ws = None
@@ -644,13 +696,31 @@ class FyersSessionAdapter:
         covers order state, and the manager keeps the leg degraded.
         """
         connected_at = self._order_ws_connected_at
+        now = time.monotonic()
         if connected_at is not None and (
-            time.monotonic() - connected_at >= ORDER_WS_STABLE_SECONDS
+            now - connected_at >= ORDER_WS_STABLE_SECONDS
         ):
             self._order_ws_flaps = 0
             return
         if connected_at is None:
-            return  # never actually connected: not a flap, just a failure
+            # If the socket never connected (e.g. repeated handshake/auth 403 errors),
+            # count the failure towards the breaker so it does not loop forever.
+            self._order_ws_flaps += 1
+            if self._order_ws_flaps < ORDER_WS_FLAP_LIMIT:
+                return
+            logger.warning(
+                "ORDER_WS_ABANDONED broker=FYERS failures=%d — venue rejected connection "
+                "repeatedly; REST polling remains active",
+                self._order_ws_flaps,
+            )
+            self._order_ws_flaps = 0
+            self._stop_order_ws()
+            self._order_ws_suspended_until = now + ORDER_WS_COOLDOWN_SECONDS
+            self._order_ws_error = (
+                "order stream unavailable — venue rejected connection (REST fallback active)"
+            )
+            return
+
         if self._order_ws_flap_counted:
             return  # this connection already counted once
         self._order_ws_flap_counted = True
@@ -664,7 +734,7 @@ class FyersSessionAdapter:
         )
         self._order_ws_flaps = 0
         self._stop_order_ws()
-        self._order_ws_suspended_until = time.monotonic() + ORDER_WS_COOLDOWN_SECONDS
+        self._order_ws_suspended_until = now + ORDER_WS_COOLDOWN_SECONDS
         self._order_ws_error = (
             "order stream unavailable — venue closes the socket (REST fallback active)"
         )

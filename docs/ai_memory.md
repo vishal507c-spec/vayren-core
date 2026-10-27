@@ -7,7 +7,27 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (fyers-intraday-sell-first-short-entry-20261027):** INTRADAY SELL-FIRST SHORT ENTRY ENABLEMENT IN TRADING ENGINE —
+**Latest update (fyers-order-ws-singleton-reconnect-fix-20261027):** FYERS ORDER WEBSOCKET SINGLETON REUSE, SDK CLEANUP & FLAP TUNING —
+- **Root Cause Addressed:**
+  - Production investigation (1,135 disconnect logs on 2026-10-27) revealed duplicate `FyersSessionAdapter` instances created across 22 live sessions (44 total instances, 77 subscriptions) competing for the single FYERS order WebSocket connection allowed per account. Under FYERS's single-connection policy, each new connection violently kicked off the older connection.
+  - SDK bug in `fyers_apiv3==3.1.18` `close_connection` threw `AttributeError: 'NoneType' object has no attribute 'join'` when `self.running_thread is None`, prematurely aborting cleanup and leaking zombie background socket and ping threads.
+  - Flap breaker threshold `ORDER_WS_STABLE_SECONDS = 30.0` was repeatedly resetting flap counters on 40s and 65s transient connections, preventing the flap circuit breaker from tripping. Consecutive connection failures (where `connected_at is None`) were also not counting towards flaps.
+- **Surgical Solution Implemented:**
+  - `src/broker/providers/fyers/live_activation.py`: Implemented thread-safe singleton caching (`_get_shared_trading_face`, `_get_shared_market_data_face`, `_reset_shared_instances`). `FactoryPlugin` now returns the shared singleton adapter across all live sessions and symbol lookups, eliminating multi-instance connection thrashing.
+  - `src/broker/providers/fyers/session_adapter.py`:
+    - Added `_safe_close_order_ws`: sets `ws.restart_flag = False` to stop the SDK reconnect loop, injects `_NoOpJoinable` running thread if `None` to bypass the SDK bug, catches specifically `'NoneType' object has no attribute 'join'` (re-raising any unrelated `AttributeError`), and joins `ws.t` and `ws.ping_thread` with a 2.0s timeout to eliminate zombie threads.
+    - Tuned `ORDER_WS_STABLE_SECONDS = 120.0` to match observed production connection cycles (40–65s), ensuring competing reconnect loops properly increment flaps.
+    - Updated `_note_ws_flap` to count consecutive connection failures (`connected_at is None`) towards `ORDER_WS_FLAP_LIMIT = 3`, protecting the order-health gate against continuous 403 or handshake failures.
+  - `src/broker/tests/test_fyers_websocket.py`: Added 5 focused unit tests covering singleton reuse, SDK AttributeError handling, flap thresholds, and consecutive connect failures.
+- **Verification:**
+  - `pytest src/broker/tests/test_fyers_websocket.py -q`: 41/41 PASSED in 0.75s.
+  - `pytest src/broker/tests/ -q`: 353/353 PASSED in ~60s.
+  - `ruff check`: All checks PASSED (0 errors).
+  - `pyright`: 0 errors, 0 warnings across touched files.
+  - `python tools/validate_language_ownership.py`: PASSED (431 files checked).
+  - `cargo check --workspace`: PASSED (Exit code 0).
+
+**Previous update (fyers-intraday-sell-first-short-entry-20261027):** INTRADAY SELL-FIRST SHORT ENTRY ENABLEMENT IN TRADING ENGINE —
 - **Root Cause Identified:**
   - In `src/execution/runtime/session.py` (`_handle_signal`):
     - `if raw_side in ("SELL", "CLOSE") and ledger_qty <= 0: return` prematurely blocked any SELL signal when flat (`ledger_qty == 0`), assuming all SELL signals were exits for existing long positions.

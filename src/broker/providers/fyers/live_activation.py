@@ -7,7 +7,9 @@ Supports both:
 
 from __future__ import annotations
 
+import contextlib
 import os
+import threading
 
 from broker.capabilities import CapabilitySet, Domain
 from broker.faces import FactoryPlugin, StaticPlugin
@@ -46,6 +48,55 @@ def live_requirements() -> tuple[str, ...]:
     return tuple(missing)
 
 
+_shared_lock = threading.Lock()
+_shared_adapter: FyersSessionAdapter | None = None
+_shared_market_data: FyersLiveMarketData | None = None
+
+
+def _get_shared_trading_face(app_id: str, access_token: str) -> FyersSessionAdapter:
+    global _shared_adapter
+    with _shared_lock:
+        if (
+            _shared_adapter is None
+            or getattr(_shared_adapter, "_app_id", None) != app_id
+            or getattr(_shared_adapter, "_token", None) != access_token
+        ):
+            if _shared_adapter is not None:
+                with contextlib.suppress(Exception):
+                    _shared_adapter.disconnect()
+            _shared_adapter = FyersSessionAdapter(app_id=app_id, access_token=access_token)
+        return _shared_adapter
+
+
+def _get_shared_market_data_face(app_id: str, access_token: str) -> FyersLiveMarketData:
+    global _shared_market_data
+    with _shared_lock:
+        if (
+            _shared_market_data is None
+            or getattr(_shared_market_data, "_app_id", None) != app_id
+            or getattr(_shared_market_data, "_token", None) != access_token
+        ):
+            if _shared_market_data is not None:
+                with contextlib.suppress(Exception):
+                    _shared_market_data.disconnect()
+            _shared_market_data = FyersLiveMarketData(app_id=app_id, access_token=access_token)
+        return _shared_market_data
+
+
+def _reset_shared_instances() -> None:
+    """Reset cached singleton instances (for test isolation)."""
+    global _shared_adapter, _shared_market_data
+    with _shared_lock:
+        if _shared_adapter is not None:
+            with contextlib.suppress(Exception):
+                _shared_adapter.disconnect()
+            _shared_adapter = None
+        if _shared_market_data is not None:
+            with contextlib.suppress(Exception):
+                _shared_market_data.disconnect()
+            _shared_market_data = None
+
+
 def register_fyers_live() -> tuple[bool, str]:
     """Register the live venue when explicitly activated via environment. Idempotent."""
     missing = live_requirements()
@@ -62,12 +113,8 @@ def register_fyers_live() -> tuple[bool, str]:
                 name=LIVE_VENUE_ID,
                 display_name=LIVE_DISPLAY_NAME,
                 factories={
-                    Domain.TRADING: lambda: FyersSessionAdapter(
-                        app_id=app_id, access_token=access_token
-                    ),
-                    Domain.MARKET_DATA: lambda: FyersLiveMarketData(
-                        app_id=app_id, access_token=access_token
-                    ),
+                    Domain.TRADING: lambda: _get_shared_trading_face(app_id, access_token),
+                    Domain.MARKET_DATA: lambda: _get_shared_market_data_face(app_id, access_token),
                 },
                 capabilities=_combined_capabilities(),
             ),
@@ -97,6 +144,12 @@ def register_fyers_live_instance(
     """
     if adapter is None:
         return False, "no authenticated adapter provided"
+    global _shared_adapter, _shared_market_data
+    with _shared_lock:
+        if isinstance(adapter, FyersSessionAdapter):
+            _shared_adapter = adapter
+        if isinstance(market_data, FyersLiveMarketData):
+            _shared_market_data = market_data
     face_map: dict[Domain, object] = {Domain.TRADING: adapter}
     if market_data is not None:
         face_map[Domain.MARKET_DATA] = market_data
@@ -127,6 +180,7 @@ def register_fyers_live_instance(
 
 def unregister_fyers_live() -> None:
     """Unregister the live venue (SYSTEM -> BROKERS disconnect or session reset)."""
+    _reset_shared_instances()
     registry = default_registry()
     if LIVE_VENUE_ID in registry:
         registry.unregister(LIVE_VENUE_ID)
@@ -142,4 +196,5 @@ __all__ = [
     "register_fyers_live",
     "register_fyers_live_instance",
     "unregister_fyers_live",
+    "_reset_shared_instances",
 ]

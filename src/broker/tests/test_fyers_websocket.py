@@ -1144,3 +1144,145 @@ def test_verify_order_stream_does_not_restart_a_cooldown_socket() -> None:
     assert "cooldown" in reason
     assert len(created) == 1, "cooldown must not be bypassed by START"
     adapter.disconnect()
+
+
+
+def test_safe_close_order_ws_handles_sdk_none_running_thread(caplog: Any) -> None:
+    """Official SDK crashes close_connection with AttributeError when running_thread is None.
+
+    _safe_close_order_ws must catch this specific SDK flaw, join t & ping_thread,
+    and prevent thread/socket leaks.
+    """
+    import logging
+
+    from broker.providers.fyers.session_adapter import _safe_close_order_ws
+
+    joined_threads: list[str] = []
+
+    class _MockThread:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def is_alive(self) -> bool:
+            return True
+
+        def join(self, timeout: float | None = None) -> None:
+            joined_threads.append(f"{self.name}:{timeout}")
+
+    class _CrashingSdkSocket:
+        def __init__(self) -> None:
+            self.restart_flag = True
+            self.running_thread = None
+            self.t = _MockThread("t")
+            self.ping_thread = _MockThread("ping_thread")
+            self.closed = False
+
+        def close_connection(self) -> None:
+            self.closed = True
+            # Exactly what fyers_apiv3 order_ws.py:444 does:
+            self.running_thread.join()  # type: ignore[union-attr]
+
+    ws = _CrashingSdkSocket()
+    with caplog.at_level(logging.INFO, logger="broker.providers.fyers.session_adapter"):
+        _safe_close_order_ws(ws)
+
+    assert not ws.restart_flag, "restart_flag must be cleared to stop SDK reconnect loop"
+    assert ws.closed, "close_connection must be called"
+    assert any("t:2.0" in s or "ping_thread:2.0" in s for s in joined_threads) or hasattr(
+        ws.running_thread, "join"
+    )
+
+
+def test_safe_close_order_ws_does_not_suppress_unrelated_attribute_error() -> None:
+    """Unrelated AttributeErrors must not be swallowed."""
+    from broker.providers.fyers.session_adapter import _safe_close_order_ws
+
+    class _BrokenSocket:
+        def close_connection(self) -> None:
+            raise AttributeError("'SomeObject' object has no attribute 'unrelated_field'")
+
+    with pytest.raises(AttributeError, match="unrelated_field"):
+        _safe_close_order_ws(_BrokenSocket())
+
+
+def test_order_ws_flap_threshold_tuned_to_production_cycle() -> None:
+    """Production investigation showed competing reconnect loops last 40-65s.
+
+    ORDER_WS_STABLE_SECONDS is 120s so connections lasting 40s or 65s do NOT
+    prematurely reset the flap counter, while true 120s+ connections do.
+    """
+    adapter, _created = _vendor_adapter(None)
+    adapter.connect()
+    assert ORDER_WS_STABLE_SECONDS == 120.0
+
+    # 1. Connection lasting 65s (typical production knock-off time) does NOT reset flaps
+    adapter._order_ws_connected_at = time.monotonic() - 65.0
+    adapter._on_ws_close({"code": 1006})
+    assert adapter._order_ws_flaps == 1, "65s connection must not reset flap count"
+
+    # 2. Connection lasting 40s (typical production medium time) does NOT reset flaps
+    adapter._on_ws_connect()
+    adapter._order_ws_connected_at = time.monotonic() - 40.0
+    adapter._on_ws_close({"code": 1006})
+    assert adapter._order_ws_flaps == 2, "40s connection must not reset flap count"
+
+    # 3. Connection lasting 121s (stable) DOES reset flaps
+    adapter._on_ws_connect()
+    adapter._order_ws_connected_at = time.monotonic() - 121.0
+    adapter._on_ws_close({"code": 1006})
+    assert adapter._order_ws_flaps == 0, "121s connection is stable and resets flap count"
+    adapter.disconnect()
+
+
+def test_order_ws_counts_consecutive_connect_failures_as_flaps() -> None:
+    """Repeated handshake/auth 403 errors where connected_at is None must trip the breaker."""
+    adapter, _created = _vendor_adapter(None)
+    adapter._order_ws_connected_at = None
+
+    for _ in range(ORDER_WS_FLAP_LIMIT):
+        adapter._note_ws_flap()
+
+    assert adapter._order_ws is None
+    assert adapter._order_ws_suspended_until > time.monotonic()
+    healthy, reason = adapter.order_stream_health()
+    assert not healthy
+    assert "rejected" in reason or "unavailable" in reason or "disconnected" in reason
+
+
+def test_live_activation_singleton_reuse(monkeypatch: Any) -> None:
+    """live_activation registers a shared singleton adapter so multiple sessions
+    do not spawn duplicate competing WebSockets."""
+    from broker.providers.fyers.live_activation import (
+        ACCESS_TOKEN_ENV,
+        API_KEY_ENV,
+        ENABLE_ENV,
+        _reset_shared_instances,
+        register_fyers_live,
+        unregister_fyers_live,
+    )
+    from broker.registry import default_registry
+    from broker.vocab import Domain
+
+    monkeypatch.setenv(ENABLE_ENV, "true")
+    monkeypatch.setenv(API_KEY_ENV, "TEST_APP_ID")
+    monkeypatch.setenv(ACCESS_TOKEN_ENV, "TEST_TOKEN")
+
+    _reset_shared_instances()
+    try:
+        ok, reason = register_fyers_live()
+        assert ok, f"registration failed: {reason}"
+
+        record = default_registry().get("fyers-live")
+        face1 = record.plugin.face(Domain.TRADING)
+        face2 = record.plugin.face(Domain.TRADING)
+        assert face1 is face2, (
+            "Multiple requests for TRADING face must return the exact same singleton instance"
+        )
+
+        md1 = record.plugin.face(Domain.MARKET_DATA)
+        md2 = record.plugin.face(Domain.MARKET_DATA)
+        assert md1 is md2, (
+            "Multiple requests for MARKET_DATA face must return the exact same singleton instance"
+        )
+    finally:
+        unregister_fyers_live()
