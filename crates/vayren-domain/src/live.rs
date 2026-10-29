@@ -4359,9 +4359,11 @@ pub fn project(state: &LiveState) -> LiveView {
     // ── WebSocket facts view ──
     let ws_status_upper = state.websocket.status.trim().to_uppercase();
     let (ws_status, ws_tone) = match ws_status_upper.as_str() {
-        "CONNECTED" => ("CONNECTED".to_string(), 1),
+        "CONNECTED" | "LIVE" => (ws_status_upper.clone(), 1),
+        "MARKET CLOSED" => ("MARKET CLOSED".to_string(), 0),
         "CONNECTING" => ("CONNECTING".to_string(), 2),
         "RECONNECTING" => ("RECONNECTING".to_string(), 2),
+        "DEGRADED" | "STALE" => (ws_status_upper.clone(), 2),
         "DISCONNECTED" => ("DISCONNECTED".to_string(), 3),
         "ERROR" | "OFFLINE" => (ws_status_upper.clone(), 3),
         "" => ("DISCONNECTED".to_string(), 3),
@@ -4398,8 +4400,9 @@ pub fn project(state: &LiveState) -> LiveView {
     };
     let md = MarketDataView {
         tone: match md_status.as_str() {
-            "STREAMING" => 1,
-            "STALE" | "CONNECTING" | "NOT REPORTED" => 2,
+            "STREAMING" | "LIVE" => 1,
+            "MARKET CLOSED" => 0,
+            "STALE" | "CONNECTING" | "DEGRADED" | "NOT REPORTED" => 2,
             "NO DATA" | "STOPPED" | "ERROR" | "FAILED" | "DISCONNECTED" => 3,
             _ => 2,
         },
@@ -8127,4 +8130,27 @@ mod tests {
         let view_updated2 = project(&st);
         assert_eq!(view_updated2.footer.snapshot_time, "21:15:00 IST");
     }
+
+    #[test]
+    fn test_market_closed_websocket_and_market_data_projection() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "websocket": {
+                "status": "MARKET CLOSED",
+                "latency_ms": 32.5,
+                "subscribed_symbols": 22
+            },
+            "market_data": {
+                "status": "MARKET CLOSED",
+                "exchange": "NSE",
+                "timeframe": "1m"
+            }
+        }));
+        let view = project(&st);
+        assert_eq!(view.ws.status, "MARKET CLOSED");
+        assert_eq!(view.ws.tone, 0);
+        assert_eq!(view.md.status, "MARKET CLOSED");
+        assert_eq!(view.md.tone, 0);
+    }
 }
+

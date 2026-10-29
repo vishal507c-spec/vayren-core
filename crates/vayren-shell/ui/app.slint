@@ -333,6 +333,7 @@ export component AppWindow inherits Window {
     in-out property <bool> conn-cta-enabled: false;
     in-out property <bool> conn-form-enabled: true;
     in-out property <bool> conn-is-connected: false;
+    in-out property <bool> conn-is-degraded: false;
     in-out property <bool> conn-is-failed: false;
     in-out property <string> conn-error-message: "";
     in-out property <bool> conn-disconnect-visible: false;
@@ -871,6 +872,7 @@ export component AppWindow inherits Window {
                     cta-enabled: root.conn-cta-enabled;
                     form-enabled: root.conn-form-enabled;
                     is-connected: root.conn-is-connected;
+                    is-degraded: root.conn-is-degraded;
                     is-failed: root.conn-is-failed;
                     error-message: root.conn-error-message;
                     disconnect-visible: root.conn-disconnect-visible;

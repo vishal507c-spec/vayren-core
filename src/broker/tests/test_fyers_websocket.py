@@ -1285,3 +1285,64 @@ def test_live_activation_singleton_reuse(monkeypatch: Any) -> None:
         )
     finally:
         unregister_fyers_live()
+
+
+
+def test_is_nse_market_open() -> None:
+    import datetime
+
+    from broker.providers.fyers.live_market_data import is_nse_market_open
+
+    ist = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    # Monday 09:14 IST -> False
+    mon_pre = datetime.datetime(2026, 10, 26, 9, 14, 0, tzinfo=ist).timestamp()
+    assert not is_nse_market_open(mon_pre)
+    # Monday 09:15 IST -> True
+    mon_open = datetime.datetime(2026, 10, 26, 9, 15, 0, tzinfo=ist).timestamp()
+    assert is_nse_market_open(mon_open)
+    # Monday 15:29 IST -> True
+    mon_mid = datetime.datetime(2026, 10, 26, 15, 29, 0, tzinfo=ist).timestamp()
+    assert is_nse_market_open(mon_mid)
+    # Monday 15:30 IST -> False
+    mon_close = datetime.datetime(2026, 10, 26, 15, 30, 0, tzinfo=ist).timestamp()
+    assert not is_nse_market_open(mon_close)
+    # Sunday 12:00 IST -> False
+    sun = datetime.datetime(2026, 10, 25, 12, 0, 0, tzinfo=ist).timestamp()
+    assert not is_nse_market_open(sun)
+
+
+def test_fyers_live_market_data_health_respects_market_hours() -> None:
+    import time
+
+    from broker.providers.fyers.live_market_data import FyersLiveMarketData
+
+    # Case 1: Market closed, last message > 120s ago -> NOT stale, returns market closed
+    closed_md = FyersLiveMarketData(
+        app_id="APP123",
+        access_token="TOK123",
+        market_hours_checker=lambda: False,
+    )
+    closed_md._running = True
+    closed_md._state = "CONNECTED"
+    closed_md._messages_received = 10
+    closed_md._last_message_at = time.monotonic() - 1500
+    closed_md._last_message_epoch = time.time() - 1500
+    ok, reason = closed_md.health()
+    assert ok is True
+    assert "market closed" in reason
+    assert "1500s ago" in reason
+
+    # Case 2: Market open, last message > 120s ago -> STALE
+    open_md = FyersLiveMarketData(
+        app_id="APP123",
+        access_token="TOK123",
+        market_hours_checker=lambda: True,
+    )
+    open_md._running = True
+    open_md._state = "CONNECTED"
+    open_md._messages_received = 10
+    open_md._last_message_at = time.monotonic() - 1500
+    open_md._last_message_epoch = time.time() - 1500
+    ok, reason = open_md.health()
+    assert ok is False
+    assert "stale — no market data for" in reason

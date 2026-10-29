@@ -13,9 +13,11 @@ registration, isolated state, shared deterministic clock sequence.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from math import floor
 from pathlib import Path
 from typing import Any, cast
@@ -859,6 +861,9 @@ class LiveSession:
         )
         snapshot = self._ledger.snapshot({signal.symbol: signal.price})
         spread = self._broker.reference_spread(signal.symbol) if self._broker else None
+        sig_ts = str(signal.timestamp)
+        if len(sig_ts) == 19 and "+" not in sig_ts and "Z" not in sig_ts:
+            sig_ts = f"{sig_ts}+05:30"
         request = RiskRequest(
             intent_id=intent.intent_id,
             strategy_id=intent.strategy_id,
@@ -866,7 +871,7 @@ class LiveSession:
             side=intent.side,
             quantity=intent.quantity,
             price=signal.price,
-            timestamp=signal.timestamp,
+            timestamp=sig_ts,
             position_qty=ledger_qty,
             day_pnl=snapshot.day_pnl,
             strategy_day_pnl=snapshot.day_pnl,
@@ -901,7 +906,7 @@ class LiveSession:
             side=plan.side,
             quantity=plan.quantity,
             price=signal.price,
-            timestamp=signal.timestamp,
+            timestamp=sig_ts,
             position_qty=ledger_qty,
             day_pnl=snapshot.day_pnl,
             strategy_day_pnl=snapshot.day_pnl,
@@ -1899,6 +1904,139 @@ class LiveSession:
                 reconcile_required=bool(restored),
             )
         # Ends at RECOVERING; start() moves RECOVERING -> VALIDATING explicitly.
+
+    def catchup_session_candles(
+        self,
+        bars: Sequence[Bar],
+        now_epoch: float | None = None,
+        current_quote: float | None = None,
+    ) -> int:
+        """Feed recovered completed session candles through strategy in chronological order.
+
+                Reconstructs the strategy state (candleCount, reference range, breakout state)
+                and detects any signals generated while offline.
+
+        '        Validates any recovered signal against:
+                - Current market conditions
+                - Signal expiry (SL breach, session time cutoff, adverse drift)
+                - Existing positions and broker orderbook/tradebook (idempotency)
+
+                Expired signals are recorded as SIGNAL_EXPIRED with exact reason.
+                Valid signals are executed through the normal risk and order pipeline.
+        """
+        from app.services.session_recovery import VENUE_TZ, evaluate_recovered_signal
+
+        now_ts = now_epoch if now_epoch is not None else time.time()
+        now_dt = datetime.fromtimestamp(now_ts, VENUE_TZ)
+        replayed = 0
+
+        sorted_bars = sorted(bars, key=lambda b: (str(b.timestamp), b.symbol))
+        for idx, bar in enumerate(sorted_bars):
+            last_ts = self._seen_candle_stamps.get(bar.symbol)
+            if last_ts is not None and bar.timestamp <= last_ts:
+                self._journal.record(
+                    "CANDLE_DUPLICATE_SKIPPED",
+                    symbol=bar.symbol,
+                    timestamp=bar.timestamp,
+                    source="session_catchup",
+                )
+                continue
+            self._seen_candle_stamps[bar.symbol] = bar.timestamp
+
+            event = CandleEvent(
+                symbol=bar.symbol,
+                timestamp=bar.timestamp,
+                seq=idx + 1,
+                source="session_recovery",
+                open=bar.open,
+                high=bar.high,
+                low=bar.low,
+                close=bar.close,
+                volume=bar.volume,
+                timeframe=bar.bar_size,
+                is_closed=True,
+            )
+
+            regime = self._regime.update(event.close, float(event.volume))
+            self._working_memory.regime = regime.value
+
+            for context in self._contexts.values():
+                try:
+                    driver = LiveStrategyDriver(context)
+                    signal = driver.on_candle(event)
+                except Exception as exc:
+                    self._journal.record(
+                        "STRATEGY_ERROR", strategy_id=context.strategy_id, reason=str(exc)
+                    )
+                    continue
+
+                if signal is None:
+                    continue
+
+                self._journal.record(
+                    "RECOVERED_SIGNAL_DETECTED",
+                    strategy_id=signal.strategy_id,
+                    signal_id=signal.signal_id,
+                    side=str(getattr(signal, "side", "") or ""),
+                    candle_timestamp=bar.timestamp,
+                )
+
+                subsequent = sorted_bars[idx + 1 :]
+                existing_pos: tuple[Any, ...] = ()
+                existing_ord: tuple[Any, ...] = ()
+                if self._broker is not None:
+                    with suppress(Exception):
+                        existing_pos = tuple(self._broker.positions() or ())
+                    with suppress(Exception):
+                        existing_ord = tuple(self._broker.open_orders() or ())
+
+                is_valid, expiry_reason = evaluate_recovered_signal(
+                    signal,
+                    now_dt=now_dt,
+                    current_quote=current_quote,
+                    subsequent_bars=subsequent,
+                    existing_positions=existing_pos,
+                    existing_orders=existing_ord,
+                )
+
+                if not is_valid:
+                    self._journal.record(
+                        "SIGNAL_EXPIRED",
+                        strategy_id=signal.strategy_id,
+                        signal_id=signal.signal_id,
+                        side=signal.side,
+                        price=signal.price,
+                        stop_loss=signal.stop_loss,
+                        candle_timestamp=bar.timestamp,
+                        reason=expiry_reason,
+                    )
+                    continue
+
+                self._journal.record(
+                    "RECOVERED_SIGNAL_VALIDATED",
+                    strategy_id=signal.strategy_id,
+                    signal_id=signal.signal_id,
+                    side=signal.side,
+                    price=signal.price,
+                )
+                self._working_memory.note_signal(signal.signal_id, signal.side)
+                try:
+                    self._handle_signal(context, signal, now_ts)
+                except Exception as exc:
+                    self._journal.record(
+                        "STRATEGY_ERROR", strategy_id=context.strategy_id, reason=str(exc)
+                    )
+
+            if self._broker is not None:
+                self._broker.on_market_price(bar.symbol, bar.close, bar.timestamp)
+            replayed += 1
+
+        self._journal.record(
+            "SESSION_RECOVERY_COMPLETED",
+            replayed_candles=replayed,
+            symbols=list({b.symbol for b in sorted_bars}),
+        )
+        return replayed
 
     def arm(self, reason: str = "") -> LiveArm:
         """Explicit live arming: DISARMED → ARMING → ARMED. Journaled.

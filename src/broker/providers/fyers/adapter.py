@@ -120,6 +120,10 @@ class FyersProvider:
                 "SYSTEM → BROKERS (or use the VAYREN_FYERS_* "
                 "environment variable fallback)",
             )
+        from broker.providers.fyers.live_activation import _shared_adapter
+
+        if _shared_adapter is not None:
+            return True, "FYERS API v3 historical data"
         return False, _HISTORY_UNAVAILABLE
 
     def symbols(self) -> set[str]:
@@ -127,12 +131,16 @@ class FyersProvider:
 
     def fetch_candles(
         self,
-        symbol: str,  # noqa: ARG002
-        interval: str,  # noqa: ARG002
-        start: datetime,  # noqa: ARG002
-        end: datetime,  # noqa: ARG002
+        symbol: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
     ) -> list[dict] | object:
-        raise ProviderError(_HISTORY_UNAVAILABLE, ERR_PROVIDER_UNAVAILABLE)
+        from broker.providers.fyers.live_activation import _shared_adapter
+
+        if _shared_adapter is not None:
+            return _shared_adapter.fetch_candles(symbol, interval, start, end)
+        raise ProviderError("FYERS session not authenticated", ERR_PROVIDER_UNAVAILABLE)
 
     def new_session(self) -> None:
         raise ProviderError(_HISTORY_UNAVAILABLE, ERR_PROVIDER_UNAVAILABLE)

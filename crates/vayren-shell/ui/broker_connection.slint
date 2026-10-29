@@ -61,6 +61,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     in property <bool> cta-enabled: false;
     in property <bool> form-enabled: true;
     in property <bool> is-connected: false;
+    in property <bool> is-degraded: false;
     in property <bool> is-failed: false;
     in property <string> error-message: "";
     in property <bool> disconnect-visible: false;
@@ -694,22 +695,22 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                             if root.is-connected: Rectangle {
                                 height: 42px;
                                 border-radius: VayrenDesign.radius;
-                                background: VayrenPalette.pos-dim;
+                                background: root.is-degraded ? VayrenPalette.warn-dim : VayrenPalette.pos-dim;
                                 border-width: 1px;
-                                border-color: VayrenPalette.pos;
+                                border-color: root.is-degraded ? VayrenPalette.amber : VayrenPalette.pos;
                                 HorizontalLayout {
                                     padding-left: VayrenDesign.sp-lg;
                                     padding-right: VayrenDesign.sp-lg;
                                     spacing: VayrenDesign.sp-md;
                                     Text {
-                                        text: "✓";
-                                        color: VayrenPalette.pos;
+                                        text: root.is-degraded ? "⚠" : "✓";
+                                        color: root.is-degraded ? VayrenPalette.amber : VayrenPalette.pos;
                                         font-size: VayrenDesign.fs-body;
                                         font-weight: 700;
                                         vertical-alignment: center;
                                     }
                                     Text {
-                                        text: "Account Connected & Verified";
+                                        text: root.is-degraded ? "Account Connected (Degraded)" : "Account Connected & Verified";
                                         color: VayrenPalette.text;
                                         font-size: VayrenDesign.fs-table;
                                         font-weight: 700;
@@ -717,13 +718,13 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                     }
                                     Text {
                                         text: "•";
-                                        color: VayrenPalette.pos;
+                                        color: root.is-degraded ? VayrenPalette.amber : VayrenPalette.pos;
                                         font-size: VayrenDesign.fs-table;
                                         vertical-alignment: center;
                                     }
                                     Text {
-                                        text: "Live trading ready";
-                                        color: VayrenPalette.pos;
+                                        text: root.is-degraded ? "Not ready — check degraded legs" : "Live trading ready";
+                                        color: root.is-degraded ? VayrenPalette.amber : VayrenPalette.pos;
                                         font-size: VayrenDesign.fs-small;
                                         vertical-alignment: center;
                                     }
@@ -733,13 +734,13 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         border-radius: 10px;
                                         background: VayrenPalette.bg;
                                         border-width: 1px;
-                                        border-color: VayrenPalette.pos;
+                                        border-color: root.is-degraded ? VayrenPalette.amber : VayrenPalette.pos;
                                         HorizontalLayout {
                                             padding-left: VayrenDesign.sp-sm;
                                             padding-right: VayrenDesign.sp-sm;
                                             Text {
-                                                text: "ACTIVE";
-                                                color: VayrenPalette.pos;
+                                                text: root.is-degraded ? "DEGRADED" : "ACTIVE";
+                                                color: root.is-degraded ? VayrenPalette.amber : VayrenPalette.pos;
                                                 font-size: 10px;
                                                 font-weight: 700;
                                                 vertical-alignment: center;
@@ -1152,19 +1153,19 @@ field-input := TextInput {
                             // Live connection state feedback card (Clear View)
                             Rectangle {
                                 border-radius: VayrenDesign.radius;
-                                background: root.is-connected ? VayrenPalette.pos-dim : root.is-failed ? VayrenPalette.neg-dim : !root.form-enabled ? VayrenPalette.focus-ring : VayrenPalette.bg1;
+                                background: root.is-connected ? (root.is-degraded ? VayrenPalette.warn-dim : VayrenPalette.pos-dim) : root.is-failed ? VayrenPalette.neg-dim : !root.form-enabled ? VayrenPalette.focus-ring : VayrenPalette.bg1;
                                 border-width: 1px;
-                                border-color: root.is-connected ? VayrenPalette.pos : root.is-failed ? VayrenPalette.neg : !root.form-enabled ? VayrenPalette.accent-dim : VayrenPalette.hairline;
+                                border-color: root.is-connected ? (root.is-degraded ? VayrenPalette.amber : VayrenPalette.pos) : root.is-failed ? VayrenPalette.neg : !root.form-enabled ? VayrenPalette.accent-dim : VayrenPalette.hairline;
                                 VerticalLayout {
                                     padding: VayrenDesign.sp-md;
                                     spacing: 4px;
                                     HorizontalLayout {
                                         spacing: VayrenDesign.sp-sm;
                                         alignment: start;
-                                        VStatusDot { tone: root.is-connected ? 1 : root.is-failed ? 3 : !root.form-enabled ? 2 : 0; }
+                                        VStatusDot { tone: root.is-connected ? (root.is-degraded ? 2 : 1) : root.is-failed ? 3 : !root.form-enabled ? 2 : 0; }
                                         Text {
-                                            text: root.is-connected ? "Connected & Verified" : root.is-failed ? "Connection Failed" : !root.form-enabled ? "Authenticating…" : "Ready to Connect";
-                                            color: root.is-connected ? VayrenPalette.pos : root.is-failed ? VayrenPalette.neg : !root.form-enabled ? VayrenPalette.accent : VayrenPalette.text;
+                                            text: root.is-connected ? (root.is-degraded ? "Connected (Degraded)" : "Connected & Verified") : root.is-failed ? "Connection Failed" : !root.form-enabled ? "Authenticating…" : "Ready to Connect";
+                                            color: root.is-connected ? (root.is-degraded ? VayrenPalette.amber : VayrenPalette.pos) : root.is-failed ? VayrenPalette.neg : !root.form-enabled ? VayrenPalette.accent : VayrenPalette.text;
                                             font-size: VayrenDesign.fs-small;
                                             font-weight: 700;
                                             vertical-alignment: center;
@@ -1177,7 +1178,7 @@ field-input := TextInput {
                                         wrap: word-wrap;
                                     }
                                     Text {
-                                        text: root.is-connected ? (root.status-message != "" ? root.status-message : "Session active & verified. Ready to trade.")
+                                        text: root.is-connected ? (root.status-message != "" ? root.status-message : (root.is-degraded ? "Session degraded — check connection legs." : "Session active & verified. Ready to trade."))
                                             : root.is-failed ? (root.error-message != "" ? root.error-message : "Authentication failed. Check credentials and retry.")
                                             : !root.form-enabled ? "Verifying credentials, 2FA and establishing secure session…"
                                             : "Enter your credentials and click connect.";

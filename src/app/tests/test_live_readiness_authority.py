@@ -458,3 +458,68 @@ def test_attach_broker_view_triggers_reconcile_on_active_sessions(
     service.attach_broker_view(manager, SimpleNamespace(active_broker=lambda: "fyers"))
 
     assert len(reconciled) == 1
+
+
+
+def test_snapshot_preserves_connected_and_capital_on_degraded_session(
+    service: LiveTradingService,
+) -> None:
+    """When a broker session is authenticated but degraded (e.g. after-market data quiet),
+    LIVE snapshot preserves connected: True and retains broker capital instead of showing
+    'Broker capital unavailable'."""
+    manager = _FakeManager(session_state="DEGRADED", auth_valid=True, version=5)
+    manager.snapshot = lambda: {  # type: ignore[method-assign]
+        "active_broker": "fyers",
+        "brokers": [
+            {
+                "id": "fyers",
+                "display": "FYERS",
+                "connected": True,
+                "configured": True,
+                "status": "DEGRADED",
+                "session": dict(manager.session),
+                "funds": {"available": 100.0},
+            }
+        ],
+    }
+    service.attach_broker_view(manager, SimpleNamespace(active_broker=lambda: "fyers"))
+
+    snap = service.snapshot()
+    view = service._broker_view()
+
+    assert view["connected"] is True
+    assert view["status"] == "DEGRADED"
+    assert snap["capital"]["status"] in ("CONNECTED", "DEGRADED")
+    assert snap["capital"]["available_margin"] == 100.0
+
+
+def test_snapshot_reports_market_closed_outside_trading_hours(
+    service: LiveTradingService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside regular trading hours, WebSocket and Market Data cards report
+    'MARKET CLOSED' rather than false 'DISCONNECTED' or 'STOPPED' alarms."""
+    import broker.providers.fyers.live_market_data as lmd_mod
+
+    manager = _FakeManager(session_state="DEGRADED", auth_valid=True, version=5)
+    manager.snapshot = lambda: {  # type: ignore[method-assign]
+        "active_broker": "fyers",
+        "brokers": [
+            {
+                "id": "fyers",
+                "display": "FYERS",
+                "connected": True,
+                "configured": True,
+                "status": "DEGRADED",
+                "session": dict(manager.session),
+                "funds": {"available": 100.0},
+            }
+        ],
+    }
+    service.attach_broker_view(manager, SimpleNamespace(active_broker=lambda: "fyers"))
+
+    # Force is_nse_market_open to return False
+    monkeypatch.setattr(lmd_mod, "is_nse_market_open", lambda: False)
+
+    snap = service.snapshot()
+    assert snap["websocket"]["status"] == "MARKET CLOSED"
+    assert snap["market_data"]["status"] == "MARKET CLOSED"

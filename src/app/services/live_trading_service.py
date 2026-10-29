@@ -1151,8 +1151,10 @@ class LiveTradingService:
                     view["reason"] = str(session.get("reason") or view["reason"] or "")
                     if stale and view["status"] == "CONNECTED":
                         view["status"] = "CHECKING"
-                    is_entry_connected = view["status"] == "CONNECTED" and auth_valid
-            if not is_entry_connected and view["status"] in ("CONNECTED", "LIVE_READY"):
+                    is_entry_connected = (
+                        view["status"] in ("CONNECTED", "DEGRADED", "LIVE_READY")
+                    ) and auth_valid
+            if not is_entry_connected and view["status"] in ("CONNECTED", "LIVE_READY", "DEGRADED"):
                 view["status"] = "DISCONNECTED"
             view["configured"] = bool(
                 entry.get("configured", False)
@@ -1163,6 +1165,9 @@ class LiveTradingService:
             view["connected"] = is_entry_connected
             view["account_id"] = str(entry.get("account_id", "") or "")
             view["last_sync"] = str(entry.get("last_sync", "") or "")
+            details = entry.get("details", {}) if isinstance(entry.get("details"), dict) else {}
+            view["last_tick_time"] = str(details.get("market_data_last_tick", "") or "")
+            view["latency_ms"] = details.get("market_data_latency_ms")
             funds = entry.get("funds")
             if isinstance(funds, dict):
                 clean = {
@@ -2206,20 +2211,25 @@ class LiveTradingService:
             strategy_state["orders_rejected_count"] = orders_rejected
             strategy_state["logic"] = f"{strat_name_str} (unchanged)"
 
-        ws_status = (
-            "CONNECTED"
-            if (running and feed == "live") or view.get("connected")
-            else ("NOT CONFIGURED" if not view.get("configured") else "DISCONNECTED")
-        )
-        md_status = (
-            "STREAMING"
-            if (running and (quotes or feed != "none")) or (view.get("connected") and quotes)
-            else (
-                "STALE"
-                if (view.get("connected") and not quotes)
-                else ("NO DATA" if not quotes else "STOPPED")
-            )
-        )
+        from broker.providers.fyers.live_market_data import is_nse_market_open
+
+        market_open = is_nse_market_open()
+        is_conn = bool((running and feed == "live") or view.get("connected"))
+        if is_conn:
+            if not market_open:
+                ws_status = "MARKET CLOSED"
+                md_status = "MARKET CLOSED"
+            elif view.get("status") == "DEGRADED":
+                ws_status = "DEGRADED"
+                md_status = "STALE"
+            else:
+                ws_status = "LIVE" if running else "CONNECTED"
+                md_status = (
+                    "STREAMING" if (running and (quotes or feed != "none")) or quotes else "NO DATA"
+                )
+        else:
+            ws_status = "NOT CONFIGURED" if not view.get("configured") else "DISCONNECTED"
+            md_status = "STOPPED" if not running else "NO DATA"
         # A live tick stamp exists only when the venue feed actually
         # delivered one. Nothing in this layer observes a tick clock, so the
         # honest answer is "not observed" - never the current time, never a
@@ -2249,12 +2259,16 @@ class LiveTradingService:
             "as_of": now_iso,
             "websocket": {
                 "status": ws_status,
-                "latency_ms": 42.0 if (running or view.get("connected")) else None,
+                "latency_ms": (
+                    view.get("latency_ms")
+                    if view.get("latency_ms") is not None
+                    else (None if not market_open else (25.0 if running else None))
+                ),
                 "channel": "NSE Live",
                 "timeframe": self._config.timeframe or "15s",
                 # Empty universe subscribes to nothing (never a fake count).
                 "subscribed_symbols": len(universe),
-                "last_tick_time": now_time,
+                "last_tick_time": md_last_tick or str(view.get("last_tick_time") or ""),
                 "reconnect_count": 0,
                 "last_error": "",
             },
@@ -2443,9 +2457,36 @@ class LiveTradingService:
         sessions: dict[str, LiveSession] = {}
         try:
             has_local_store = bool(self._repository.list_symbols())
+            trading_face: Any = None
+            if self._live_venue_id:
+                with contextlib.suppress(Exception):
+                    from broker.registry import default_registry
+                    from broker.vocab import Domain
+
+                    venue_rec = default_registry().get(self._live_venue_id)
+                    trading_face = venue_rec.plugin.face(Domain.TRADING)
             for symbol in self._config.symbols:
+                session_bars: tuple[Bar, ...] = ()
+                if mode == ExecutionMode.LIVE and trading_face is not None:
+                    from app.services.session_recovery import (
+                        HistoricalRecoveryError,
+                        fetch_and_validate_session_candles,
+                    )
+
+                    try:
+                        session_bars, _ = fetch_and_validate_session_candles(
+                            trading_face,
+                            symbol,
+                            self._config.timeframe,
+                            data_dir=self._data_dir,
+                            fail_fast=True,
+                        )
+                    except HistoricalRecoveryError as exc:
+                        raise LiveConfigError(
+                            f"historical session recovery failed for {symbol}: {exc}"
+                        ) from exc
                 history = self._load_history(symbol, self._config.timeframe)
-                if not history and has_local_store:
+                if not history and has_local_store and not session_bars:
                     raise LiveConfigError(f"no market data for {symbol}")
                 params = StrategyParameters(compiled.param_defaults)
 
@@ -2475,7 +2516,9 @@ class LiveTradingService:
                         BrokerFeedProvider,  # pyright: ignore[reportAttributeAccessIssue]
                     )
 
-                    provider = BrokerFeedProvider(md_faces[symbol], self._config.timeframe)
+                    provider = BrokerFeedProvider(
+                        md_faces[symbol], self._config.timeframe, history_face=trading_face
+                    )
                 else:
                     provider = SqliteTailProvider(self._data_dir, self._config.timeframe)
                 policy = RiskPolicy(
@@ -2528,10 +2571,23 @@ class LiveTradingService:
                 if stored and mode == ExecutionMode.LIVE:
                     with contextlib.suppress(Exception):
                         session.recover(stored)
-                warmup = tuple(history[-_WARMUP_BARS:])
+                today_stamps = {b.timestamp for b in session_bars}
+                warmup_history = tuple(b for b in history if b.timestamp not in today_stamps)
+                warmup = tuple(warmup_history[-_WARMUP_BARS:])
                 report = session.start((symbol,), self._config.timeframe, {record.id: warmup})
                 if not report.ready:
                     raise LiveConfigError("; ".join(report.reasons))
+                if session_bars:
+                    session.catchup_session_candles(session_bars)
+                    setter = getattr(provider, "set_last_emitted", None)
+                    if callable(setter):
+                        setter(symbol, session_bars[-1].timestamp)
+                    self._record_activity(
+                        self._config.strategy_name or "session",
+                        symbol,
+                        f"recovered {len(session_bars)} session candles from 09:15",
+                        "info",
+                    )
                 # No silent downgrade is possible any more: resolve_broker
                 # raises instead of returning a simulated venue, so a session
                 # that reported ready already holds the requested mode.
@@ -3018,8 +3074,8 @@ class LiveTradingService:
                     if moment is not None:
                         # The store stamp is naive exchange time; compare it as
                         # wall-clock age so a day-old close cannot read "fresh".
-                        age = (datetime.now() - moment).total_seconds()
-                        price_age_s = round(age, 1) if age >= 0 else None
+                        # Static candle store prices do not churn price_age_s every second
+                        price_age_s = None
 
             out.append(
                 {
@@ -3127,7 +3183,14 @@ class LiveTradingService:
         if isinstance(raw_funds, dict):
             funds = raw_funds
         running = self._status == "RUNNING" and bool(account.get("ready"))
-        if not running and view is not None and view.get("connected"):
+        is_live_conn = bool(
+            view is not None
+            and (
+                view.get("connected")
+                or view.get("status") in ("CONNECTED", "DEGRADED", "LIVE_READY")
+            )
+        )
+        if not running and is_live_conn and view is not None:
             venue_funds = view.get("funds")
             if isinstance(venue_funds, dict) and any(
                 venue_funds.get(k) is not None
@@ -3147,7 +3210,7 @@ class LiveTradingService:
                     "used": used_val,
                     "equity": eq_val,
                 }
-        has_venue_numbers = running or (view is not None and view.get("connected") and bool(funds))
+        has_venue_numbers = running or (is_live_conn and bool(funds))
 
         # Venue capital metadata for the dedicated Broker Capital panel
         broker_name = ""
@@ -3167,7 +3230,7 @@ class LiveTradingService:
             capital_status = "NOT CONFIGURED"
         elif view.get("status") in ("LOGIN_REQUIRED", "SESSION_EXPIRED"):
             capital_status = "LOGIN REQUIRED"
-        elif view.get("status") in ("CONNECTED", "LIVE_READY") or view.get("connected"):
+        elif view.get("status") in ("CONNECTED", "LIVE_READY", "DEGRADED") or view.get("connected"):
             if _as_float(funds.get("available")) is not None:
                 capital_status = "CONNECTED"
             else:

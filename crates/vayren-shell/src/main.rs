@@ -62,6 +62,7 @@ fn apply_authoritative_broker_ui(
     ui.set_conn_pill_label(verdict.pill_label.clone().into());
     ui.set_conn_pill_tone(verdict.pill_tone);
     ui.set_conn_is_connected(verdict.connected);
+    ui.set_conn_is_degraded(verdict.is_degraded);
     ui.set_conn_is_failed(verdict.failed);
     ui.set_conn_error_message(
         if verdict.failed {
@@ -3332,8 +3333,9 @@ mod tests {
         });
         sync_broker_ui(&ui, &sections, &form);
         assert_eq!(ui.get_conn_pill_label(), "Connected (Degraded)");
-        assert_eq!(ui.get_conn_pill_tone(), 1);
+        assert_eq!(ui.get_conn_pill_tone(), 2);
         assert!(ui.get_conn_is_connected());
+        assert!(ui.get_conn_is_degraded());
         assert!(!ui.get_conn_is_failed());
         assert_eq!(
             ui.get_broker_field_v0(),

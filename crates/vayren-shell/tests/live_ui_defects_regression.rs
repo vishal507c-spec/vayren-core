@@ -313,7 +313,8 @@ fn test_defect_7_inspector_reopen_rail_padding_clearance() {
 
 #[test]
 fn test_defect_8_strategy_combobox_selection() {
-    let src = include_str!("../ui/live.slint");
+    let raw_src = include_str!("../ui/live.slint");
+    let src = raw_src.replace("\r\n", "\n");
     assert!(
         src.contains("color: root.strategy-selected > 0 ? VayrenPalette.live-teal : VayrenPalette.live-ink-dim;"),
         "Strategy label color must only highlight when strategy-selected > 0"

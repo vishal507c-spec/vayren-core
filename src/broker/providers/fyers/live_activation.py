@@ -13,9 +13,11 @@ import threading
 
 from broker.capabilities import CapabilitySet, Domain
 from broker.faces import FactoryPlugin, StaticPlugin
+from broker.providers.fyers.adapter import HISTORICAL_CAPABILITIES
 from broker.providers.fyers.live_market_data import (
     MARKET_DATA_CAPABILITIES,
     FyersLiveMarketData,
+    is_nse_market_open,
 )
 from broker.providers.fyers.session_adapter import (
     TRADING_CAPABILITIES,
@@ -31,8 +33,17 @@ ACCESS_TOKEN_ENV = "VAYREN_FYERS_ACCESS_TOKEN"
 
 
 def _combined_capabilities() -> CapabilitySet:
-    items = set(TRADING_CAPABILITIES.items) | set(MARKET_DATA_CAPABILITIES.items)
-    domains = tuple(sorted({Domain.TRADING, Domain.MARKET_DATA}, key=lambda d: d.value))
+    items = (
+        set(TRADING_CAPABILITIES.items)
+        | set(MARKET_DATA_CAPABILITIES.items)
+        | set(HISTORICAL_CAPABILITIES.items)
+    )
+    domains = tuple(
+        sorted(
+            {Domain.TRADING, Domain.MARKET_DATA, Domain.HISTORICAL_DATA},
+            key=lambda d: d.value,
+        )
+    )
     return CapabilitySet(domains=domains, items=frozenset(items))
 
 
@@ -79,7 +90,9 @@ def _get_shared_market_data_face(app_id: str, access_token: str) -> FyersLiveMar
             if _shared_market_data is not None:
                 with contextlib.suppress(Exception):
                     _shared_market_data.disconnect()
-            _shared_market_data = FyersLiveMarketData(app_id=app_id, access_token=access_token)
+            _shared_market_data = FyersLiveMarketData(
+                app_id=app_id, access_token=access_token, market_hours_checker=is_nse_market_open
+            )
         return _shared_market_data
 
 
@@ -115,11 +128,12 @@ def register_fyers_live() -> tuple[bool, str]:
                 factories={
                     Domain.TRADING: lambda: _get_shared_trading_face(app_id, access_token),
                     Domain.MARKET_DATA: lambda: _get_shared_market_data_face(app_id, access_token),
+                    Domain.HISTORICAL_DATA: lambda: _get_shared_trading_face(app_id, access_token),
                 },
                 capabilities=_combined_capabilities(),
             ),
             capabilities=_combined_capabilities(),
-            faces=(Domain.TRADING, Domain.MARKET_DATA),
+            faces=(Domain.TRADING, Domain.MARKET_DATA, Domain.HISTORICAL_DATA),
         )
     except Exception as exc:
         return False, f"live venue record invalid: {exc}"
@@ -150,7 +164,10 @@ def register_fyers_live_instance(
             _shared_adapter = adapter
         if isinstance(market_data, FyersLiveMarketData):
             _shared_market_data = market_data
-    face_map: dict[Domain, object] = {Domain.TRADING: adapter}
+    face_map: dict[Domain, object] = {
+        Domain.TRADING: adapter,
+        Domain.HISTORICAL_DATA: adapter,
+    }
     if market_data is not None:
         face_map[Domain.MARKET_DATA] = market_data
     registry = default_registry()

@@ -305,6 +305,7 @@ pub fn authoritative_broker(sections: &serde_json::Value) -> Option<BrokerAuthor
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrokerVerdict {
     pub connected: bool,
+    pub is_degraded: bool,
     pub failed: bool,
     /// In-progress states (checking/connecting/verifying/…) paint activity
     /// without claiming success or failure.
@@ -338,6 +339,7 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
     match state.as_str() {
         "CONNECTED" => BrokerVerdict {
             connected: true,
+            is_degraded: false,
             failed: false,
             in_progress: false,
             pill_label: "Connected".to_string(),
@@ -355,10 +357,11 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
         },
         "DEGRADED" => BrokerVerdict {
             connected: true,
+            is_degraded: true,
             failed: false,
             in_progress: false,
             pill_label: "Connected (Degraded)".to_string(),
-            pill_tone: 1,
+            pill_tone: 2,
             status_message: status_or("Connected with a degraded leg."),
             description: if next_action.is_empty() {
                 format!("{venue} is connected; one connection leg needs attention.")
@@ -378,6 +381,7 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
             };
             BrokerVerdict {
                 connected: false,
+                is_degraded: false,
                 failed: false,
                 in_progress: true,
                 pill_label: "Connecting…".to_string(),
@@ -392,6 +396,7 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
         }
         "LOGIN_REQUIRED" => BrokerVerdict {
             connected: false,
+            is_degraded: false,
             failed: false,
             in_progress: false,
             pill_label: "Login Required".to_string(),
@@ -409,6 +414,7 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
         },
         "DISCONNECTED" => BrokerVerdict {
             connected: false,
+            is_degraded: false,
             failed: false,
             in_progress: false,
             pill_label: "Not Connected".to_string(),
@@ -422,6 +428,7 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
         },
         _ => BrokerVerdict {
             connected: false,
+            is_degraded: false,
             failed: true,
             in_progress: false,
             pill_label: "Connection Failed".to_string(),

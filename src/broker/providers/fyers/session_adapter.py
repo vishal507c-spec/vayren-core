@@ -17,6 +17,7 @@ import time
 import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -32,6 +33,21 @@ from broker.providers.fyers.live_auth import (
 from broker.vocab import BrokerError, Environment, ErrorCode
 
 logger = logging.getLogger(__name__)
+
+_VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
+_RESOLUTION_MAP: dict[str, str] = {
+    "1m": "1",
+    "3m": "3",
+    "5m": "5",
+    "10m": "10",
+    "15m": "15",
+    "20m": "20",
+    "30m": "30",
+    "60m": "60",
+    "1h": "60",
+    "1d": "D",
+    "D": "D",
+}
 
 TRADING_CAPABILITIES: CapabilitySet = capability_set(
     {
@@ -1348,6 +1364,38 @@ class FyersSessionAdapter:
             int(range_to_epoch),
             resolution_text,
         )
+
+    def fetch_candles(
+        self,
+        symbol: str,
+        interval: str,
+        start: Any,
+        end: Any,
+    ) -> list[dict[str, Any]]:
+        """Normalized candles for one symbol/interval/range via Historical API."""
+        resolution = _RESOLUTION_MAP.get(str(interval).lower(), str(interval))
+        from_epoch = (
+            int(start.replace(tzinfo=_VENUE_TZ).timestamp())
+            if getattr(start, "tzinfo", None) is None
+            else int(start.timestamp())
+        )
+        to_epoch = (
+            int(end.replace(tzinfo=_VENUE_TZ).timestamp())
+            if getattr(end, "tzinfo", None) is None
+            else int(end.timestamp())
+        )
+        rows = self.history(symbol, resolution, from_epoch, to_epoch)
+        return [
+            {
+                "date": datetime.fromtimestamp(r[0], _VENUE_TZ).replace(tzinfo=None),
+                "open": r[1],
+                "high": r[2],
+                "low": r[3],
+                "close": r[4],
+                "volume": r[5],
+            }
+            for r in rows
+        ]
 
     def market_status(self) -> dict[str, str]:
         """Provider market status per exchange segment (authoritative)."""

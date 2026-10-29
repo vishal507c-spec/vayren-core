@@ -1311,16 +1311,17 @@ export component LiveScreen inherits Rectangle {
                 }
 
                 LiveTopCard {
-                    icon-char: "WS";
+                    icon-char: "MD";
                     show-icon: true;
-                    label: "WS CONNECTION";
+                    label: "MARKET WS";
                     value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
-                    tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" ? 1 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" ? 2 : 3));
+                    tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" ? 1 : (root.ws.status == "MARKET CLOSED" ? 0 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" || root.ws.status == "DEGRADED" ? 2 : 3)));
                     sub-text: root.ws.last-error != "" ? root.ws.last-error
-                        : (root.ws.latency != "" && root.ws.latency != "—" ? ("RTT: " + root.ws.latency)
+                        : (root.ws.status == "MARKET CLOSED" ? "Market Closed (15:30 IST)"
                         : (root.ws.last-tick != "" && root.ws.last-tick != "—" ? ("Last: " + root.ws.last-tick)
-                        : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Live Stream")));
-                    sub-tone: root.ws.last-error != "" ? 3 : (root.ws.tone != 0 ? root.ws.tone : 0);
+                        : (root.ws.latency != "" && root.ws.latency != "—" ? ("RTT: " + root.ws.latency)
+                        : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Market Stream"))));
+                    sub-tone: root.ws.last-error != "" ? 3 : (root.ws.status == "MARKET CLOSED" ? 0 : (root.ws.tone != 0 ? root.ws.tone : 0));
                 }
 
                 Rectangle { horizontal-stretch: 1; min-width: 6px; background: transparent; }
@@ -1463,16 +1464,17 @@ export component LiveScreen inherits Rectangle {
                     }
 
                     LiveTopCard {
-                        icon-char: "WS";
+                        icon-char: "MD";
                         show-icon: true;
-                        label: "WS CONNECTION";
+                        label: "MARKET WS";
                         value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
-                        tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" ? 1 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" ? 2 : 3));
+                        tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" ? 1 : (root.ws.status == "MARKET CLOSED" ? 0 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" || root.ws.status == "DEGRADED" ? 2 : 3)));
                         sub-text: root.ws.last-error != "" ? root.ws.last-error
-                            : (root.ws.latency != "" && root.ws.latency != "—" ? ("RTT: " + root.ws.latency)
+                            : (root.ws.status == "MARKET CLOSED" ? "Market Closed (15:30 IST)"
                             : (root.ws.last-tick != "" && root.ws.last-tick != "—" ? ("Last: " + root.ws.last-tick)
-                            : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Live Stream")));
-                        sub-tone: root.ws.last-error != "" ? 3 : (root.ws.tone != 0 ? root.ws.tone : 0);
+                            : (root.ws.latency != "" && root.ws.latency != "—" ? ("RTT: " + root.ws.latency)
+                            : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Market Stream"))));
+                        sub-tone: root.ws.last-error != "" ? 3 : (root.ws.status == "MARKET CLOSED" ? 0 : (root.ws.tone != 0 ? root.ws.tone : 0));
                     }
 
                     Rectangle { horizontal-stretch: 1; background: transparent; }

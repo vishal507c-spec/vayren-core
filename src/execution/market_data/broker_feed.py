@@ -50,6 +50,7 @@ class BrokerFeedProvider(MarketDataProvider):
         session_anchor: str = "09:15",
         clock: Callable[[], float] | None = None,
         stale_after_s: float | None = None,
+        history_face: Any | None = None,
     ) -> None:
         self._face = face
         self._timeframe = timeframe
@@ -74,6 +75,8 @@ class BrokerFeedProvider(MarketDataProvider):
         self._last_dayvol: dict[str, int] = {}
         self._last_close: dict[str, float] = {}
         self._last_error = ""
+        self._history_face = history_face
+        self._backfill_events: list[CandleEvent] = []
 
     @property
     def name(self) -> str:
@@ -91,6 +94,10 @@ class BrokerFeedProvider(MarketDataProvider):
     def last_close(self) -> dict[str, float]:
         """Latest seen price per symbol (marks without extra reads)."""
         return dict(self._last_close)
+
+    def set_last_emitted(self, symbol: str, timestamp: str) -> None:
+        """Seed the emitted watermark from startup historical recovery."""
+        self._emitted[symbol] = timestamp
 
     def open(self, symbols: tuple[str, ...], timeframe: str) -> None:
         self._timeframe = timeframe
@@ -146,6 +153,9 @@ class BrokerFeedProvider(MarketDataProvider):
             return ()
         self._last_error = ""
         events: list[CandleEvent] = []
+        if self._backfill_events:
+            events.extend(self._backfill_events)
+            self._backfill_events.clear()
         for quote in quotes:
             event = self._ingest(quote)
             if event is not None:
@@ -214,6 +224,45 @@ class BrokerFeedProvider(MarketDataProvider):
                     self._face.subscribe(tuple(self._subscribed))
                 except Exception as exc:
                     self._last_error = f"feed resubscribe failed: {exc}"
+            self._handle_reconnect_backfill()
+
+    def _handle_reconnect_backfill(self) -> None:
+        if self._history_face is None:
+            return
+        from datetime import datetime
+
+        from app.services.session_recovery import VENUE_TZ, backfill_candle_gap
+
+        now_dt = datetime.fromtimestamp(self._clock(), VENUE_TZ)
+        for symbol in self._subscribed:
+            # Interrupted partial bucket is invalidated so old ticks don't pollute new intervals
+            self._buckets.pop(symbol, None)
+            last_ts = self._emitted.get(symbol)
+            if not last_ts:
+                continue
+            try:
+                recovered = backfill_candle_gap(
+                    self._history_face, symbol, self._timeframe, last_ts, now_dt=now_dt
+                )
+                for ev in recovered:
+                    self._seq[symbol] = self._seq.get(symbol, 0) + 1
+                    event_with_seq = CandleEvent(
+                        symbol=ev.symbol,
+                        timestamp=ev.timestamp,
+                        seq=self._seq[symbol],
+                        source=self.name,
+                        open=ev.open,
+                        high=ev.high,
+                        low=ev.low,
+                        close=ev.close,
+                        volume=ev.volume,
+                        timeframe=self._timeframe,
+                        is_closed=True,
+                    )
+                    self._backfill_events.append(event_with_seq)
+                    self._emitted[symbol] = ev.timestamp
+            except Exception as exc:
+                self._last_error = f"reconnect backfill failed for {symbol}: {exc}"
 
     # ── internals ───────────────────────────────────────────────
 

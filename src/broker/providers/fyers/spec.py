@@ -33,7 +33,10 @@ from broker.providers.fyers.live_auth import (
 from broker.providers.fyers.live_auth import (
     default_redirect_url as fyers_redirect_url,
 )
-from broker.providers.fyers.live_market_data import FyersLiveMarketData
+from broker.providers.fyers.live_market_data import (
+    FyersLiveMarketData,
+    is_nse_market_open,
+)
 from broker.providers.fyers.selenium_auth import (
     BrowserUnavailableError,
     FyersSeleniumAuthEngine,
@@ -118,7 +121,7 @@ def fyers_management_spec() -> BrokerSpec:
         config_key_map={"api_key": "app_id", "api_secret": "secret"},
         build_adapter=lambda app_id, token: FyersSessionAdapter(app_id=app_id, access_token=token),
         build_market_data=lambda app_id, token: FyersLiveMarketData(
-            app_id=app_id, access_token=token
+            app_id=app_id, access_token=token, market_hours_checker=is_nse_market_open
         ),
         build_flow=FyersAuthFlow,
         build_session_store=lambda store, service: FyersSessionStore(store, service),

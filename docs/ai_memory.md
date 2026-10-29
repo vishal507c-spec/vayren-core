@@ -7,7 +7,104 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (fyers-order-ws-singleton-reconnect-fix-20261027):** FYERS ORDER WEBSOCKET SINGLETON REUSE, SDK CLEANUP & FLAP TUNING —
+**Latest update (local-readiness-and-dashboard-verification-20261029):** LOCAL APP LAUNCH & DASHBOARD STATE VERIFICATION PASS —
+- **Requirements Verified:**
+  1. Local native build and launch verified (`cargo build -p vayren-shell` debug & release profiles completed cleanly).
+  2. Both System and Live dashboard screens verified via automated contract and Slint headless harness tests (`live_render_snapshot.rs`, `live_ui_defects_regression.rs`, `test_live_dashboard_verification.py`).
+  3. App strictly NEVER reports "Live trading ready" when any required component is degraded or failed (`is-degraded` / `is-failed` Slint guards render "Not ready — check degraded legs" / "Connected (Degraded)" Amber pill tone 2).
+  4. Outside market hours (pre-market 08:49 IST / after 15:30 IST), `MARKET CLOSED` status is displayed on WS and Market Data cards without clearing broker capital, available margin, or account ID.
+  5. Market-open states verified via test matrix: `LIVE/STREAMING`, `STALE`, `DISCONNECTED`, `DEGRADED`, and `ENGINE STOPPED`.
+  6. Measured data update latency: snapshot generation avg = 1.018 ms, p95 = 1.193 ms. Idle screens maintain deterministic hashes with zero 1-second VecModel rebuild churn.
+  7. Independent connection legs verified across Gateway REST (`READY`), FYERS Market Data WS (`READY`), and FYERS Order WS (`FAILED`), correctly propagating unified broker state to `DEGRADED`.
+  8. Full Git diff inspected: startup recovery, strategy (OBR C1C4), risk limits, position sizing, and safety gates are completely untouched and intact.
+  9. Zero live orders placed, zero live connections initiated, zero git pushes performed.
+- **Verification Gates:**
+  - `cargo check --workspace`: PASSED in 0.17s.
+  - `cargo test -p vayren-domain`: 311/311 PASSED in 0.38s.
+  - `cargo test -p vayren-shell`: 113/113 PASSED across all suites.
+  - `pytest src/app/tests/test_live_dashboard_verification.py`: 5/5 PASSED in 0.90s.
+  - `pytest src/app/tests/test_startup_recovery.py`: 9/9 PASSED in 0.40s.
+  - `python tools/validate_language_ownership.py`: PASSED (425 files checked).
+  - `ruff check`: PASSED (0 errors).
+
+**Previous update (realtime-dashboard-inconsistency-slowness-fix-20261028):** REAL-TIME DASHBOARD INCONSISTENCY & SLOWNESS RESOLUTION (AFTER-MARKET STALE AWARENESS, CAPITAL PERSISTENCE & DIFF HASH STABILIZATION) —
+- **Problem Solved:**
+  - Dashboard screenshots taken at 21:22:12 IST showed:
+    1. System tab reported "Live trading ready" despite degraded leg `market_data — FAILED: stale (1269s)`.
+    2. Live tab showed false cascading alarms: `WS DISCONNECTED`, `DATA STOPPED`, `ENGINE STOPPED`, and `Broker capital unavailable`.
+    3. Slint UI felt sluggish due to 1-second continuous differential hash churn forcing VecModel rebuilds and repainting every second even when idle.
+- **Root Cause Confirmed:**
+  - `crates/vayren-shell/ui/broker_connection.slint`: Unconditionally hardcoded `Live trading ready` whenever `root.is-connected` was true without checking degradation.
+  - `src/broker/providers/fyers/live_market_data.py`: `health()` checked `age > 120s` without considering NSE market hours (Mon-Fri 09:15-15:30 IST), marking healthy post-market socket as `stale`.
+  - `src/app/services/live_trading_service.py`: `_broker_view()` evaluated `is_entry_connected` as False for `DEGRADED` sessions, dropping `connected` to False and cascading into `WS DISCONNECTED`, `DATA STOPPED`, and clearing broker funds to `None` ("Broker capital unavailable").
+  - `live_trading_service.py`: Calculated dynamic wall-clock `price_age_s = (datetime.now() - moment).total_seconds()` every 1s for all 22 static candle quotes, and updated `websocket["last_tick_time"]` to `now_time` every second. This invalidated section hashes in `server.py` every second, causing continuous unsolicited differential JSON pushes and heavy UI repainting.
+- **Surgical Solution Implemented:**
+  - `src/broker/providers/fyers/live_market_data.py`: Added `is_nse_market_open()` timezone-aware helper and `market_hours_checker`. In `health()`, after-market absence of ticks is reported as `connected — market closed (last msg Xs ago)` (healthy), while in-market quietness continues to trigger `stale` degradation.
+  - `src/broker/providers/fyers/adapter.py`: Fixed `available()` to check `_shared_adapter is not None` before claiming history availability.
+  - `src/broker/providers/fyers/spec.py` & `live_activation.py`: Passed `market_hours_checker=is_nse_market_open` to `FyersLiveMarketData`.
+  - `src/app/services/broker_manager.py`: Preserved `market_data_last_tick` and `market_data_latency_ms` in health check details.
+  - `src/app/services/live_trading_service.py`:
+    - Recognized `DEGRADED` as connected in `_broker_view()` and `_capital_block()` when auth is valid, preserving venue funds.
+    - Added market hours awareness in `snapshot()`: sets WebSocket and Market Data cards to `MARKET CLOSED` (tone 0) outside trading hours.
+    - Stabilized `last_tick_time` to genuine tick timestamp and eliminated dynamic `price_age_s` on static candle quotes, ending 1s hash churn.
+  - `crates/vayren-domain/src/live.rs`: Added `MARKET CLOSED` tone 0 mapping to `WebSocketView` and `MarketDataView`.
+  - `crates/vayren-shell/ui/broker_connection.slint`, `live.slint`, `app.slint`: Added `is-degraded` / `conn-is-degraded` property. Amber warning pill tone 2 and `Connected (Degraded)` badge displayed instead of misleading `Live trading ready`. Renamed Card 2 to `MARKET WS` and displays `Market Closed (15:30 IST)`.
+  - `crates/vayren-shell/src/remote_live.rs` & `main.rs`: Mapped `DEGRADED` to `pill_tone: 2` (Amber) and bound `is_degraded`.
+- **Verification:**
+  - `pytest src/broker/tests src/app/tests -q`: 719/719 PASSED.
+  - `cargo test -p vayren-domain`: 311/311 PASSED in 0.38s.
+  - `cargo test -p vayren-shell --lib`: 68/68 PASSED in 0.17s.
+  - `cargo test -p vayren-shell --bin vayren-shell`: 14/14 PASSED in 0.10s.
+  - `cargo check -p vayren-domain -p vayren-shell`: PASSED.
+  - `python tools/validate_language_ownership.py`: PASSED (424 files checked).
+  - `ruff check`: All files clean, 0 errors.
+
+**Previous update (fyers-startup-recovery-no-missed-signal-20261028):** RELIABLE STARTUP RECOVERY & NO-MISSED-VALID-SIGNAL FIX IN FYERS LIVE PIPELINE —
+- **Problem Solved:**
+  - When the trading engine started late during market hours (e.g. after 09:15 open), restarted, or suffered WebSocket disconnects, historical candles for the current session were not loaded. The strategy could not reconstruct reference ranges (`refHigh`/`refLow`), candle counts, or breakout states, and valid opportunities occurring before startup were missed.
+- **Surgical Solution Implemented:**
+  - `src/broker/providers/fyers/session_adapter.py`: Added `fetch_candles(symbol, interval, start, end)` implementing `Domain.HISTORICAL_DATA` backed by FYERS `/data/history` with IST (`Asia/Kolkata`) conversion.
+  - `src/broker/providers/fyers/live_activation.py` & `adapter.py`: Exposed `HISTORICAL_CAPABILITIES` and `Domain.HISTORICAL_DATA` on FYERS plugin factories and capability reporting.
+  - `src/app/services/session_recovery.py`: New module providing:
+    - `is_trading_day`: Verifies weekday and NSE calendar non-holiday.
+    - `expected_completed_session_intervals`: Calculates expected 30m intervals anchored from 09:15 IST, filtering out incomplete/forming candles.
+    - `fetch_and_validate_session_candles`: Fetches session candles from FYERS Historical API, detects missing candles (including 09:15 opening candle), deduplicates, writes to local store, and raises `HistoricalRecoveryError` on failure (fails safe, never silently continues with incomplete data).
+    - `backfill_candle_gap`: Recovers missing intervals on WebSocket drop.
+    - `evaluate_recovered_signal`: Validates historical signals generated during recovery against session cutoff (15:15 IST), stop-loss breach on subsequent bars or current quote, adverse price drift (>2.0%), open positions, and open orders.
+  - `src/execution/market_data/broker_feed.py`:
+    - Added `history_face` support.
+    - Added `set_last_emitted(symbol, timestamp)` watermark.
+    - Added `_handle_reconnect_backfill()` to backfill missing closed intervals on WebSocket reconnect without duplicate emissions or bucket corruption.
+  - `src/execution/runtime/session.py`:
+    - Added `catchup_session_candles(bars, now_epoch, current_quote)` to chronologically replay recovered session candles, rebuild strategy state, and safely route unexpired signals through risk and order submission while recording expired signals with exact reasons.
+    - Normalized naive IST candle timestamps (`"YYYY-MM-DD HH:MM:SS"`) with `+05:30` offset when passing to `RiskRequest` so Rust's `parse_epoch` computes POSIX UTC epoch correctly against system `now_epoch` without `'clock anomaly'` errors.
+  - `src/app/services/live_trading_service.py`:
+    - Injected `trading_face` into `BrokerFeedProvider`.
+    - Integrated `fetch_and_validate_session_candles` into `_build_sessions()` to recover session candles before starting live sessions.
+    - Filtered warmup history to prior days only.
+    - Invoked `session.catchup_session_candles()` and watermarked `set_last_emitted`.
+  - `src/app/tests/test_startup_recovery.py`: Added 9 comprehensive unit tests covering all required scenarios:
+    1. Start before market open (0 candles needed, report SUCCESS).
+    2. Start at 09:49 IST with 09:15 candle recovered historically.
+    3. Start halfway through session (all completed candles recovered).
+    4. WebSocket disconnect and reconnect backfill.
+    5. Historical API missing/corrupt candles fails safely (`HistoricalRecoveryError`).
+    6. Historical replay produces identical strategy state to live processing.
+    7. Repeated startup/recovery prevents duplicate orders.
+    8. Expired historical signals do not create stale entries.
+    9. Valid recovered unexpired signal executes through normal risk and order safety pipeline.
+- **Verification:**
+  - `pytest src/app/tests/test_startup_recovery.py -v`: 9/9 PASSED in 2.46s.
+  - `python tools/benchmark.py impact --run`: 11 changed files validated, `ruff check` PASS (0.09s), `pytest` across `execution`, `broker`, `app` PASSED in 95.84s.
+  - `python tools/validate_language_ownership.py`: PASSED (424 files checked).
+  - `cargo check -p vayren-core`: PASSED (0.43s).
+  - `ruff check` & `ruff format --check`: All 11 files cleanly formatted, 0 errors.
+  - `pyright`: 0 errors, 0 warnings.
+- **Constraints Maintained:**
+  - NO push to GitHub, NO remote EC2 deployment or service restart until reviewed.
+  - Existing strategy (OBR C1C4) entry/exit/SL and risk sizing rules strictly preserved.
+
+**Previous update (fyers-order-ws-singleton-reconnect-fix-20261027):** FYERS ORDER WEBSOCKET SINGLETON REUSE, SDK CLEANUP & FLAP TUNING —
 - **Root Cause Addressed:**
   - Production investigation (1,135 disconnect logs on 2026-10-27) revealed duplicate `FyersSessionAdapter` instances created across 22 live sessions (44 total instances, 77 subscriptions) competing for the single FYERS order WebSocket connection allowed per account. Under FYERS's single-connection policy, each new connection violently kicked off the older connection.
   - SDK bug in `fyers_apiv3==3.1.18` `close_connection` threw `AttributeError: 'NoneType' object has no attribute 'join'` when `self.running_thread is None`, prematurely aborting cleanup and leaking zombie background socket and ping threads.

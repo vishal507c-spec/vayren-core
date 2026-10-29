@@ -1512,6 +1512,8 @@ class BrokerManager:
                     self._set_leg(spec.broker_id, "market_ws", "READY", success=True)
                 else:
                     self._set_leg(spec.broker_id, "market_ws", "FAILED", str(md_reason))
+                details["market_data_last_tick"] = getattr(md, "last_tick_time", "")
+                details["market_data_latency_ms"] = getattr(md, "last_latency_ms", None)
             except Exception as exc:
                 checks["market_data"] = f"FAILED: {type(exc).__name__}"
                 self._set_leg(spec.broker_id, "market_ws", "FAILED", str(exc))

@@ -16,13 +16,28 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from broker.capabilities import CapabilitySet, Caps, Domain, capability_set
 from broker.vocab import BrokerError, ErrorCode
 
 logger = logging.getLogger(__name__)
+
+_VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
+_SESSION_START_MINUTE = 9 * 60 + 15  # 09:15 IST
+_SESSION_END_MINUTE = 15 * 60 + 30  # 15:30 IST
+
+
+def is_nse_market_open(epoch: float | None = None) -> bool:
+    """True if epoch (default now) is within regular NSE hours (Mon-Fri 09:15-15:30 IST)."""
+    t = epoch if epoch is not None else time.time()
+    dt = datetime.fromtimestamp(t, _VENUE_TZ)
+    if dt.weekday() >= 5:  # Saturday or Sunday
+        return False
+    minute_of_day = dt.hour * 60 + dt.minute
+    return _SESSION_START_MINUTE <= minute_of_day < _SESSION_END_MINUTE
+
 
 #: A stream that WAS delivering and then goes quiet this long is stale.
 #: A socket that never delivered (market closed) is not stale — that is a
@@ -68,11 +83,15 @@ class FyersLiveMarketData:
         access_token: str,
         socket_factory: Callable[..., Any] | None = None,
         max_queue_size: int = 50_000,
+        market_hours_checker: Callable[[], bool] | None = None,
     ) -> None:
         self._app_id = str(app_id or "").strip()
         self._token = str(access_token or "").strip()
         self._socket_factory = socket_factory
         self._max_queue_size = max(1, int(max_queue_size))
+        self._is_market_open = market_hours_checker
+        self._last_tick_time: str = ""
+        self._last_latency_ms: float | None = None
         # One ingestion history, one independent cursor per consumer. The old
         # single Queue was drained destructively: the first session's poll
         # consumed every symbol and silently starved the other 21. A bounded
@@ -336,12 +355,19 @@ class FyersLiveMarketData:
             return False, "CREDENTIALS not ready"
         if self._state == STATE_CONNECTED:
             age = self.data_age_s
+            market_open = self._is_market_open() if self._is_market_open is not None else True
+
             if self._messages_received == 0:
                 return (
                     True,
                     "connected — no market data received yet (market closed or unsubscribed)",
                 )
             if age is not None and age > MARKET_DATA_STALE_SECONDS:
+                if not market_open:
+                    return (
+                        True,
+                        f"connected — market closed (last msg {int(age or 0)}s ago)",
+                    )
                 return False, f"stale — no market data for {int(age)}s"
             return True, f"streaming — {self._messages_received} msgs, last {int(age or 0)}s ago"
         if self._state == STATE_CONNECTING:
@@ -363,6 +389,16 @@ class FyersLiveMarketData:
         if self._last_message_at is None:
             return None
         return max(0.0, time.monotonic() - self._last_message_at)
+
+    @property
+    def last_tick_time(self) -> str:
+        """Timestamp of the last ingested tick, or empty string."""
+        return self._last_tick_time
+
+    @property
+    def last_latency_ms(self) -> float | None:
+        """Measured delivery latency of the last tick, or None."""
+        return self._last_latency_ms
 
     def disconnect(self) -> None:
         """Drop transport, cancel any pending retry, stay down until connect().
@@ -597,6 +633,13 @@ class FyersLiveMarketData:
         # distinguish "streaming" from "socket open but silent".
         self._messages_received += len(normalized_events)
         self._last_message_at = time.monotonic()
+        for ev in normalized_events:
+            ts = ev.get("timestamp")
+            if ts:
+                self._last_tick_time = str(ts)
+            exch_ts = ev.get("exchange_timestamp")
+            if isinstance(exch_ts, (int, float)) and exch_ts > 0:
+                self._last_latency_ms = max(0.0, (time.time() - float(exch_ts)) * 1000.0)
         with self._history_lock:
             for ev in normalized_events:
                 if len(self._history) >= self._max_queue_size:
