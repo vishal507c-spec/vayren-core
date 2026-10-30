@@ -971,6 +971,24 @@ mod tests {
         "market_symbol": "", "market_timeframe": "15m", "market_bars": null
     }"#;
 
+    const READY: &str = r#"{
+        "mode": "PAPER",
+        "session_status": "STOPPED",
+        "broker": {"name": "paper", "connected": true},
+        "gates": [],
+        "start_blockers": [],
+        "kill": {"halted": false},
+        "positions": [], "orders": [], "fills": [], "events": [],
+        "available_strategies": ["OBR"],
+        "strategy": {"id": "OBR", "name": "OBR"},
+        "available_symbols": ["TEST"],
+        "selected_symbols": ["TEST"],
+        "available_timeframes": ["15m"],
+        "selected_timeframe": "15m",
+        "quantity": 10.0,
+        "market_symbol": "TEST", "market_timeframe": "15m", "market_bars": null
+    }"#;
+
     const RUNNING: &str = r#"{
         "mode": "PAPER",
         "session_status": "RUNNING",
@@ -1042,21 +1060,29 @@ mod tests {
     }
 
     #[test]
-    fn blocked_start_reaches_the_backend_but_fakes_no_state() {
+    fn blocked_start_is_prevented_and_valid_start_dispatches() {
         let view = make_view();
         snapshot(view, IDLE);
-        // The backend reports blockers ("no strategy selected"). START is now
-        // PRESSED anyway and forwarded, because the service is the authority
-        // that decides — the old contract swallowed the click silently, which
-        // is exactly the dead-button defect. What must never change: the model
-        // does not fake a session transition on its own.
+        // Under Finding 2 safety rules, START is blocked when blockers exist ("no strategy selected").
+        with_view(view, |v| v.state.borrow_mut().start());
+        assert_eq!(
+            with_view(view, |v| v.state.borrow_mut().take_action()),
+            None
+        );
+        assert!(with_view(view, |v| {
+            matches!(v.state.borrow().session, live::SessionStatus::Stopped)
+        }));
+
+        // When a ready snapshot is loaded with valid selections and empty blockers, START dispatches
+        snapshot(view, READY);
         with_view(view, |v| v.state.borrow_mut().start());
         let action = with_view(view, |v| v.state.borrow_mut().take_action());
         let parsed: serde_json::Value =
-            serde_json::from_str(&action.expect("blocked START must reach the backend")).unwrap();
+            serde_json::from_str(&action.expect("valid START must reach backend")).unwrap();
         assert_eq!(parsed["action"], "start");
+        // Must transition to Starting, never optimistically to Running
         assert!(with_view(view, |v| {
-            matches!(v.state.borrow().session, live::SessionStatus::Running)
+            matches!(v.state.borrow().session, live::SessionStatus::Starting)
         }));
 
         snapshot(view, RUNNING);
