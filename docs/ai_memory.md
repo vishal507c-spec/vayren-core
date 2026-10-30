@@ -7,7 +7,27 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-ui-audit-findings-fix-20261030):** RESOLUTION OF ALL 10 LIVE UI AUDIT FINDINGS (RISK VALIDATION, START SAFETY, STRATEGY DESELECTION, REJECTED ORDERS, SELECTION CONSISTENCY & MODAL CONFIRMATION) —
+**Latest update (github-push-ec2-deployment-20261030):** COMPLETE GITHUB PUSH & EC2 PRODUCTION DEPLOYMENT (COMMIT `9c886bd`) —
+- **Commit & GitHub Push:**
+  - Commit `9c886bd`: `feat(live): resolve 10 UI audit findings, LTP pipeline streaming, and session recovery` pushed to `origin/main`.
+  - Diff: 11 files changed, 1143 insertions(+), 141 deletions(-).
+  - Included: All 10 UI audit fixes, live LTP pipeline fix across all 22 FYERS symbols, historical session recovery, Slint dynamic color bindings, and 8 new unit/regression tests.
+- **EC2 Production Deployment:**
+  - Host: `vayren` (EC2 `100.75.185.37`).
+  - Pre-deploy backup tag created: `pre-deploy-20261030_223842`.
+  - Fast-forward git pull: updated from `f5f46bf` to `9c886bd` cleanly.
+  - Market condition verified: Closed (22:39 IST, UTC 17:09), session status `STOPPED`, unarmed (`armed: false`), zero live orders active.
+  - Service restart: `sudo systemctl restart vayren-remote.service` executed cleanly (new PID: 843145).
+- **Production Verification:**
+  - Remote Gateway listening on `127.0.0.1:8765`.
+  - Both FYERS WebSockets connected: `ORDER_WS_CONNECTED broker=FYERS` & `MARKET_WS_CONNECTED broker=FYERS`.
+  - All 22 watchlist instruments discovered and populated in snapshot quotes.
+  - Off-market hours quotes correctly indicate `Stale: True` (historical SQLite fallback), never falsely labeled `LIVE`.
+  - Health check (`remote.ops_cli health`): Status `HEALTHY`, uptime 45d, memory 35.7%, disk 71.4%, active strategy `OBR C1C4`.
+  - Start blocker check: `live confirmation required (explicit operator consent)` safely blocks unconfirmed execution.
+  - Duplicate order & recovery gates confirmed intact.
+
+**Previous update (live-ui-audit-findings-fix-20261030):** RESOLUTION OF ALL 10 LIVE UI AUDIT FINDINGS (RISK VALIDATION, START SAFETY, STRATEGY DESELECTION, REJECTED ORDERS, SELECTION CONSISTENCY & MODAL CONFIRMATION) —
 - **10 Defects Resolved:**
   1. *Finding 1 (False RISK VALIDATED Status):* Never show `[✓] RISK VALIDATED` when levels or qty are missing or zero. `LiveState::project()` requires `qty > 0 && entry_price > 0.0 && stop_price > 0.0`. Missing values fail closed to `risk_validated: false` with banner `[✕] RISK NOT VALIDATED · Missing entry, stop, or quantity`.
   2. *Finding 2 (START Safety Bypass):* `start()` consults `can_start()` and backend `start_blockers()`. Starting in host mode sets `SessionStatus::Starting` (never optimistically `Running` before backend confirmation). If unanswered, `expire_pending_action()` cleanly rolls `Starting` back to `Stopped` so the START button remains clickable.
