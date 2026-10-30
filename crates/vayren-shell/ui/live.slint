@@ -2808,7 +2808,7 @@ export component LiveScreen inherits Rectangle {
                                     }
                                     if root.selected-stock.risk-banner-text != "": Text {
                                         text: "Notice: " + root.selected-stock.risk-banner-text;
-                                        color: VayrenPalette.amber;
+                                        color: root.selected-stock.risk-validated ? VayrenPalette.pos : VayrenPalette.neg;
                                         font-size: 10px;
                                         wrap: word-wrap;
                                     }

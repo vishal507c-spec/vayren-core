@@ -329,6 +329,7 @@ class LiveTradingService:
         self._journal_cursors: dict[str, int] = {}
         self._activity: deque[dict[str, Any]] = deque(maxlen=_ACTIVITY_CAP)
         self._marks: dict[str, float] = {}
+        self._mark_times: dict[str, str] = {}
         self._open_since: dict[str, str] = {}
         self._last_signal: dict[str, str] = {}
         self._status = "STOPPED"
@@ -2147,7 +2148,7 @@ class LiveTradingService:
         # Phase-3: resolve sizing capital BEFORE quotes/risk blocks render,
         # so every number below derives from the same venue truth.
         self._refresh_risk_capital(view)
-        universe = self.available_symbols()
+        universe = self.available_symbols() or tuple(self._config.symbols)
         if self._config.strategy_name and not self._config.symbols and universe:
             self._config.symbols = universe
         quotes = self._universe_quotes(universe)
@@ -2847,6 +2848,28 @@ class LiveTradingService:
             }
         )
 
+    def set_live_price(self, symbol: str, price: float, timestamp: str | None = None) -> None:
+        """Record the latest live market price and timestamp for a symbol."""
+        try:
+            px = float(price)
+            if px > 0 and math.isfinite(px):
+                clean = _clean_symbol(symbol)
+                clean_bare = clean[:-3] if clean.endswith("-EQ") else clean
+                ts = str(timestamp or _utcnow_iso())
+                for key in (
+                    symbol,
+                    clean,
+                    clean_bare,
+                    f"NSE:{clean}",
+                    f"NSE:{clean_bare}",
+                    f"NSE:{clean_bare}-EQ",
+                    f"{clean_bare}-EQ",
+                ):
+                    self._marks[key] = px
+                    self._mark_times[key] = ts
+        except (TypeError, ValueError):
+            pass
+
     def _refresh_mark(self, symbol: str) -> None:
         """Update the mark from the session's own provider (zero extra reads).
 
@@ -2858,14 +2881,54 @@ class LiveTradingService:
             return
         provider = getattr(session, "_provider", None)
         last_close = getattr(provider, "last_close", None)
+        clean = _clean_symbol(symbol)
+        clean_bare = clean[:-3] if clean.endswith("-EQ") else clean
         if isinstance(last_close, dict):
-            price = last_close.get(symbol)
+            price = (
+                last_close.get(symbol)
+                or last_close.get(clean)
+                or last_close.get(clean_bare)
+                or last_close.get(f"NSE:{clean}")
+                or last_close.get(f"NSE:{clean_bare}")
+                or last_close.get(f"NSE:{clean_bare}-EQ")
+            )
             try:
                 price_value = float(price) if price is not None else 0.0
             except (TypeError, ValueError):
-                return
+                price_value = 0.0
             if price_value > 0:
-                self._marks[symbol] = price_value
+                for key in (
+                    symbol,
+                    clean,
+                    clean_bare,
+                    f"NSE:{clean}",
+                    f"NSE:{clean_bare}",
+                    f"NSE:{clean_bare}-EQ",
+                    f"{clean_bare}-EQ",
+                ):
+                    self._marks[key] = price_value
+        last_time = getattr(provider, "last_tick_time", None)
+        if isinstance(last_time, dict):
+            ts = (
+                last_time.get(symbol)
+                or last_time.get(clean)
+                or last_time.get(clean_bare)
+                or last_time.get(f"NSE:{clean}")
+                or last_time.get(f"NSE:{clean_bare}")
+                or last_time.get(f"NSE:{clean_bare}-EQ")
+            )
+            if ts:
+                ts_str = str(ts)
+                for key in (
+                    symbol,
+                    clean,
+                    clean_bare,
+                    f"NSE:{clean}",
+                    f"NSE:{clean_bare}",
+                    f"NSE:{clean_bare}-EQ",
+                    f"{clean_bare}-EQ",
+                ):
+                    self._mark_times[key] = ts_str
 
     def _track_open_since(self) -> None:
         for symbol, session in self._sessions.items():
@@ -2946,9 +3009,36 @@ class LiveTradingService:
         out: list[dict[str, Any]] = []
         for symbol in listed:
             clean = _clean_symbol(symbol)
-            row = quotes.get(clean)
+            clean_bare = clean[:-3] if clean.endswith("-EQ") else clean
+            row = quotes.get(clean) or quotes.get(clean_bare)
             price = getattr(row, "price", None) if row is not None else None
             change = getattr(row, "change_pct", None) if row is not None else None
+
+            # Resolve live market price from marks or active session provider
+            if (
+                symbol not in self._marks
+                and clean not in self._marks
+                and clean_bare not in self._marks
+                and symbol in self._sessions
+            ):
+                with contextlib.suppress(Exception):
+                    self._refresh_mark(symbol)
+
+            live_price = (
+                self._marks.get(symbol)
+                or self._marks.get(clean)
+                or self._marks.get(clean_bare)
+                or self._marks.get(f"NSE:{clean}")
+                or self._marks.get(f"NSE:{clean_bare}")
+                or self._marks.get(f"NSE:{clean_bare}-EQ")
+            )
+            is_live = live_price is not None and live_price > 0
+            if is_live and live_price is not None:
+                live_val = round(float(live_price), 2)
+                base_px = getattr(row, "price", None)
+                if base_px is not None and base_px > 0:
+                    change = round(100.0 * (live_val - base_px) / base_px, 2)
+                price = live_val
 
             # Position facts
             pos_side = "FLAT"
@@ -2974,15 +3064,28 @@ class LiveTradingService:
             planned_risk = None
             risk_util = None
             signal = "--"
-            # `last_update` is the CANDLE'S OWN stamp, never the current
-            # clock. These prices come from the local `<SYMBOL>.db` tail, so
-            # a row can be hours old; stamping it with `now_time` labelled a
-            # previous-session close as a live tick. `stale`/`price_source`
-            # keep that explicit for the UI instead of implied by a clock.
+
             source_stamp = str(getattr(row, "as_of", "") or "") if row is not None else ""
-            last_update = source_stamp
-            price_source = "none"
-            stale = True
+            if is_live:
+                live_stamp = (
+                    self._mark_times.get(symbol)
+                    or self._mark_times.get(clean)
+                    or self._mark_times.get(clean_bare)
+                    or self._mark_times.get(f"NSE:{clean}")
+                    or self._mark_times.get(f"NSE:{clean_bare}")
+                    or self._mark_times.get(f"NSE:{clean_bare}-EQ")
+                )
+                last_update = live_stamp if live_stamp else _utcnow_iso()
+                price_source = "live_feed"
+                stale = False
+            elif price is not None:
+                last_update = source_stamp
+                price_source = "candle_store"
+                stale = True
+            else:
+                last_update = ""
+                price_source = "none"
+                stale = True
             price_age_s: float | None = None
 
             # Reference levels, entry and stop come from REAL state only.
@@ -3003,7 +3106,7 @@ class LiveTradingService:
             # everything below is already keyed off those two fields.
             signal_present = self._last_signal.get(symbol, "") not in ("", "no signal yet")
 
-            if clean and clean in store and price is not None:
+            if ((clean and clean in store and price is not None) or is_live) and price is not None:
                 status = "AVAILABLE"
                 # An OPEN position is the one case where the entry price is a
                 # real, ledger-owned number rather than a strategy level.
@@ -3051,31 +3154,40 @@ class LiveTradingService:
                 except Exception:
                     pass
                 try:
-                    snap_orders = session.engine.open_orders()
-                    for o in snap_orders:
-                        if getattr(o, "symbol", "") == symbol:
-                            sym_order = str(getattr(o, "state", "WORKING"))
-                            break
+                    # Look up latest tracked order for this symbol
+                    # (including terminal states like REJECTED)
+                    tracked = [
+                        o
+                        for o in getattr(session.engine, "_orders", {}).values()
+                        if getattr(o, "symbol", "") == symbol
+                    ]
+                    if tracked:
+                        latest_ord = tracked[-1]
+                        st = str(getattr(latest_ord, "state", "")).upper()
+                        if "REJECT" in st or "DENIED" in st:
+                            sym_order = "REJECTED"
+                            watchlist_status = "REJECTED"
+                        elif "FILL" in st or "COMPLETE" in st:
+                            sym_order = "FILLED"
+                        elif "CANCEL" in st or "EXPIRED" in st:
+                            sym_order = "CANCELLED"
+                        elif st in ("OPEN", "PENDING", "WORKING", "SUBMITTED", "ACCEPTED"):
+                            sym_order = "WORKING"
+                            if watchlist_status not in ("IN POSITION", "SIGNAL"):
+                                watchlist_status = "WORKING"
+                        else:
+                            sym_order = st
+                    else:
+                        snap_orders = session.engine.open_orders()
+                        for o in snap_orders:
+                            if getattr(o, "symbol", "") == symbol:
+                                sym_order = str(getattr(o, "state", "WORKING"))
+                                break
                 except Exception:
                     pass
                 stop_levels = getattr(session, "_stop_levels", {})
                 if symbol in stop_levels:
                     stop_price = round(float(stop_levels[symbol]), 2)
-
-            if price is not None:
-                price_source = "candle_store"
-                stale = True
-                # Same parser the store uses, so the age is measured against
-                # the store's own format instead of a second guess at it.
-                with contextlib.suppress(Exception):
-                    from app.services.market_data_service import _parse_stamp
-
-                    moment = _parse_stamp(source_stamp)
-                    if moment is not None:
-                        # The store stamp is naive exchange time; compare it as
-                        # wall-clock age so a day-old close cannot read "fresh".
-                        # Static candle store prices do not churn price_age_s every second
-                        price_age_s = None
 
             out.append(
                 {

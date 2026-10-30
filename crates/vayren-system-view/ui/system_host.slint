@@ -1,12 +1,13 @@
 // System host window — integration glue ONLY, never visual design.
 //
-// Root `Window` hosting the EXISTING verified `BrokerPanel` unmodified (all
-// presentation, layout and styling live in `../../vayren-shell/ui/broker.slint`).
-// Every property below is a pure pass-through binding; every action callback
-// forwards outward for the host's action drain. Nothing here may add,
-// restyle, or recompose content — compare against the `app.slint`
-// BrokerPanel instance block.
-import { BrokerPanel, BrokerCheckRow } from "../../vayren-shell/ui/broker.slint";
+// Root `Window` hosting the broker CONNECTION workspace (presentation lives
+// in `../../vayren-shell/ui/broker_connection.slint`) plus the collapsible
+// system-health / event-log sections. The legacy broker-status card facts
+// (status-glyph, check-rows, funds/positions/orders, connect buttons) are NOT
+// rendered here — `apply_view` in Rust feeds them 1:1 with `shell::apply` as
+// a retained parity surface, so those properties below keep that exact shape.
+// Nothing here may add, restyle, or recompose content from UI inference.
+import { BrokerCheckRow } from "../../vayren-shell/ui/broker.slint";
 import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, ProgressStepView } from "../../vayren-shell/ui/broker_connection.slint";
 import { VayrenPalette, VayrenDesign } from "../../vayren-shell/ui/palette.slint";
 import { ScrollView } from "std-widgets.slint";
@@ -83,6 +84,9 @@ export component SystemHostWindow inherits Window {
     callback refresh-requested();
     callback disconnect-requested();
     
+    // Legacy configure contract — retained parity surface (the connection
+    // workspace carries its own credential flow; only the card surface
+    // fires this, which is currently unrendered).
     callback config-saved(string, string);
     // Connection workspace intents (retry reuses login, manage reuses
     // refresh, disconnect is shared — same manager methods as before).
@@ -130,7 +134,7 @@ export component SystemHostWindow inherits Window {
                 padding-right: VayrenDesign.sp-md;
                 spacing: VayrenDesign.sp-sm;
                 TouchArea {
-                    width: health-lbl.width + 8px;
+                    width: health-lbl.width + 16px;
                     health-lbl := Text {
                         text: root.health-open ? "SYSTEM HEALTH ^" : "SYSTEM HEALTH v";
                         color: root.health-open ? VayrenPalette.text : VayrenPalette.muted;
@@ -141,7 +145,7 @@ export component SystemHostWindow inherits Window {
                     clicked => { root.health-toggle(); }
                 }
                 TouchArea {
-                    width: log-lbl.width + 8px;
+                    width: log-lbl.width + 16px;
                     log-lbl := Text {
                         text: root.log-open ? "EVENT LOG ^" : "EVENT LOG v";
                         color: root.log-open ? VayrenPalette.text : VayrenPalette.muted;
@@ -171,6 +175,7 @@ export component SystemHostWindow inherits Window {
                     Text {
                         text: row.value;
                         color: row.tone == 1 ? VayrenPalette.pos
+                            : row.tone == 2 ? VayrenPalette.amber
                             : row.tone == 3 ? VayrenPalette.neg
                             : VayrenPalette.muted;
                         font-size: VayrenDesign.fs-label;

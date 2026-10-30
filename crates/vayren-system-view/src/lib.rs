@@ -455,6 +455,9 @@ impl SystemView {
             return Err(-5);
         }
         ensure_platform()?;
+        if !scale_factor.is_finite() {
+            return Err(-5);
+        }
         let scale = scale_factor.clamp(MIN_SCALE, MAX_SCALE);
         let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
         PENDING_WINDOW.with(|slot| slot.borrow_mut().replace(window.clone()));
@@ -652,6 +655,9 @@ pub extern "C" fn vayren_system_view_resize(
         }
         view.width_px = width_px;
         view.height_px = height_px;
+        if !scale_factor.is_finite() {
+            return Err(-5);
+        }
         view.scale_factor = scale_factor.clamp(MIN_SCALE, MAX_SCALE);
         view.apply_geometry();
         Ok(0)
@@ -791,7 +797,9 @@ fn pointer_event(
     })
 }
 
-/// Pointer moved (logical units, legacy logical coordinates map 1:1).
+/// Pointer moved. Coordinates are LOGICAL units: a host rendering at
+/// scale_factor != 1.0 must divide its physical cursor pixels by the same
+/// scale_factor it passed to create/resize before calling here.
 #[no_mangle]
 pub extern "C" fn vayren_system_view_pointer_move(
     view: *mut SystemView,
@@ -1214,11 +1222,15 @@ mod tests {
             vayren_system_view_render(std::ptr::null_mut(), std::ptr::null_mut(), 0),
             -1
         );
+        // Non-finite scale must fail closed (clamp alone would keep NaN).
+        assert!(vayren_system_view_create(400, 300, f32::NAN).is_null());
         let view = make_view();
         let bad = std::ffi::CString::new("{nope").unwrap();
         assert_eq!(vayren_system_view_set_snapshot(view, bad.as_ptr()), -4);
         assert_eq!(vayren_system_view_set_snapshot(view, std::ptr::null()), -2);
         assert_eq!(vayren_system_view_resize(view, 0, 600, 1.0), -5);
+        assert_eq!(vayren_system_view_resize(view, 800, 600, f32::NAN), -5);
+        assert_eq!(vayren_system_view_resize(view, 800, 600, f32::INFINITY), -5);
         assert_eq!(vayren_system_view_pointer_press(view, 1.0, 1.0, 9), -5);
         let mut tiny = vec![0u8; 8];
         assert_eq!(

@@ -543,7 +543,22 @@ impl CapitalRiskEngine {
         entry_price: f64,
         stop_price: f64,
     ) -> (bool, String) {
+        if qty <= 0 {
+            return (false, "Invalid quantity: must be positive".to_string());
+        }
+        if !entry_price.is_finite() || entry_price <= 0.0 {
+            return (false, "Invalid entry price: must be positive".to_string());
+        }
+        if !stop_price.is_finite() || stop_price <= 0.0 {
+            return (false, "Invalid stop price: must be positive".to_string());
+        }
         let risk_per_share = (stop_price - entry_price).abs();
+        if risk_per_share <= 0.0 {
+            return (
+                false,
+                "Invalid stop price: must not equal entry price".to_string(),
+            );
+        }
         let planned = qty as f64 * risk_per_share;
         let max_risk = self.max_allowed_risk();
         if planned <= max_risk {
@@ -1311,17 +1326,15 @@ impl LiveState {
     pub fn select_strategy(&mut self, index: usize) {
         if index < self.strategies.len() {
             self.strategy_index = Some(index);
-            // Immediate visible switch: the newly selected strategy's rows
-            // arrive with the next backend snapshot, so the previous
-            // strategy's symbols and checks are cleared now rather than displayed as the
-            // new strategy's universe for a frame.
-            self.symbols.clear();
-            self.store_total = None;
-            self.watchlist_rows.clear();
-            self.selected_symbol.clear();
-            self.action_note = None;
-            self.push_setup_action();
+        } else {
+            self.strategy_index = None;
         }
+        self.symbols.clear();
+        self.store_total = None;
+        self.watchlist_rows.clear();
+        self.selected_symbol.clear();
+        self.action_note = None;
+        self.push_setup_action();
     }
 
     pub fn select_strategy_value(&mut self, value: &str) {
@@ -1333,6 +1346,12 @@ impl LiveState {
             || trimmed == "—"
         {
             self.strategy_index = None;
+            self.symbols.clear();
+            self.store_total = None;
+            self.watchlist_rows.clear();
+            self.selected_symbol.clear();
+            self.action_note = None;
+            self.push_setup_action();
             return;
         }
         if let Some(i) = self.strategies.iter().position(|s| {
@@ -1341,6 +1360,14 @@ impl LiveState {
                 || s.replace([' ', '_'], "-").eq_ignore_ascii_case(value)
         }) {
             self.select_strategy(i);
+        } else {
+            self.strategy_index = None;
+            self.symbols.clear();
+            self.store_total = None;
+            self.watchlist_rows.clear();
+            self.selected_symbol.clear();
+            self.action_note = None;
+            self.push_setup_action();
         }
     }
 
@@ -1447,42 +1474,43 @@ impl LiveState {
             // a second request — the backend must never see two starts.
             return;
         }
-        if self.host_mode {
-            if self.mode == ExecMode::Live {
-                if !self.venue_gates_ready() {
-                    self.action_note = Some("live gates not satisfied (see LIVE READINESS)".into());
-                    return;
-                }
-                self.live_confirmed = true;
-                self.confirm_dialog_open = false;
-            }
-            // Real-time optimistic update: switch to Running immediately
-            self.session = SessionStatus::Running;
-            self.set_pending("start");
-            self.push_action(serde_json::json!({
-                "action": "start",
-                "confirmed": true,
-            }));
-            self.action_note = Some("start requested — running".into());
-            return;
-        }
-        if self.mode == ExecMode::Live {
+        // Mandatory LIVE confirmation gate: never auto-confirm LIVE on start
+        if self.mode == ExecMode::Live && !self.live_confirmed {
             if !self.venue_gates_ready() {
                 self.action_note = Some("live gates not satisfied (see LIVE READINESS)".into());
                 return;
             }
-            self.live_confirmed = true;
-            self.confirm_dialog_open = false;
+            self.confirm_dialog_open = true;
+            self.action_note =
+                Some("Explicit operator confirmation required for LIVE execution.".into());
+            return;
         }
-        match self.start_blockers().first() {
-            Some(reason) => self.action_note = Some(reason.clone()),
-            None => {
-                // The bridge owns the transition to RUNNING; the model only
-                // records the request.
-                self.session = SessionStatus::Starting;
-                self.action_note = Some("start requested — awaiting engine bridge".into());
+        // Start safety check: consult can_start() and backend blockers
+        if !self.can_start() {
+            if let Some(reason) = self.start_blockers().first() {
+                self.action_note = Some(reason.clone());
+            } else {
+                self.action_note = Some("START blocked: preconditions not met".into());
             }
+            return;
         }
+        if self.host_mode {
+            // Never optimistically mark RUNNING before backend confirmation
+            self.session = SessionStatus::Starting;
+            self.set_pending("start");
+            let confirmed = match self.mode {
+                ExecMode::Live => self.live_confirmed,
+                _ => true,
+            };
+            self.push_action(serde_json::json!({
+                "action": "start",
+                "confirmed": confirmed,
+            }));
+            self.action_note = Some("start requested — awaiting confirmation".into());
+            return;
+        }
+        self.session = SessionStatus::Starting;
+        self.action_note = Some("start requested — awaiting engine bridge".into());
     }
 
     /// Record a pending action and stamp its dispatch time so a backend that
@@ -1506,7 +1534,7 @@ impl LiveState {
         if expired {
             self.pending_action = None;
             self.pending_since = None;
-            if self.session == SessionStatus::Running {
+            if self.session == SessionStatus::Running || self.session == SessionStatus::Starting {
                 self.session = SessionStatus::Stopped;
             }
             self.action_note = Some("backend did not answer — request cleared, press again".into());
@@ -1745,6 +1773,29 @@ impl LiveState {
         }
         if let Some(or) = v.get("orders_rejected").and_then(|n| n.as_u64()) {
             self.orders_rejected = or as usize;
+        }
+
+        if let Some(strat) = v.get("strategy").and_then(|s| s.as_object()) {
+            if self.orders_submitted == 0 {
+                if let Some(os) = strat.get("orders_submitted").or_else(|| strat.get("orders_submitted_count")).and_then(|n| n.as_u64()) {
+                    self.orders_submitted = os as usize;
+                }
+            }
+            if self.orders_filled == 0 {
+                if let Some(of) = strat.get("orders_filled").or_else(|| strat.get("orders_filled_count")).or_else(|| strat.get("signals_executed")).and_then(|n| n.as_u64()) {
+                    self.orders_filled = of as usize;
+                }
+            }
+            if self.orders_rejected == 0 {
+                if let Some(or) = strat.get("orders_rejected").or_else(|| strat.get("orders_rejected_count")).or_else(|| strat.get("signals_rejected")).and_then(|n| n.as_u64()) {
+                    self.orders_rejected = or as usize;
+                }
+            }
+            if self.orders_pending == 0 {
+                if let Some(op) = strat.get("orders_pending").or_else(|| strat.get("orders_working_count")).and_then(|n| n.as_u64()) {
+                    self.orders_pending = op as usize;
+                }
+            }
         }
 
         // ── unified eligibility (Phase-6/7 backend section) ──
@@ -3803,6 +3854,58 @@ fn eligibility_view(state: &LiveState) -> EligibilityView {
     }
 }
 
+pub fn derive_exchange_label(symbol: &str, state: &LiveState) -> String {
+    let sym_upper = symbol.to_ascii_uppercase();
+    let (prefix, rest) = if let Some((p, r)) = sym_upper.split_once(':') {
+        (p.trim(), r.trim())
+    } else {
+        ("", sym_upper.as_str())
+    };
+
+    let ex = if !prefix.is_empty() {
+        prefix.to_string()
+    } else if !state.market_data.exchange.is_empty() {
+        let md_ex = state.market_data.exchange.to_ascii_uppercase();
+        if md_ex.contains("BSE") {
+            "BSE".to_string()
+        } else if md_ex.contains("MCX") {
+            "MCX".to_string()
+        } else if md_ex.contains("NFO") {
+            "NFO".to_string()
+        } else if md_ex.contains("CDS") {
+            "CDS".to_string()
+        } else {
+            "NSE".to_string()
+        }
+    } else {
+        let u_ex = state.universe_exchange().to_ascii_uppercase();
+        if !u_ex.is_empty() {
+            u_ex
+        } else {
+            "NSE".to_string()
+        }
+    };
+
+    let instrument = if ex == "MCX" || rest.contains("COMMODITY") {
+        "COMMODITY"
+    } else if ex == "NFO"
+        || rest.ends_with("-FUT")
+        || rest.ends_with("FUT")
+        || rest.ends_with("-CE")
+        || rest.ends_with("-PE")
+        || rest.ends_with("CE")
+        || rest.ends_with("PE")
+    {
+        "DERIVATIVE"
+    } else if ex == "CDS" || rest.contains("CURRENCY") {
+        "CURRENCY"
+    } else {
+        "EQUITY"
+    };
+
+    format!("{} {}", ex, instrument)
+}
+
 pub fn project(state: &LiveState) -> LiveView {
     // ── command bar ──
     // Card anatomy matches the terminal reference: small label (in Slint),
@@ -4446,19 +4549,70 @@ pub fn project(state: &LiveState) -> LiveView {
         .iter()
         .filter(|r| !r.signal.is_empty() && r.signal != "—" && r.signal != "--")
         .count();
-    let orders_sent = if state.orders_submitted > 0 {
+    let derived_submitted = state
+        .orders
+        .len()
+        .max(state.pnl.orders.map(|n| n as usize).unwrap_or(0));
+    let derived_filled = state
+        .orders
+        .iter()
+        .filter(|o| matches!(o.status.to_ascii_uppercase().as_str(), "FILLED" | "COMPLETE"))
+        .count()
+        .max(state.fills.len());
+    let derived_rejected = state
+        .orders
+        .iter()
+        .filter(|o| {
+            let s = o.status.to_ascii_uppercase();
+            s.contains("REJECT")
+                || s.contains("CANCEL")
+                || s.contains("EXPIRE")
+                || s.contains("DENIED")
+        })
+        .count();
+    let derived_pending = if let Some(open) = state.open_order_count {
+        open
+    } else {
+        state
+            .orders
+            .iter()
+            .filter(|o| {
+                let s = o.status.to_ascii_uppercase();
+                s.contains("WORKING")
+                    || s.contains("OPEN")
+                    || s.contains("SUBMIT")
+                    || s.contains("PENDING")
+                    || s.contains("ACCEPT")
+            })
+            .count()
+    };
+
+    let orders_submitted = if state.orders_submitted > 0 {
         state.orders_submitted
     } else {
-        state.pnl.orders.map(|n| n as usize).unwrap_or(0)
+        derived_submitted
     };
-    let fills_count = if state.orders_filled > 0 {
+    let orders_filled = if state.orders_filled > 0 {
         state.orders_filled
     } else {
-        state.fills.len()
+        derived_filled
     };
+    let orders_rejected = if state.orders_rejected > 0 {
+        state.orders_rejected
+    } else {
+        derived_rejected
+    };
+    let orders_pending = if state.orders_pending > 0 {
+        state.orders_pending
+    } else {
+        derived_pending
+    };
+
+    let orders_sent = orders_submitted;
+    let fills_count = orders_filled;
     let orders_detail = format!(
         "{} submitted · {} filled · {} rejected · {} pending",
-        state.orders_submitted, state.orders_filled, state.orders_rejected, state.orders_pending,
+        orders_submitted, orders_filled, orders_rejected, orders_pending,
     );
     // One wall-clock reading per projection: the engine uptime clock and the
     // running duration must agree and reset together — and both derive from
@@ -4572,9 +4726,13 @@ pub fn project(state: &LiveState) -> LiveView {
             .as_deref()
             .map(|o| {
                 let o = o.to_ascii_uppercase();
-                o.contains("REJECT") || o.contains("FAIL") || o.contains("DENIED")
+                o.contains("REJECT")
+                    || o.contains("FAIL")
+                    || o.contains("DENIED")
+                    || o.contains("CANCEL")
             })
             .unwrap_or(false)
+            || r.status.to_ascii_uppercase().contains("REJECT")
     };
     // READY means "the engine would size this and nothing blocks it". It is
     // deliberately DISJOINT from WAITING, which owns the rows that are simply
@@ -4656,8 +4814,7 @@ pub fn project(state: &LiveState) -> LiveView {
     let filter_chip_selected = state.filter_chip_index as i32;
 
     let search_lower = state.search_query.trim().to_lowercase();
-    let mut watchlist_views = Vec::new();
-    let mut row_idx = 1;
+    let mut filtered_rows: Vec<&WatchlistStockRow> = Vec::new();
 
     for row in &state.watchlist_rows {
         // STEP 26: the chip index selects ONE bucket, and each predicate below
@@ -4693,9 +4850,25 @@ pub fn project(state: &LiveState) -> LiveView {
             }
         }
 
-        let is_selected = row.symbol == state.selected_symbol
-            || row.clean_symbol == state.selected_symbol
-            || (state.selected_symbol.is_empty() && row_idx == 1);
+        filtered_rows.push(row);
+    }
+
+    // ── Selected Stock Details view ──
+    // Derive highlighted row and inspector from the same filtered watchlist selection.
+    // Do not silently select the first stock when selection is invalid or filtered out.
+    let chosen_row: Option<&WatchlistStockRow> = if !state.selected_symbol.is_empty() {
+        filtered_rows.iter().copied().find(|r| {
+            r.symbol == state.selected_symbol || r.clean_symbol == state.selected_symbol
+        })
+    } else {
+        None
+    };
+
+    let mut watchlist_views = Vec::new();
+    let mut row_idx = 1;
+
+    for row in &filtered_rows {
+        let is_selected = chosen_row.map(|c| c.symbol == row.symbol).unwrap_or(false);
 
         let sym_disp = if !row.clean_symbol.is_empty() {
             row.clean_symbol.clone()
@@ -4842,17 +5015,6 @@ pub fn project(state: &LiveState) -> LiveView {
         row_idx += 1;
     }
 
-    // ── Selected Stock Details view ──
-    let chosen_row = state
-        .watchlist_rows
-        .iter()
-        .find(|r| {
-            r.symbol == state.selected_symbol
-                || r.clean_symbol == state.selected_symbol
-                || (state.selected_symbol.is_empty() && !state.watchlist_rows.is_empty())
-        })
-        .or_else(|| state.watchlist_rows.first());
-
     let (broker_cap_str, eff_cap_str, max_risk_str) = if capital_valid {
         let bc = state
             .capital
@@ -4879,23 +5041,29 @@ pub fn project(state: &LiveState) -> LiveView {
         )
     } else {
         match chosen_row {
-            Some(r) => {
-                let ep = r.entry_price.unwrap_or(0.0);
-                let sp = r.stop_price.unwrap_or(0.0);
-                let q = r.qty.unwrap_or(0);
-                let (ok, msg) = state.risk_engine.validate_planned_risk(q, ep, sp);
-                let banner = if ok {
-                    format!(
-                        "[✓] RISK VALIDATED · Planned ₹{:.2} <= Max ₹{:.2} · Safe to execute",
-                        r.planned_risk.unwrap_or(0.0),
-                        state.risk_engine.max_allowed_risk()
-                    )
-                } else {
-                    format!("[✕] RISK BLOCKED · {}", msg)
-                };
-                (ok, banner)
-            }
-            None => (true, "[✓] RISK VALIDATED · Safe to execute".into()),
+            Some(r) => match (r.qty, r.entry_price, r.stop_price) {
+                (Some(q), Some(ep), Some(sp)) if q > 0 && ep > 0.0 && sp > 0.0 => {
+                    let (ok, msg) = state.risk_engine.validate_planned_risk(q, ep, sp);
+                    let banner = if ok {
+                        format!(
+                            "[✓] RISK VALIDATED · Planned ₹{:.2} <= Max ₹{:.2} · Safe to execute",
+                            r.planned_risk.unwrap_or(0.0),
+                            state.risk_engine.max_allowed_risk()
+                        )
+                    } else {
+                        format!("[✕] RISK BLOCKED · {}", msg)
+                    };
+                    (ok, banner)
+                }
+                _ => (
+                    false,
+                    "[✕] RISK NOT VALIDATED · Missing entry, stop, or quantity".to_string(),
+                ),
+            },
+            None => (
+                false,
+                "[—] RISK NOT VALIDATED · Select an instrument to inspect risk".to_string(),
+            ),
         }
     };
 
@@ -4973,7 +5141,7 @@ pub fn project(state: &LiveState) -> LiveView {
                 });
 
             StockDetailView {
-                symbol: format!("{} · NSE EQUITY", sym_disp),
+                symbol: format!("{} · {}", sym_disp, derive_exchange_label(&r.symbol, state)),
                 ltp: r.ltp.map_or("—".into(), |v| format!("{:.2}", v)),
                 change: r.change_pct.map_or("—".into(), |v| format!("{:+.2}%", v)),
                 change_tone: match r.change_pct {
@@ -5077,12 +5245,8 @@ pub fn project(state: &LiveState) -> LiveView {
             unrealized_pnl: "₹0.00".into(),
             realized_pnl: "₹0.00".into(),
             recent_orders: "—".into(),
-            risk_validated: capital_valid,
-            risk_banner_text: if capital_valid {
-                "[✓] RISK VALIDATED · Safe to execute".into()
-            } else {
-                "[✕] RISK STATUS: NOT READY · Capital not available".into()
-            },
+            risk_validated: false,
+            risk_banner_text: risk_banner,
             pipeline: Vec::new(),
             order_reason: String::new(),
             current_open_risk: None,
@@ -6140,7 +6304,7 @@ mod tests {
         assert!(st.host_mode && st.bridge_wired);
         assert!(st.can_start());
         st.start();
-        assert_eq!(st.session, SessionStatus::Running); // optimistic real-time transition
+        assert_eq!(st.session, SessionStatus::Starting); // never optimistically Running before backend confirmation
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["action"], "start");
         assert_eq!(action["confirmed"], true);
@@ -6205,11 +6369,17 @@ mod tests {
         assert!(view.setup.needs_live_confirm);
         assert!(!view.setup.confirmed_live);
 
-        // In 1-click mode, clicking START in LIVE when venue gates are ready directly
-        // authorizes and dispatches confirmed: true immediately (0ms UI latency)
+        // Normal START click in unconfirmed LIVE mode opens confirmation modal and does not dispatch
         st.start();
+        assert!(st.confirm_dialog_open);
+        assert!(!st.live_confirmed);
+        assert!(st.take_action().is_none());
+
+        // Explicit operator confirmation confirms LIVE and dispatches confirmed start
+        st.confirm_live();
+        assert!(!st.confirm_dialog_open);
         assert!(st.live_confirmed);
-        assert_eq!(st.session, SessionStatus::Running);
+        assert_eq!(st.session, SessionStatus::Starting);
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["action"], "start");
         assert_eq!(action["confirmed"], true);
@@ -7420,11 +7590,17 @@ mod tests {
         assert!(!st.confirm_dialog_open);
         assert!(!st.live_confirmed);
 
-        // Direct 1-click START: operator consent is granted directly on START click
+        // Normal START click in unconfirmed LIVE mode opens confirmation modal and does not dispatch
         st.start();
+        assert!(st.confirm_dialog_open);
+        assert!(!st.live_confirmed);
+        assert!(st.take_action().is_none());
+
+        // Explicit operator confirmation confirms LIVE and dispatches confirmed start
+        st.confirm_live();
         assert!(!st.confirm_dialog_open);
         assert!(st.live_confirmed);
-        assert_eq!(st.session, SessionStatus::Running);
+        assert_eq!(st.session, SessionStatus::Starting);
         let action = st.take_action();
         assert!(action.is_some());
         let val: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();
@@ -7548,11 +7724,16 @@ mod tests {
         st.live_confirmed = false;
         st.gates = all_ready_gates();
 
-        // Direct 1-click START when venue gates are ready
+        // Trigger START -> modal opens
         st.start();
+        assert!(st.confirm_dialog_open);
+        assert!(!st.live_confirmed);
+
+        // Operator explicitly confirms in modal -> dispatches confirmed start action
+        st.confirm_live();
         assert!(!st.confirm_dialog_open);
         assert!(st.live_confirmed);
-        assert_eq!(st.session, SessionStatus::Running);
+        assert_eq!(st.session, SessionStatus::Starting);
 
         let action = st.take_action();
         assert!(action.is_some());
@@ -8151,6 +8332,345 @@ mod tests {
         assert_eq!(view.ws.tone, 0);
         assert_eq!(view.md.status, "MARKET CLOSED");
         assert_eq!(view.md.tone, 0);
+    }
+
+    #[test]
+    fn test_finding_1_false_risk_validated_eliminated_when_data_missing_or_invalid() {
+        let mut st = LiveState::default();
+        st.capital.broker_capital = Some(100_000.0);
+        st.capital.source = "broker".into();
+        st.selected_symbol = "NSE:INFY-EQ".into();
+
+        // 1. Missing entry and stop price -> risk must not validate
+        st.watchlist_rows = vec![WatchlistStockRow {
+            symbol: "NSE:INFY-EQ".into(),
+            clean_symbol: "INFY".into(),
+            ltp: Some(1500.0),
+            change_pct: Some(0.5),
+            ref_high: None,
+            ref_low: None,
+            break_low: None,
+            entry_price: None,
+            stop_price: None,
+            risk_per_share: None,
+            qty: None,
+            planned_risk: None,
+            risk_util: None,
+            position: "FLAT".into(),
+            status: "WAITING".into(),
+            signal: "--".into(),
+            order: None,
+            pnl: None,
+            last_update: "10:00:00".into(),
+        }];
+
+        let view = project(&st);
+        assert!(!view.selected_stock.risk_validated, "Missing levels must not validate risk");
+        assert!(
+            view.selected_stock.risk_banner_text.contains("[✕] RISK NOT VALIDATED"),
+            "Banner must show RISK NOT VALIDATED: {}",
+            view.selected_stock.risk_banner_text
+        );
+
+        // 2. Non-positive / zero qty or prices -> must not validate
+        st.watchlist_rows[0].entry_price = Some(0.0);
+        st.watchlist_rows[0].stop_price = Some(1400.0);
+        st.watchlist_rows[0].qty = Some(0);
+        let view_zero = project(&st);
+        assert!(!view_zero.selected_stock.risk_validated);
+        assert!(view_zero.selected_stock.risk_banner_text.contains("[✕] RISK NOT VALIDATED"));
+
+        // 3. Valid levels and qty within limit -> risk validated
+        st.watchlist_rows[0].entry_price = Some(1500.0);
+        st.watchlist_rows[0].stop_price = Some(1490.0);
+        st.watchlist_rows[0].qty = Some(10);
+        st.watchlist_rows[0].planned_risk = Some(100.0);
+        let view_valid = project(&st);
+        assert!(view_valid.selected_stock.risk_validated);
+        assert!(view_valid.selected_stock.risk_banner_text.contains("[✓] RISK VALIDATED"));
+    }
+
+    #[test]
+    fn test_finding_2_start_safety_consults_blockers_and_never_optimistically_runs() {
+        let mut st = LiveState::default();
+        st.bridge_wired = true;
+        st.host_mode = true;
+        // Unconfigured state has blockers
+        assert!(!st.can_start());
+        st.start();
+        assert_eq!(st.session, SessionStatus::Stopped);
+        assert!(st.action_note.is_some());
+        assert!(st.take_action().is_none());
+
+        // When properly configured in PAPER mode, start sets Starting (never Running)
+        let mut st_ready = start_ready_state();
+        assert!(st_ready.can_start());
+        st_ready.start();
+        assert_eq!(
+            st_ready.session,
+            SessionStatus::Starting,
+            "Must never optimistically set Running before backend confirmation"
+        );
+        let action: serde_json::Value =
+            serde_json::from_str(&st_ready.take_action().unwrap()).unwrap();
+        assert_eq!(action["action"], "start");
+    }
+
+    #[test]
+    fn test_finding_3_strategy_deselection_clears_stale_data_and_dispatches_empty_setup() {
+        let mut st = configured(LiveState::default());
+        st.host_mode = true;
+        st.selected_symbol = "NSE:RELIANCE-EQ".into();
+        st.watchlist_rows = vec![WatchlistStockRow {
+            symbol: "NSE:RELIANCE-EQ".into(),
+            clean_symbol: "RELIANCE".into(),
+            ltp: Some(2500.0),
+            change_pct: None,
+            ref_high: None,
+            ref_low: None,
+            break_low: None,
+            entry_price: None,
+            stop_price: None,
+            risk_per_share: None,
+            qty: None,
+            planned_risk: None,
+            risk_util: None,
+            position: "".into(),
+            status: "READY".into(),
+            signal: "--".into(),
+            order: None,
+            pnl: None,
+            last_update: "".into(),
+        }];
+        st.drain_actions();
+
+        // Deselect strategy via combo text
+        st.select_strategy_value("— Select Strategy —");
+        assert!(st.strategy_index.is_none());
+        assert!(st.selected_strategy().is_none());
+        assert!(st.symbols.is_empty(), "Symbols must be cleared");
+        assert!(st.watchlist_rows.is_empty(), "Watchlist rows must be cleared");
+        assert!(st.selected_symbol.is_empty(), "Selected symbol must be cleared");
+
+        // Verifies setup action with empty strategy was pushed
+        let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
+        assert_eq!(action["action"], "setup");
+        assert_eq!(action["strategy_name"], "");
+        assert_eq!(action["symbols"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_finding_4_rejected_order_count_and_filter_consistency() {
+        let mut st = LiveState::default();
+        st.watchlist_rows = vec![
+            WatchlistStockRow {
+                symbol: "NSE:RELIANCE-EQ".into(),
+                clean_symbol: "RELIANCE".into(),
+                ltp: Some(2500.0),
+                change_pct: None,
+                ref_high: None,
+                ref_low: None,
+                break_low: None,
+                entry_price: None,
+                stop_price: None,
+                risk_per_share: None,
+                qty: None,
+                planned_risk: None,
+                risk_util: None,
+                position: "".into(),
+                status: "REJECTED".into(),
+                signal: "--".into(),
+                order: Some("REJECTED".into()),
+                pnl: None,
+                last_update: "".into(),
+            },
+            WatchlistStockRow {
+                symbol: "NSE:TCS-EQ".into(),
+                clean_symbol: "TCS".into(),
+                ltp: Some(3500.0),
+                change_pct: None,
+                ref_high: None,
+                ref_low: None,
+                break_low: None,
+                entry_price: None,
+                stop_price: None,
+                risk_per_share: None,
+                qty: None,
+                planned_risk: None,
+                risk_util: None,
+                position: "".into(),
+                status: "WAITING".into(),
+                signal: "--".into(),
+                order: None,
+                pnl: None,
+                last_update: "".into(),
+            },
+        ];
+
+        let view = project(&st);
+        assert_eq!(view.filter_chips[8], "REJECTED (1)");
+
+        // Selecting chip 8 (REJECTED) filters strictly to the rejected row
+        st.set_filter_chip(8);
+        let filtered_view = project(&st);
+        assert_eq!(filtered_view.watchlist.len(), 1);
+        assert_eq!(filtered_view.watchlist[0].symbol, "RELIANCE");
+        assert_eq!(filtered_view.watchlist[0].order, "REJECTED");
+    }
+
+    #[test]
+    fn test_finding_5_empty_watchlist_displays_empty_guidance_and_not_validated_banner() {
+        let mut st = LiveState::default();
+        st.capital.broker_capital = Some(50_000.0);
+        st.watchlist_rows.clear();
+        st.selected_symbol.clear();
+
+        let view = project(&st);
+        assert_eq!(view.watchlist.len(), 0);
+        assert_eq!(view.selected_stock.symbol, "NO STOCK SELECTED");
+        assert!(!view.selected_stock.risk_validated);
+        assert!(view.selected_stock.risk_banner_text.contains("[—] RISK NOT VALIDATED"));
+    }
+
+    #[test]
+    fn test_finding_6_selected_row_and_inspector_consistency_across_filters() {
+        let mut st = LiveState::default();
+        st.selected_symbol = "NSE:TCS-EQ".into();
+        st.watchlist_rows = vec![
+            WatchlistStockRow {
+                symbol: "NSE:INFY-EQ".into(),
+                clean_symbol: "INFY".into(),
+                ltp: Some(1500.0),
+                change_pct: None,
+                ref_high: None,
+                ref_low: None,
+                break_low: None,
+                entry_price: None,
+                stop_price: None,
+                risk_per_share: None,
+                qty: None,
+                planned_risk: None,
+                risk_util: None,
+                position: "".into(),
+                status: "WAITING".into(),
+                signal: "--".into(),
+                order: None,
+                pnl: None,
+                last_update: "".into(),
+            },
+            WatchlistStockRow {
+                symbol: "NSE:TCS-EQ".into(),
+                clean_symbol: "TCS".into(),
+                ltp: Some(3500.0),
+                change_pct: None,
+                ref_high: None,
+                ref_low: None,
+                break_low: None,
+                entry_price: None,
+                stop_price: None,
+                risk_per_share: None,
+                qty: None,
+                planned_risk: None,
+                risk_util: None,
+                position: "".into(),
+                status: "WAITING".into(),
+                signal: "--".into(),
+                order: None,
+                pnl: None,
+                last_update: "".into(),
+            },
+        ];
+
+        // 1. Initial: TCS is selected in table and inspector
+        let view = project(&st);
+        assert_eq!(view.selected_stock.symbol, "TCS · NSE EQUITY");
+        assert!(!view.watchlist[0].selected);
+        assert!(view.watchlist[1].selected);
+
+        // 2. Search filters out TCS: inspector clears to empty state and table has no selection
+        st.set_watchlist_search("INFY");
+        let search_view = project(&st);
+        assert_eq!(search_view.watchlist.len(), 1);
+        assert_eq!(search_view.watchlist[0].symbol, "INFY");
+        assert!(!search_view.watchlist[0].selected);
+        assert_eq!(search_view.selected_stock.symbol, "NO STOCK SELECTED");
+
+        // 3. Invalid selected_symbol does NOT silently select the first stock
+        st.set_watchlist_search("");
+        st.selected_symbol = "NSE:NONEXISTENT-EQ".into();
+        let invalid_view = project(&st);
+        assert_eq!(invalid_view.selected_stock.symbol, "NO STOCK SELECTED");
+        assert!(!invalid_view.watchlist[0].selected);
+        assert!(!invalid_view.watchlist[1].selected);
+    }
+
+    #[test]
+    fn test_finding_7_exchange_and_instrument_type_label_derivation() {
+        let st = LiveState::default();
+        assert_eq!(derive_exchange_label("NSE:SBIN-EQ", &st), "NSE EQUITY");
+        assert_eq!(derive_exchange_label("BSE:TCS", &st), "BSE EQUITY");
+        assert_eq!(derive_exchange_label("MCX:CRUDEOIL", &st), "MCX COMMODITY");
+        assert_eq!(derive_exchange_label("NFO:NIFTY24OCTFUT", &st), "NFO DERIVATIVE");
+        assert_eq!(derive_exchange_label("CDS:USDINR", &st), "CDS CURRENCY");
+    }
+
+    #[test]
+    fn test_finding_10_authoritative_order_counts_and_partial_snapshot_fallback() {
+        let mut st = LiveState::default();
+        st.orders = vec![
+            OrderRow {
+                order_id: "ORD-1".into(),
+                strategy: "OBR".into(),
+                symbol: "RELIANCE".into(),
+                side: "BUY".into(),
+                quantity: "10".into(),
+                order_type: "MARKET".into(),
+                price: "2500".into(),
+                status: "FILLED".into(),
+                time: "09:30:00".into(),
+                broker: "FYERS".into(),
+                reason: "".into(),
+                filled_qty: "10".into(),
+                history: vec!["CREATED".into(), "FILLED".into()],
+            },
+            OrderRow {
+                order_id: "ORD-2".into(),
+                strategy: "OBR".into(),
+                symbol: "TCS".into(),
+                side: "SELL".into(),
+                quantity: "5".into(),
+                order_type: "LIMIT".into(),
+                price: "3500".into(),
+                status: "REJECTED".into(),
+                time: "09:35:00".into(),
+                broker: "FYERS".into(),
+                reason: "Insufficient funds".into(),
+                filled_qty: "0".into(),
+                history: vec!["CREATED".into(), "REJECTED".into()],
+            },
+            OrderRow {
+                order_id: "ORD-3".into(),
+                strategy: "OBR".into(),
+                symbol: "INFY".into(),
+                side: "BUY".into(),
+                quantity: "15".into(),
+                order_type: "LIMIT".into(),
+                price: "1500".into(),
+                status: "WORKING".into(),
+                time: "09:40:00".into(),
+                broker: "FYERS".into(),
+                reason: "".into(),
+                filled_qty: "0".into(),
+                history: vec!["CREATED".into(), "SUBMITTED".into()],
+            },
+        ];
+
+        let view = project(&st);
+        assert_eq!(view.active_strat.orders_today, "3 sent (1 filled)");
+        assert_eq!(
+            view.active_strat.orders_detail,
+            "3 submitted · 1 filled · 1 rejected · 1 pending"
+        );
     }
 }
 

@@ -411,3 +411,12 @@ fn test_defect_12_stale_arm_halt_wording_eliminated() {
         "Remote live gateway must not contain stale START/STOP/HALT notice"
     );
 }
+
+#[test]
+fn test_defect_finding_8_risk_banner_color_binds_to_risk_validated() {
+    let src = include_str!("../ui/live.slint");
+    assert!(
+        src.contains("color: root.selected-stock.risk-validated ? VayrenPalette.pos : VayrenPalette.neg;"),
+        "Risk banner text color must bind dynamically to risk-validated (pos for valid, neg for blocked/not ready)"
+    );
+}

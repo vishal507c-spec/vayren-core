@@ -7,7 +7,90 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (local-readiness-and-dashboard-verification-20261029):** LOCAL APP LAUNCH & DASHBOARD STATE VERIFICATION PASS —
+**Latest update (live-ui-audit-findings-fix-20261030):** RESOLUTION OF ALL 10 LIVE UI AUDIT FINDINGS (RISK VALIDATION, START SAFETY, STRATEGY DESELECTION, REJECTED ORDERS, SELECTION CONSISTENCY & MODAL CONFIRMATION) —
+- **10 Defects Resolved:**
+  1. *Finding 1 (False RISK VALIDATED Status):* Never show `[✓] RISK VALIDATED` when levels or qty are missing or zero. `LiveState::project()` requires `qty > 0 && entry_price > 0.0 && stop_price > 0.0`. Missing values fail closed to `risk_validated: false` with banner `[✕] RISK NOT VALIDATED · Missing entry, stop, or quantity`.
+  2. *Finding 2 (START Safety Bypass):* `start()` consults `can_start()` and backend `start_blockers()`. Starting in host mode sets `SessionStatus::Starting` (never optimistically `Running` before backend confirmation). If unanswered, `expire_pending_action()` cleanly rolls `Starting` back to `Stopped` so the START button remains clickable.
+  3. *Finding 3 (Strategy Deselection):* Selecting `"— Select Strategy —"`, empty string, or invalid index clears `strategy_index = None`, `symbols.clear()`, `watchlist_rows.clear()`, `selected_symbol.clear()`, and dispatches `{"action": "setup", "strategy_name": "", "symbols": []}` to Python backend.
+  4. *Finding 4 (REJECTED Order Count and Filter):* `rejected` closure inspects both order state and row status (`REJECT`, `FAIL`, `DENIED`, `CANCEL`). Chip 8 (REJECTED) count matches and filters rows correctly. Python `_universe_quotes()` inspects all tracked orders in `session.engine._orders` so terminal `REJECTED` orders accurately show up in quotes and watchlist status.
+  5. *Finding 5 (Empty Watchlist):* When watchlist rows are empty or no instrument is selected, `StockDetailView` displays empty state (`NO STOCK SELECTED`), `risk_validated: false`, and banner `[—] RISK NOT VALIDATED · Select an instrument to inspect risk`.
+  6. *Finding 6 (Selected Row and Inspector Mismatch):* Derived `chosen_row` strictly from `filtered_rows` matching `selected_symbol`. Highlighting in table and inspector are derived from the identical row. Filtering out selected symbol or selecting invalid symbol sets `chosen_row = None`, clearing inspector to empty state and unhighlighting table rows (no silent first-stock fallback).
+  7. *Finding 7 (Exchange Label):* Replaced hardcoded `NSE EQUITY` with `derive_exchange_label(symbol, state)` dynamically returning `NSE EQUITY`, `BSE EQUITY`, `MCX COMMODITY`, `NFO DERIVATIVE`, or `CDS CURRENCY` from symbol prefix and backend metadata.
+  8. *Finding 8 (Risk Banner Colors):* `crates/vayren-shell/ui/live.slint` updated to dynamically color banner: `color: root.selected-stock.risk-validated ? VayrenPalette.pos : VayrenPalette.neg;` (green for validated, red/negative for blocked or not ready).
+  9. *Finding 9 (LIVE Confirmation Modal):* Normal START click in unconfirmed LIVE mode opens `confirm_dialog_open = true` and halts. Only explicit `confirm_live()` operator confirmation sets `live_confirmed = true`, closes dialog, and dispatches confirmed start request.
+  10. *Finding 10 (Orders Detail Count Inconsistency):* Authoritative counts unified across `orders_sent`, `fills_count`, and `orders_detail`. Reads from `strategy` dict if top-level omitted, with fallback to `state.orders` and `state.fills` on partial snapshots.
+- **Verification Gates:**
+  - `cargo test -p vayren-domain`: 320/320 PASSED in 0.16s (including 8 new regression tests).
+  - `cargo test -p vayren-shell --test live_ui_defects_regression`: 24/24 PASSED in 0.01s (including Slint color binding regression test).
+  - `pytest src/app/tests/test_live_ui_audit_findings.py`: 2/2 PASSED in 0.79s.
+  - `pytest src/app/tests/test_live_ltp_pipeline.py`: 6/6 PASSED in 0.88s.
+  - `ruff check src/app/services/live_trading_service.py src/app/tests/`: 0 errors.
+  - `pyright src/app/services/live_trading_service.py src/app/tests/test_live_ui_audit_findings.py`: 0 errors.
+  - `python tools/validate_language_ownership.py`: PASSED (427 files checked).
+- **Git & Deployment Safety:**
+  - ZERO git push, ZERO deployment to EC2, ZERO service restarts, ZERO live orders. Strategy logic and risk rules 100% intact.
+
+**Previous update (live-ltp-pipeline-fix-20261030):** LIVE LTP PIPELINE BUG FIX & TICK-TO-UI STREAMING RECOVERY PASS —
+- **Problem Solved:**
+  - Live dashboard showed frozen/static LTPs for watchlist symbols despite active FYERS Market DataSocket streaming valid ticks.
+- **Root Cause Confirmed:**
+  - `src/app/services/live_trading_service.py::_universe_quotes()` read prices exclusively from `MarketDataService.get_quotes()` (historical SQLite candle stores, e.g. 2026-10-16) and completely ignored live market prices stored in `self._marks`.
+  - In addition, an unconditional trailing block in `_universe_quotes()` was overwriting `price_source = "candle_store"` and `stale = True`.
+  - Because `quotes` remained identical to static candle DB data, differential hashing in `remote/server.py` saw no changes and omitted `quotes` from Gateway WebSocket `state_update` frames.
+- **Fix Implemented:**
+  1. `src/execution/market_data/broker_feed.py`:
+     - Added `self._last_tick_time: dict[str, str] = {}` to capture real venue tick timestamps on incoming ticks in `_ingest()`.
+     - Added `@property def last_tick_time(self) -> dict[str, str]` exposure.
+     - Properly cleaned up in `unsubscribe()` and `close()`.
+  2. `src/app/services/live_trading_service.py`:
+     - Initialized `self._mark_times: dict[str, str] = {}`.
+     - Implemented `set_live_price(self, symbol, price, timestamp)` mapping across all 22 FYERS symbol variations (`clean`, `clean_bare`, `NSE:{clean}`, `NSE:{clean_bare}`, `NSE:{clean_bare}-EQ`, `{clean_bare}-EQ`).
+     - Enhanced `_refresh_mark(symbol)` to pull `last_close` and `last_tick_time` across all variations.
+     - Rewrote `_universe_quotes()` LTP resolution:
+       - Uses `self._marks` with multi-key fallback.
+       - When live: sets `price = live_val`, calculates `change_pct` against candle base if available, sets `price_source = "live_feed"`, `stale = False`, `last_update = live_stamp`.
+       - When no live mark: falls back to SQLite candles, sets `price_source = "candle_store"`, `stale = True`, `last_update = source_stamp`.
+       - Dead override block removed.
+  3. `src/app/tests/test_live_ltp_pipeline.py`:
+     - 6 automated regression and benchmark tests verifying live mark ingestion, stale fallback, FYERS symbol variations, snapshot hash mutation on new ticks, zero churn on idle ticks, and latency benchmark.
+- **Latency Benchmark:**
+  - 22 symbols `set_live_price`: 0.061 ms
+  - Snapshot generation: 22.2 ms
+  - Diff hashing (`_stable_hash`): 0.23 ms
+  - Total end-to-end pipeline: ~22.5 ms (well below real-time rendering thresholds).
+- **Verification:**
+  - `pytest src/app/tests/test_live_ltp_pipeline.py`: 6/6 PASSED in 0.89s.
+  - `pytest src/execution/tests/test_live_pipeline.py`: 16/16 PASSED in 1.48s.
+  - `python tools/validate_language_ownership.py`: PASSED (426 files checked).
+  - `cargo check -p vayren-core`: PASSED in 0.44s.
+  - `ruff check`: PASSED (0 errors).
+- **Git & Production Safety:**
+  - ZERO git push, ZERO deployment, ZERO service restarts, ZERO live orders. Strategy, risk limits, and safety gates 100% unchanged.
+
+**Previous update (system-ui-bug-hunt-20261030):** SYSTEM VIEW HARDENING PASS —
+- **Fixed (Rust+Slint):**
+  1. `NaN`/non-finite `scale_factor` now fails closed (`Err(-5)` in `vayren_system_view_create`/`_resize`) instead of silently propagating `NaN` into `ScaleFactorChanged` layout. Added test assertions in `rejects_bad_input_fail_closed`.
+  2. Removed dead `BrokerPanel` import from `system_host.slint` + `app.slint` (component is imported but never instantiated in either — the broker screen now renders the connection workspace). Header doc corrected to describe the real surface (connection workspace + health/log sections).
+  3. Health-grid tone mapping now includes amber (`tone == 2`) for consistency with the event-log grid (shared 0–3 convention).
+  4. Collapsible toggle TouchArea hit targets widened (label + 16px).
+  5. Pointer doc clarified: host must divide physical cursor px by `scale_factor` (logical-unit contract).
+  6. `config-saved` Slint callback documented as retained legacy contract (workspace carries its own credential flow).
+- **Verified:** `cargo check -p vayren-system-view -p vayren-shell` clean; `cargo test -p vayren-system-view` 7/7 + shot 1/1; `cargo test -p vayren-shell` 143.78s PASS; `cargo fmt --check -p vayren-system-view` clean; `python tools/benchmark.py impact --run` PASS.
+- **Open:** `shell::apply`/`apply_view` still project the legacy broker card facts (status-glyph, check-rows, funds/positions/orders, login/refresh/connect) onto properties that neither the shell nor the system view renders — retained parity surface, drift risk flagged; coordinate with a future cleanup slice.
+**Previous update (desktop-release-package-and-shortcut-20261030):** OFFICIAL DESKTOP RELEASE PACKAGE & SHORTCUT SYNC PASS —
+- **Requirements Verified:**
+  1. Built canonical production release package via `python tools/build_rust.py --package`:
+     - `vayren_core.dll` (release profile, 500,224 bytes).
+     - 6 View release DLLs batched: `vayren-portfolio-view`, `vayren-live-view`, `vayren-system-view`, `vayren-strategy-lab-view`, `vayren-research-view`, `vayren-market-view` (all built in `target/release/`).
+     - `vayren-shell.exe` compiled with `--release --features packaged-remote` (42,020,352 bytes).
+  2. Desktop shortcut verified and synced at `C:\Users\visha\Desktop\VAYREN.lnk`:
+     - Target: `C:\Users\visha\Desktop\vayren-core\target\release\vayren-shell.exe`
+     - Arguments: `--data-dir D:\ZerodhaTradingData --strategy-dir D:\VAYREN_STRATEGIES`
+     - Icon: `tools\assets\vayren_desktop.ico`
+     - Direct Rust execution: strictly no Python wrapper, no `--local` fallback, canonical remote-first production mode.
+  3. Regression tests: `pytest tools/tests/test_desktop.py`: 7/7 PASSED in 1.83s.
+
+**Previous update (local-readiness-and-dashboard-verification-20261029):** LOCAL APP LAUNCH & DASHBOARD STATE VERIFICATION PASS —
 - **Requirements Verified:**
   1. Local native build and launch verified (`cargo build -p vayren-shell` debug & release profiles completed cleanly).
   2. Both System and Live dashboard screens verified via automated contract and Slint headless harness tests (`live_render_snapshot.rs`, `live_ui_defects_regression.rs`, `test_live_dashboard_verification.py`).
