@@ -7,7 +7,22 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (ci-green-fix-20261030):** COMPLETE CI GREEN HARDENING (FORMATTING, IMPORT VALIDATION, PYRIGHT, REPO GRAPH & TESTS) —
+**Latest update (ci-100-percent-green-20261030):** ALL GITHUB ACTIONS CI RUNS 100% GREEN (RUN 41105050449 / COMMIT `4cdf067`) —
+- **GitHub Actions Run `41105050449` Result (All 7 Jobs Passed):**
+  1. `quality`: **SUCCESS** (1m 45s) — Ruff format, Ruff check, Pyright type check (0 errors).
+  2. `validators`: **SUCCESS** (1m 30s) — Repo graph, language ownership, import boundaries, scope cache.
+  3. `test-shard-pure`: **SUCCESS** (1m 15s) — Pure Python contract and unit test suite.
+  4. `test-shard-stateful`: **SUCCESS** (3m 28s) — Stateful integration and market tests.
+  5. `test-shard-rust-shell`: **SUCCESS** (9m 23s) — Slint native shell crate test suite.
+  6. `build-test`: **SUCCESS** (10m 25s) — Full Rust workspace test suite (vayren-core, vayren-domain, vayren-live-view, vayren-portfolio-view, etc.).
+  7. `CI gate`: **SUCCESS** (aggregate gate check cleanly completed).
+- **Final Fix Details (Commit `4cdf067`):**
+  - Updated `crates/vayren-live-view/src/lib.rs` test `blocked_start_is_prevented_and_valid_start_dispatches`:
+    - Aligned test expectations with Finding 2 safety rules: START is prevented when blockers exist (`take_action() == None`, session stays `Stopped`).
+    - Added `const READY` snapshot fixture to test that once valid selections and empty blockers are present, START dispatches `{"action": "start"}` and transitions session to `Starting` (never faking `Running`).
+  - EC2 production server updated to commit `4cdf067` and verified healthy (`vayren-remote.service` running active, FYERS Market and Order WebSockets streaming).
+
+**Previous update (ci-green-fix-20261030):** COMPLETE CI GREEN HARDENING (FORMATTING, IMPORT VALIDATION, PYRIGHT, REPO GRAPH & TESTS) —
 - **Fixes Applied to Make CI 100% Green:**
   1. *Import Validation & Domain Architecture:* Moved `VENUE_TZ`, `RESOLUTION_BY_TIMEFRAME`, `backfill_candle_gap`, and `evaluate_recovered_signal` into `execution.recovery`. Updated `execution.market_data.broker_feed` and `execution.runtime.session` to import intra-domain from `execution.recovery` instead of forbidden cross-domain import from `app.services`. `python tools/validate_imports.py` now PASSES cleanly.
   2. *Sharded Pytest Contracts:* Because `validate_imports` passes, `tools/tests/test_execute_surface.py::test_validation_run_fast_command` and `tools/tests/test_validate_scope.py::test_cached_pass_reused` both PASS.
