@@ -109,12 +109,28 @@ def test_idle_ticks_do_not_churn_snapshot_hash(tmp_path: Path) -> None:
 def test_tick_to_dashboard_latency_benchmark(tmp_path: Path) -> None:
     svc = LiveTradingService(data_dir=tmp_path)
     symbols = (
-        "NSE:DREDGECORP", "NSE:WAAREERTL", "NSE:KEC", "NSE:KAYNES",
-        "NSE:AVANTIFEED", "NSE:ROUTE", "NSE:RAILTEL", "NSE:SCI",
-        "NSE:MOIL", "NSE:CRAMC", "NSE:LXCHEM", "NSE:NOCIL",
-        "NSE:DAMCAPITAL", "NSE:JSWCEMENT", "NSE:TEXRAIL", "NSE:ZEEL",
-        "NSE:VIKRAN", "NSE:IFCI", "NSE:DCW", "NSE:SAGILITY",
-        "NSE:JINDWORLD", "NSE:NETWEB"
+        "NSE:DREDGECORP",
+        "NSE:WAAREERTL",
+        "NSE:KEC",
+        "NSE:KAYNES",
+        "NSE:AVANTIFEED",
+        "NSE:ROUTE",
+        "NSE:RAILTEL",
+        "NSE:SCI",
+        "NSE:MOIL",
+        "NSE:CRAMC",
+        "NSE:LXCHEM",
+        "NSE:NOCIL",
+        "NSE:DAMCAPITAL",
+        "NSE:JSWCEMENT",
+        "NSE:TEXRAIL",
+        "NSE:ZEEL",
+        "NSE:VIKRAN",
+        "NSE:IFCI",
+        "NSE:DCW",
+        "NSE:SAGILITY",
+        "NSE:JINDWORLD",
+        "NSE:NETWEB",
     )
     svc._config.strategy_name = "OBR C1C4"
     svc._config.symbols = symbols

@@ -1924,7 +1924,7 @@ class LiveSession:
                 Expired signals are recorded as SIGNAL_EXPIRED with exact reason.
                 Valid signals are executed through the normal risk and order pipeline.
         """
-        from app.services.session_recovery import VENUE_TZ, evaluate_recovered_signal
+        from execution.recovery import VENUE_TZ, evaluate_recovered_signal
 
         now_ts = now_epoch if now_epoch is not None else time.time()
         now_dt = datetime.fromtimestamp(now_ts, VENUE_TZ)

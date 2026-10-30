@@ -239,7 +239,7 @@ class BrokerFeedProvider(MarketDataProvider):
             return
         from datetime import datetime
 
-        from app.services.session_recovery import VENUE_TZ, backfill_candle_gap
+        from execution.recovery import VENUE_TZ, backfill_candle_gap
 
         now_dt = datetime.fromtimestamp(self._clock(), VENUE_TZ)
         for symbol in self._subscribed:

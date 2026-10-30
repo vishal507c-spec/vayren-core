@@ -1287,7 +1287,6 @@ def test_live_activation_singleton_reuse(monkeypatch: Any) -> None:
         unregister_fyers_live()
 
 
-
 def test_is_nse_market_open() -> None:
     import datetime
 
@@ -1322,11 +1321,9 @@ def test_fyers_live_market_data_health_respects_market_hours() -> None:
         access_token="TOK123",
         market_hours_checker=lambda: False,
     )
-    closed_md._running = True
     closed_md._state = "CONNECTED"
     closed_md._messages_received = 10
     closed_md._last_message_at = time.monotonic() - 1500
-    closed_md._last_message_epoch = time.time() - 1500
     ok, reason = closed_md.health()
     assert ok is True
     assert "market closed" in reason
@@ -1338,11 +1335,9 @@ def test_fyers_live_market_data_health_respects_market_hours() -> None:
         access_token="TOK123",
         market_hours_checker=lambda: True,
     )
-    open_md._running = True
     open_md._state = "CONNECTED"
     open_md._messages_received = 10
     open_md._last_message_at = time.monotonic() - 1500
-    open_md._last_message_epoch = time.time() - 1500
     ok, reason = open_md.health()
     assert ok is False
     assert "stale — no market data for" in reason

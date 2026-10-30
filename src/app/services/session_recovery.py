@@ -23,40 +23,30 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Collection, Sequence
+from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from data.candle_store import write_candles
 from data.settings import NSE_HOLIDAYS
-from execution.events import CandleEvent
-from execution.models.intent import StrategySignal
+from execution.recovery import (
+    RESOLUTION_BY_TIMEFRAME,
+    VENUE_TZ,
+    backfill_candle_gap,
+    evaluate_recovered_signal,
+)
+from execution.recovery import (
+    is_trading_day as _base_is_trading_day,
+)
 from market.models.bar import Bar
 from market.native_timeframe import seconds_of
 
 logger = logging.getLogger(__name__)
 
-#: Venue wall clock (IST: UTC + 5:30).
-VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
-
 SESSION_OPEN_TIME = (9, 15)
 SESSION_CLOSE_TIME = (15, 30)
-
-RESOLUTION_BY_TIMEFRAME: dict[str, str] = {
-    "1m": "1",
-    "3m": "3",
-    "5m": "5",
-    "10m": "10",
-    "15m": "15",
-    "20m": "20",
-    "30m": "30",
-    "60m": "60",
-    "1h": "60",
-    "1d": "D",
-    "D": "D",
-}
 
 
 class HistoricalRecoveryError(RuntimeError):
@@ -78,11 +68,7 @@ class HistoricalRecoveryReport:
 
 def is_trading_day(dt: date | datetime, holidays: Collection[str] = NSE_HOLIDAYS) -> bool:
     """Check if the given date is an active NSE trading day (Mon-Fri, non-holiday)."""
-    d = dt.date() if isinstance(dt, datetime) else dt
-    if d.weekday() >= 5:  # Saturday or Sunday
-        return False
-    iso = d.isoformat()
-    return iso not in holidays
+    return _base_is_trading_day(dt, holidays=holidays)
 
 
 def expected_completed_session_intervals(
@@ -315,208 +301,6 @@ def fetch_and_validate_session_candles(
         detail=detail_msg,
     )
     return tuple(recovered_bars), report
-
-
-def evaluate_recovered_signal(
-    signal: StrategySignal,
-    *,
-    now_dt: datetime,
-    current_quote: float | None = None,
-    subsequent_bars: Sequence[Bar] = (),
-    existing_positions: Sequence[Any] = (),
-    existing_orders: Sequence[Any] = (),
-    exit_time_cutoff: tuple[int, int] = (15, 15),
-    max_slippage_pct: float = 2.0,
-) -> tuple[bool, str]:
-    """Check if a signal that occurred while the engine was offline is still valid.
-
-    Checks:
-    1. Existing Position / Duplicate:
-       - If position already open or order already submitted today -> DUPLICATE_PREVENTED.
-    2. Session Time Cutoff:
-       - If current time >= 15:15 IST (exit time) -> SESSION_TIME_EXIT_PASSED.
-    3. Stop Loss Breached:
-       - If subsequent bars touched SL, or current market price breached SL -> STOP_LOSS_BREACHED.
-    4. Adverse Price Drift:
-       - If current price has moved excessively far against entry -> ADVERSE_PRICE_DRIFT.
-
-    Returns (is_valid, reason).
-    """
-    now = now_dt.replace(tzinfo=VENUE_TZ) if now_dt.tzinfo is None else now_dt.astimezone(VENUE_TZ)
-
-    # 1. Existing position check
-    for pos in existing_positions:
-        sym = getattr(pos, "symbol", "") or (pos.get("symbol") if isinstance(pos, dict) else "")
-        qty = getattr(pos, "quantity", 0) or (
-            pos.get("quantity", 0) if isinstance(pos, dict) else 0
-        )
-        if sym == signal.symbol and qty != 0:
-            return False, f"POSITION_ALREADY_EXISTS: position of {qty} exists for {signal.symbol}"
-
-    # 2. Existing order check (idempotency)
-    for ord_item in existing_orders:
-        ord_sym = getattr(ord_item, "symbol", "") or (
-            ord_item.get("symbol") if isinstance(ord_item, dict) else ""
-        )
-        ord_side = str(
-            getattr(ord_item, "side", "")
-            or (ord_item.get("side", "") if isinstance(ord_item, dict) else "")
-        ).upper()
-        if ord_sym == signal.symbol and ord_side == str(signal.side).upper():
-            return (
-                False,
-                f"ORDER_ALREADY_SUBMITTED: {signal.side} order already placed for {signal.symbol}",
-            )
-
-    # 3. Session time cutoff
-    cutoff_h, cutoff_m = exit_time_cutoff
-    if now.hour > cutoff_h or (now.hour == cutoff_h and now.minute >= cutoff_m):
-        return (
-            False,
-            f"SESSION_TIME_EXIT_PASSED: {now.strftime('%H:%M')} >= {cutoff_h:02d}:{cutoff_m:02d}",
-        )
-
-    side = str(signal.side).upper()
-    entry_price = float(signal.price)
-    stop_loss = float(signal.stop_loss) if signal.stop_loss is not None else None
-
-    # 4. Stop Loss breached check
-    if stop_loss is not None and stop_loss > 0:
-        if side == "SELL":
-            # Short position: stop loss is above entry price.
-            for bar in subsequent_bars:
-                if bar.high >= stop_loss:
-                    return (
-                        False,
-                        f"STOP_LOSS_BREACHED: bar high {bar.high:.2f} >= SL {stop_loss:.2f}",
-                    )
-            if current_quote is not None and current_quote >= stop_loss:
-                return (
-                    False,
-                    f"STOP_LOSS_BREACHED: quote {current_quote:.2f} >= SL {stop_loss:.2f}",
-                )
-        elif side == "BUY":
-            # Long position: stop loss is below entry price.
-            for bar in subsequent_bars:
-                if bar.low <= stop_loss:
-                    return (
-                        False,
-                        f"STOP_LOSS_BREACHED: bar low {bar.low:.2f} <= SL {stop_loss:.2f}",
-                    )
-            if current_quote is not None and current_quote <= stop_loss:
-                return (
-                    False,
-                    f"STOP_LOSS_BREACHED: quote {current_quote:.2f} <= SL {stop_loss:.2f}",
-                )
-
-    # 5. Adverse price drift check
-    if current_quote is not None and entry_price > 0:
-        if side == "SELL":
-            drift_pct = (current_quote - entry_price) / entry_price * 100.0
-            if drift_pct > max_slippage_pct:
-                return (
-                    False,
-                    f"ADVERSE_PRICE_DRIFT: rose {drift_pct:.2f}% "
-                    f"({current_quote:.2f} vs {entry_price:.2f})",
-                )
-        elif side == "BUY":
-            drift_pct = (entry_price - current_quote) / entry_price * 100.0
-            if drift_pct > max_slippage_pct:
-                return (
-                    False,
-                    f"ADVERSE_PRICE_DRIFT: fell {drift_pct:.2f}% "
-                    f"({current_quote:.2f} vs {entry_price:.2f})",
-                )
-
-    return True, "VALID"
-
-
-def backfill_candle_gap(
-    adapter: Any,
-    symbol: str,
-    timeframe: str,
-    last_seen_stamp: str,
-    now_dt: datetime | None = None,
-) -> tuple[CandleEvent, ...]:
-    """Backfill missing completed candles between last_seen_stamp and current time.
-
-    Used when WebSocket reconnects after a disconnect interval during market hours.
-    """
-    raw_now = now_dt if now_dt is not None else datetime.now(VENUE_TZ)
-    now = (
-        raw_now.replace(tzinfo=VENUE_TZ) if raw_now.tzinfo is None else raw_now.astimezone(VENUE_TZ)
-    )
-
-    if not is_trading_day(now):
-        return ()
-
-    try:
-        last_dt = datetime.strptime(last_seen_stamp[:19], "%Y-%m-%d %H:%M:%S").replace(
-            tzinfo=VENUE_TZ
-        )
-    except Exception:
-        return ()
-
-    tf_sec = int(seconds_of(timeframe) or 1800)
-    step = timedelta(seconds=float(tf_sec))
-    expected_start = last_dt + step
-
-    expected_intervals: list[tuple[datetime, datetime]] = []
-    curr = expected_start
-    while curr < now:
-        end_val = curr + step
-        if end_val <= now:
-            expected_intervals.append((curr, end_val))
-        else:
-            break
-        curr = end_val
-
-    if not expected_intervals:
-        return ()
-
-    resolution = RESOLUTION_BY_TIMEFRAME.get(str(timeframe).lower(), str(timeframe))
-    from_epoch = int(expected_intervals[0][0].timestamp())
-    to_epoch = int(now.timestamp())
-
-    try:
-        raw_rows = adapter.history(symbol, resolution, from_epoch, to_epoch)
-    except Exception as exc:
-        logger.warning("Failed to fetch backfill candles for %s: %s", symbol, exc)
-        return ()
-
-    events: list[CandleEvent] = []
-    for row in raw_rows if isinstance(raw_rows, (list, tuple)) else []:
-        if not isinstance(row, (list, tuple)) or len(row) < 6:
-            continue
-        try:
-            epoch = int(row[0])
-            o, h, low, c = float(row[1]), float(row[2]), float(row[3]), float(row[4])
-            v = int(float(row[5]))
-        except (TypeError, ValueError):
-            continue
-
-        candle_dt = datetime.fromtimestamp(epoch, VENUE_TZ)
-        if candle_dt <= last_dt or (epoch + tf_sec) > to_epoch:
-            continue
-
-        events.append(
-            CandleEvent(
-                symbol=symbol,
-                timestamp=_format_stamp(candle_dt),
-                seq=0,
-                source="backfill_history",
-                open=o,
-                high=h,
-                low=low,
-                close=c,
-                volume=v,
-                timeframe=timeframe,
-                is_closed=True,
-            )
-        )
-
-    events.sort(key=lambda e: (e.timestamp, e.symbol))
-    return tuple(events)
 
 
 __all__ = [

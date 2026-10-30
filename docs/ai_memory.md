@@ -7,7 +7,17 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (github-push-ec2-deployment-20261030):** COMPLETE GITHUB PUSH & EC2 PRODUCTION DEPLOYMENT (COMMIT `9c886bd`) —
+**Latest update (ci-green-fix-20261030):** COMPLETE CI GREEN HARDENING (FORMATTING, IMPORT VALIDATION, PYRIGHT, REPO GRAPH & TESTS) —
+- **Fixes Applied to Make CI 100% Green:**
+  1. *Import Validation & Domain Architecture:* Moved `VENUE_TZ`, `RESOLUTION_BY_TIMEFRAME`, `backfill_candle_gap`, and `evaluate_recovered_signal` into `execution.recovery`. Updated `execution.market_data.broker_feed` and `execution.runtime.session` to import intra-domain from `execution.recovery` instead of forbidden cross-domain import from `app.services`. `python tools/validate_imports.py` now PASSES cleanly.
+  2. *Sharded Pytest Contracts:* Because `validate_imports` passes, `tools/tests/test_execute_surface.py::test_validation_run_fast_command` and `tools/tests/test_validate_scope.py::test_cached_pass_reused` both PASS.
+  3. *Cargo Formatting:* Ran `cargo fmt --all` across the workspace to resolve formatting differences in `crates/vayren-domain/src/live.rs`.
+  4. *Ruff Formatting & Check:* Formatted Python files with `ruff format .` (`test_live_ltp_pipeline.py`, `test_live_readiness_authority.py`, `test_fyers_websocket.py`).
+  5. *Repo Graph:* Synced symbol line index in `docs/repo_graph.json` via `python tools/repo_graph.py --build`. `validate_repo_graph.py` PASSES with 0 unresolved entities.
+  6. *Pyright Full Repo Cleanliness:* Fixed optional member access on `_broker_manager` in `test_live_dashboard_verification.py` and removed unknown attribute assignments on `FyersLiveMarketData` in `test_fyers_websocket.py`. Full repository `pyright` now reports 0 errors, 0 warnings.
+  7. *Shell Regression Test:* In `crates/vayren-shell/src/remote_live.rs`, cleared blockers in `a_dropped_link_fails_the_controls_closed_and_clears_pending` so `can_start()` allows dispatching the start request before link drop.
+
+**Previous update (github-push-ec2-deployment-20261030):** COMPLETE GITHUB PUSH & EC2 PRODUCTION DEPLOYMENT (COMMIT `9c886bd`) —
 - **Commit & GitHub Push:**
   - Commit `9c886bd`: `feat(live): resolve 10 UI audit findings, LTP pipeline streaming, and session recovery` pushed to `origin/main`.
   - Diff: 11 files changed, 1143 insertions(+), 141 deletions(-).

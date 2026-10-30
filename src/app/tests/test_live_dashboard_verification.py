@@ -122,6 +122,7 @@ def test_3_market_open_states_matrix(tmp_path: Path) -> None:
 
     def _set_state(status: str, connected: bool, quotes: bool = False, running: bool = False):
         svc._status = "RUNNING" if running else "STOPPED"
+        assert svc._broker_manager is not None
         svc._broker_manager.snapshot.return_value = {
             "active_broker": "fyers",
             "brokers": [

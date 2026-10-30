@@ -1561,7 +1561,9 @@ mod tests {
     fn a_dropped_link_fails_the_controls_closed_and_clears_pending() {
         let mut state = init_remote_state();
         apply_role(&mut state, "trade");
-        apply_remote_sections(&mut state, &sections(), false);
+        let mut sec = sections();
+        sec["blockers"] = json!([]);
+        apply_remote_sections(&mut state, &sec, false);
         assert!(state.bridge_wired);
         state.start();
         assert_eq!(state.pending_action.as_deref(), Some("start"));

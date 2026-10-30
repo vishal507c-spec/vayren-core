@@ -1777,22 +1777,40 @@ impl LiveState {
 
         if let Some(strat) = v.get("strategy").and_then(|s| s.as_object()) {
             if self.orders_submitted == 0 {
-                if let Some(os) = strat.get("orders_submitted").or_else(|| strat.get("orders_submitted_count")).and_then(|n| n.as_u64()) {
+                if let Some(os) = strat
+                    .get("orders_submitted")
+                    .or_else(|| strat.get("orders_submitted_count"))
+                    .and_then(|n| n.as_u64())
+                {
                     self.orders_submitted = os as usize;
                 }
             }
             if self.orders_filled == 0 {
-                if let Some(of) = strat.get("orders_filled").or_else(|| strat.get("orders_filled_count")).or_else(|| strat.get("signals_executed")).and_then(|n| n.as_u64()) {
+                if let Some(of) = strat
+                    .get("orders_filled")
+                    .or_else(|| strat.get("orders_filled_count"))
+                    .or_else(|| strat.get("signals_executed"))
+                    .and_then(|n| n.as_u64())
+                {
                     self.orders_filled = of as usize;
                 }
             }
             if self.orders_rejected == 0 {
-                if let Some(or) = strat.get("orders_rejected").or_else(|| strat.get("orders_rejected_count")).or_else(|| strat.get("signals_rejected")).and_then(|n| n.as_u64()) {
+                if let Some(or) = strat
+                    .get("orders_rejected")
+                    .or_else(|| strat.get("orders_rejected_count"))
+                    .or_else(|| strat.get("signals_rejected"))
+                    .and_then(|n| n.as_u64())
+                {
                     self.orders_rejected = or as usize;
                 }
             }
             if self.orders_pending == 0 {
-                if let Some(op) = strat.get("orders_pending").or_else(|| strat.get("orders_working_count")).and_then(|n| n.as_u64()) {
+                if let Some(op) = strat
+                    .get("orders_pending")
+                    .or_else(|| strat.get("orders_working_count"))
+                    .and_then(|n| n.as_u64())
+                {
                     self.orders_pending = op as usize;
                 }
             }
@@ -4556,7 +4574,12 @@ pub fn project(state: &LiveState) -> LiveView {
     let derived_filled = state
         .orders
         .iter()
-        .filter(|o| matches!(o.status.to_ascii_uppercase().as_str(), "FILLED" | "COMPLETE"))
+        .filter(|o| {
+            matches!(
+                o.status.to_ascii_uppercase().as_str(),
+                "FILLED" | "COMPLETE"
+            )
+        })
         .count()
         .max(state.fills.len());
     let derived_rejected = state
@@ -4857,9 +4880,10 @@ pub fn project(state: &LiveState) -> LiveView {
     // Derive highlighted row and inspector from the same filtered watchlist selection.
     // Do not silently select the first stock when selection is invalid or filtered out.
     let chosen_row: Option<&WatchlistStockRow> = if !state.selected_symbol.is_empty() {
-        filtered_rows.iter().copied().find(|r| {
-            r.symbol == state.selected_symbol || r.clean_symbol == state.selected_symbol
-        })
+        filtered_rows
+            .iter()
+            .copied()
+            .find(|r| r.symbol == state.selected_symbol || r.clean_symbol == state.selected_symbol)
     } else {
         None
     };
@@ -8365,9 +8389,14 @@ mod tests {
         }];
 
         let view = project(&st);
-        assert!(!view.selected_stock.risk_validated, "Missing levels must not validate risk");
         assert!(
-            view.selected_stock.risk_banner_text.contains("[✕] RISK NOT VALIDATED"),
+            !view.selected_stock.risk_validated,
+            "Missing levels must not validate risk"
+        );
+        assert!(
+            view.selected_stock
+                .risk_banner_text
+                .contains("[✕] RISK NOT VALIDATED"),
             "Banner must show RISK NOT VALIDATED: {}",
             view.selected_stock.risk_banner_text
         );
@@ -8378,7 +8407,10 @@ mod tests {
         st.watchlist_rows[0].qty = Some(0);
         let view_zero = project(&st);
         assert!(!view_zero.selected_stock.risk_validated);
-        assert!(view_zero.selected_stock.risk_banner_text.contains("[✕] RISK NOT VALIDATED"));
+        assert!(view_zero
+            .selected_stock
+            .risk_banner_text
+            .contains("[✕] RISK NOT VALIDATED"));
 
         // 3. Valid levels and qty within limit -> risk validated
         st.watchlist_rows[0].entry_price = Some(1500.0);
@@ -8387,7 +8419,10 @@ mod tests {
         st.watchlist_rows[0].planned_risk = Some(100.0);
         let view_valid = project(&st);
         assert!(view_valid.selected_stock.risk_validated);
-        assert!(view_valid.selected_stock.risk_banner_text.contains("[✓] RISK VALIDATED"));
+        assert!(view_valid
+            .selected_stock
+            .risk_banner_text
+            .contains("[✓] RISK VALIDATED"));
     }
 
     #[test]
@@ -8449,8 +8484,14 @@ mod tests {
         assert!(st.strategy_index.is_none());
         assert!(st.selected_strategy().is_none());
         assert!(st.symbols.is_empty(), "Symbols must be cleared");
-        assert!(st.watchlist_rows.is_empty(), "Watchlist rows must be cleared");
-        assert!(st.selected_symbol.is_empty(), "Selected symbol must be cleared");
+        assert!(
+            st.watchlist_rows.is_empty(),
+            "Watchlist rows must be cleared"
+        );
+        assert!(
+            st.selected_symbol.is_empty(),
+            "Selected symbol must be cleared"
+        );
 
         // Verifies setup action with empty strategy was pushed
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
@@ -8529,7 +8570,10 @@ mod tests {
         assert_eq!(view.watchlist.len(), 0);
         assert_eq!(view.selected_stock.symbol, "NO STOCK SELECTED");
         assert!(!view.selected_stock.risk_validated);
-        assert!(view.selected_stock.risk_banner_text.contains("[—] RISK NOT VALIDATED"));
+        assert!(view
+            .selected_stock
+            .risk_banner_text
+            .contains("[—] RISK NOT VALIDATED"));
     }
 
     #[test]
@@ -8610,7 +8654,10 @@ mod tests {
         assert_eq!(derive_exchange_label("NSE:SBIN-EQ", &st), "NSE EQUITY");
         assert_eq!(derive_exchange_label("BSE:TCS", &st), "BSE EQUITY");
         assert_eq!(derive_exchange_label("MCX:CRUDEOIL", &st), "MCX COMMODITY");
-        assert_eq!(derive_exchange_label("NFO:NIFTY24OCTFUT", &st), "NFO DERIVATIVE");
+        assert_eq!(
+            derive_exchange_label("NFO:NIFTY24OCTFUT", &st),
+            "NFO DERIVATIVE"
+        );
         assert_eq!(derive_exchange_label("CDS:USDINR", &st), "CDS CURRENCY");
     }
 
@@ -8673,4 +8720,3 @@ mod tests {
         );
     }
 }
-

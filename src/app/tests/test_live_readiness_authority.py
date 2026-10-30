@@ -460,7 +460,6 @@ def test_attach_broker_view_triggers_reconcile_on_active_sessions(
     assert len(reconciled) == 1
 
 
-
 def test_snapshot_preserves_connected_and_capital_on_degraded_session(
     service: LiveTradingService,
 ) -> None:
