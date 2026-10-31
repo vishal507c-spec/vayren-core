@@ -2490,6 +2490,13 @@ fn apply_server_op_ack(
                 .get("selected_broker")
                 .and_then(|v| v.as_str())
                 .unwrap_or("none");
+            if let Some(sc) = payload.get("server_code").and_then(|v| v.as_object()) {
+                let sc_status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
+                ui.set_server_code_status(slint::SharedString::from(sc_status));
+                let mut footer = ui.get_live_footer();
+                footer.server_code_status = slint::SharedString::from(sc_status);
+                ui.set_live_footer(footer);
+            }
             let feedback = format!(
                 "✓ EC2 {} · Gateway {} (PID {}) · Worker {} · Broker {} · Up {}",
                 ec2_status, gw_status, gw_pid, worker_status, broker, uptime

@@ -1521,3 +1521,7 @@
 4. Transient lint trap logged: `headless.py` shows stat-only CRLF drift (`git update-index --refresh` clears it); `ruff format --check` sees 421 files formatted when content matches HEAD.
 5. Full gate GREEN (make_exit=0): 1791 passed, 5 skipped; ruff + format + pyright + all validators + context + cargo clean. repo_graph rebuilt (0c707f4). main == origin/main at 0c707f4.
 6. Release exe rebuilt locally (`target/release/vayren-shell.exe`, 41,114,112 bytes) so `C:\Users\visha\Desktop\VAYREN.lnk` shows the polish. `target/` is gitignored.
+
+**Latest update (server-code-status-broadcast-fix-20261031):**
+- Discovered server_code was missing from EVENT_CHANNELS in src/remote/server.py. Added server_code to allow remote snapshot/state broadcast to clients.
+- In crates/vayren-shell/src/main.rs, updated health server_op ack to project server_code_status.

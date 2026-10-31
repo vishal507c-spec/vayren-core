@@ -112,6 +112,7 @@ EVENT_CHANNELS = (
     "selected_timeframe",
     "quotes",
     "pnl",
+    "server_code",
 )
 
 _CLOSE_POLICY = 1008
