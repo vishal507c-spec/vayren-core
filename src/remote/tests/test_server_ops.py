@@ -360,3 +360,23 @@ def test_execute_op_deploy_requires_confirm(tmp_path):
     )
     assert res["ok"] is False
     assert "requires confirmed=True" in res["error"]
+
+
+def test_execute_op_check_code(tmp_path):
+    d = tmp_path / "data"
+    d.mkdir()
+    s = tmp_path / "strategies"
+    s.mkdir()
+
+    res = execute_server_op(
+        op_name="check_code",
+        params={"force": True},
+        data_dir=str(d),
+        strategy_dir=str(s),
+    )
+    assert res["ok"] is True
+    assert res["status"] in ("SERVER CODE: UPDATED", "SERVER CODE: NOT UPDATED")
+    assert "updated" in res
+    assert "github_sha" in res
+    assert "deployed_sha" in res
+    assert "running_sha" in res

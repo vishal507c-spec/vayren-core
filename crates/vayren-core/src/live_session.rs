@@ -860,6 +860,13 @@ impl LiveSession {
                     ),
                     ("signal_id".to_string(), field_str(signal.signal_id.clone())),
                     ("event_seq".to_string(), field_int(signal.event_seq)),
+                    (
+                        "side".to_string(),
+                        field_str(match signal.side {
+                            Side::Buy => "BUY".to_string(),
+                            Side::Sell => "SELL".to_string(),
+                        }),
+                    ),
                 ],
             );
             self.emit(SessionEvent::Signal(SignalGenerated {

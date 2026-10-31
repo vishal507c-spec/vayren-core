@@ -97,6 +97,7 @@ export component AppWindow inherits Window {
     callback server-op-restart();
     callback server-op-backup();
     callback server-op-logs();
+    callback refresh-server-code();
 
     // Strategy Lab interactions (Slint reports; Rust view-model owns state).
     callback lab-library-picked(int);
@@ -353,6 +354,7 @@ export component AppWindow inherits Window {
     in-out property <int> server-status-tone: 1;
     in-out property <string> worker-status: "STOPPED";
     in-out property <int> worker-status-tone: 2;
+    in-out property <string> server-code-status: "SERVER CODE: NOT UPDATED";
     in-out property <string> server-metrics: "RAM: 41% · Disk: 88% · Up: 27d";
     in-out property <string> server-op-feedback: "";
     in-out property <int> server-op-tone: 0;
@@ -906,6 +908,8 @@ export component AppWindow inherits Window {
                     server-op-restart() => { root.server-op-restart(); }
                     server-op-backup() => { root.server-op-backup(); }
                     server-op-logs() => { root.server-op-logs(); }
+                    server-code-status: root.server-code-status;
+                    refresh-server-code => { root.refresh-server-code(); }
                 }
                 if !root.screen-pending && root.active-screen == ShellScreen.lab: StrategyLabScreen {
                     head-roomy: root.width >= 1210px;
@@ -1063,6 +1067,7 @@ export component AppWindow inherits Window {
                     event-filter-changed(t) => { root.live-event-filter-changed(t); }
                     event-type-picked(i) => { root.live-event-type-picked(i); }
                     clear-events() => { root.live-clear-events(); }
+                    refresh-server-code => { root.refresh-server-code(); }
                     inspector-toggled() => { root.live-inspector-toggled(); }
                     configure-broker() => { root.live-configure-broker(); }
                     refresh-stocks() => { root.live-refresh-stocks(); }

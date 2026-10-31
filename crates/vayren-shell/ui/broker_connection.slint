@@ -120,6 +120,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     in property <int> server-status-tone: 1;
     in property <string> worker-status: "STOPPED";
     in property <int> worker-status-tone: 2;
+    in property <string> server-code-status: "SERVER CODE: NOT UPDATED";
     in property <string> server-metrics: "RAM: 41% · Disk: 88% · Up: 27d";
     in property <string> server-op-feedback: "";
     in property <int> server-op-tone: 0;
@@ -129,6 +130,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     callback server-op-restart();
     callback server-op-backup();
     callback server-op-logs();
+    callback refresh-server-code();
 
     // Compact label for the header control, driven by confirmed persisted
     // state (never by an optimistic local guess).
@@ -438,6 +440,26 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                             font-weight: 700;
                             vertical-alignment: center;
                             overflow: elide;
+                        }
+                    }
+                    // Server Code Status Row
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        VStatusDot { tone: root.server-code-status == "SERVER CODE: UPDATED" ? 1 : 3; }
+                        Rectangle {
+                            width: code-text.width;
+                            code-text := Text {
+                                text: root.server-code-status;
+                                color: root.server-code-status == "SERVER CODE: UPDATED" ? VayrenPalette.pos : VayrenPalette.neg;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.refresh-server-code(); }
+                            }
                         }
                     }
 

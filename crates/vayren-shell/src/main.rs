@@ -1360,6 +1360,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     ui.set_server_status(slint::SharedString::from("CONNECTED"));
                                     ui.set_server_status_tone(1);
                                 }
+                                if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
+                                    let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
+                                    ui.set_server_code_status(slint::SharedString::from(status));
+                                }
                                 apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
                                 sync_broker_ui(&ui, &sections, &timer_broker_form);
                                 dirty = true;
@@ -1372,6 +1376,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     ui.set_worker_status_tone(if running { 1 } else if status == "ERROR" { 3 } else { 2 });
                                     ui.set_server_status(slint::SharedString::from("CONNECTED"));
                                     ui.set_server_status_tone(1);
+                                }
+                                if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
+                                    let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
+                                    ui.set_server_code_status(slint::SharedString::from(status));
+                                }
+                                if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
+                                    let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
+                                    ui.set_server_code_status(slint::SharedString::from(status));
                                 }
                                 apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
                                 sync_broker_ui(&ui, &sections, &timer_broker_form);
@@ -1392,6 +1404,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     ui.set_server_status_tone(3);
                                     ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
                                     ui.set_worker_status_tone(0);
+                                    ui.set_server_code_status(slint::SharedString::from("SERVER CODE: NOT UPDATED"));
+                                    live_state.borrow_mut().server_code_status = "SERVER CODE: NOT UPDATED".to_string();
                                 }
                                 mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
                                 dirty = true;
@@ -2510,6 +2524,16 @@ fn apply_server_op_ack(
                 "✓ Backup Verified: {name} ({size_kb} KB, sha256:{sha_short})"
             )));
         }
+        "check_code" => {
+            let status = payload
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("SERVER CODE: NOT UPDATED");
+            ui.set_server_code_status(slint::SharedString::from(status));
+            let mut footer = ui.get_live_footer();
+            footer.server_code_status = slint::SharedString::from(status);
+            ui.set_live_footer(footer);
+        }
         "logs" => {
             ui.set_server_op_tone(1);
             let count = payload
@@ -2607,6 +2631,43 @@ fn wire_server_ops(
             ui.set_server_op_busy(false);
             ui.set_server_op_tone(3);
             ui.set_server_op_feedback(slint::SharedString::from("✕ Remote gateway not connected"));
+        }
+    });
+
+    let handle = ui.as_weak();
+    let cmd = command_tx.clone();
+    let _pt = pending_time.clone();
+    ui.on_refresh_server_code(move || {
+        println!("SERVER OP: refresh server code requested");
+        if let Some(ref sender) = cmd {
+            let _ = sender.send(vayren_shell::remote_live::RemoteCommand {
+                action: "server_op".to_string(),
+                params: serde_json::json!({ "op": "check_code", "force": true }),
+            });
+        } else if let Some(ui) = handle.upgrade() {
+            let output = std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .output();
+            let local_sha = output.ok().and_then(|o| String::from_utf8(o.stdout).ok()).unwrap_or_default().trim().to_string();
+            let remote_output = std::process::Command::new("git")
+                .args(["ls-remote", "origin", "refs/heads/main"])
+                .output();
+            let remote_sha = remote_output.ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .unwrap_or_default()
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            let status = if !local_sha.is_empty() && !remote_sha.is_empty() && local_sha.eq_ignore_ascii_case(&remote_sha) {
+                "SERVER CODE: UPDATED"
+            } else {
+                "SERVER CODE: NOT UPDATED"
+            };
+            ui.set_server_code_status(slint::SharedString::from(status));
+            let mut footer = ui.get_live_footer();
+            footer.server_code_status = slint::SharedString::from(status);
+            ui.set_live_footer(footer);
         }
     });
 
@@ -2991,6 +3052,10 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status(slint::SharedString::from("CONNECTED"));
                                 ui.set_server_status_tone(1);
                             }
+                            if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
+                                let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
+                                ui.set_server_code_status(slint::SharedString::from(status));
+                            }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
                             sync_broker_ui(&ui, &sections, &broker_form);
                             dirty = true;
@@ -3017,6 +3082,10 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status(slint::SharedString::from("CONNECTED"));
                                 ui.set_server_status_tone(1);
                             }
+                            if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
+                                let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
+                                ui.set_server_code_status(slint::SharedString::from(status));
+                            }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
                             sync_broker_ui(&ui, &sections, &broker_form);
                             dirty = true;
@@ -3036,6 +3105,8 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status_tone(3);
                                 ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
                                 ui.set_worker_status_tone(0);
+                                ui.set_server_code_status(slint::SharedString::from("SERVER CODE: NOT UPDATED"));
+                                live_state.borrow_mut().server_code_status = "SERVER CODE: NOT UPDATED".to_string();
                             }
                             mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
                             dirty = true;

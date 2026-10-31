@@ -76,6 +76,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         logger.error("remote config refused: %s", exc)
         return 2
+    from remote.server_code_status import get_running_sha
+
+    running_sha = get_running_sha()
+    logger.info("Server running SHA frozen in memory: %s", running_sha or "UNKNOWN")
+
     gateway = HeadlessGateway(args.data_dir, args.strategy_dir)
     server = RemoteServer(gateway, tokens, config)
     try:

@@ -179,7 +179,28 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         live.get("broker_session") if isinstance(live.get("broker_session"), dict) else {}
     )
     feed = str(live.get("feed", "none") or "none")
-    if broker_connected and feed == "live":
+    order_ws_leg = None
+    legs = broker_session.get("legs")
+    if isinstance(legs, list):
+        for leg in legs:
+            if isinstance(leg, dict) and leg.get("name") in ("order_ws", "order_stream"):
+                order_ws_leg = leg
+                break
+    elif isinstance(legs, dict):
+        order_ws_leg = legs.get("order_ws") or legs.get("order_stream")
+
+    if order_ws_leg and str(
+        order_ws_leg.get("state") or order_ws_leg.get("status", "")
+    ).upper() in ("FAILED", "DEGRADED"):
+        order_stream = {
+            "status": "DEGRADED",
+            "detail": str(
+                order_ws_leg.get("reason")
+                or order_ws_leg.get("last_error")
+                or "Order WebSocket degraded"
+            ),
+        }
+    elif broker_connected and feed == "live":
         order_stream = {"status": "CONNECTED", "detail": "broker order stream"}
     elif broker_connected:
         order_stream = {"status": "CONNECTED", "detail": "broker connected (local tail)"}
@@ -240,6 +261,19 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "last_updated": str(capital.get("last_updated", "") or ""),
         "source": "broker-reported funds via risk engine (no fallback)",
     }
+    server_code = live.get("server_code")
+    if not isinstance(server_code, dict):
+        try:
+            from remote.server_code_status import get_server_code_status
+
+            server_code = get_server_code_status(force=False)
+        except Exception as exc:  # noqa: BLE001
+            server_code = {
+                "status": "SERVER CODE: NOT UPDATED",
+                "updated": False,
+                "error": str(exc),
+            }
+
     snapshot = {
         "broker": {
             "status": "CONNECTED" if broker_connected else "DISCONNECTED",
@@ -328,6 +362,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "as_of": str(live.get("as_of", "") or ""),
         "broker_session": scrub(broker_session),
         "websocket": scrub(websocket),
+        "server_code": scrub(server_code),
     }
     return scrub(snapshot)
 

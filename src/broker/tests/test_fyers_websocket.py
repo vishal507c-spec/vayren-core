@@ -1341,3 +1341,64 @@ def test_fyers_live_market_data_health_respects_market_hours() -> None:
     ok, reason = open_md.health()
     assert ok is False
     assert "stale — no market data for" in reason
+
+
+# ── FYERS WebSocket Timestamp & Timezone Tests ─────────────────────────────
+
+
+def test_fyers_extract_timestamp_epoch_seconds_and_millis() -> None:
+    md = FyersLiveMarketData(app_id="APP123", access_token="TOKEN456")
+
+    # 1730260500 is 2024-10-30 03:55:00 UTC == 2024-10-30 09:25:00 IST
+    ts_sec = md._extract_timestamp({"timestamp": 1730260500})
+    assert ts_sec == "2024-10-30T09:25:00+05:30"
+
+    # Milliseconds (13 digits)
+    ts_ms = md._extract_timestamp({"last_traded_time": 1730260500000})
+    assert ts_ms == "2024-10-30T09:25:00+05:30"
+
+    # Microseconds (16 digits)
+    ts_us = md._extract_timestamp({"exch_feed_time": 1730260500000000})
+    assert ts_us == "2024-10-30T09:25:00+05:30"
+
+    # String numeric epoch
+    ts_str = md._extract_timestamp({"feed_time": "1730260500"})
+    assert ts_str == "2024-10-30T09:25:00+05:30"
+
+
+def test_fyers_extract_timestamp_iso_utc_converts_to_ist() -> None:
+    md = FyersLiveMarketData(app_id="APP123", access_token="TOKEN456")
+
+    # UTC with 'Z'
+    ts_z = md._extract_timestamp({"timestamp": "2026-10-30T03:45:00Z"})
+    assert ts_z == "2026-10-30T09:15:00+05:30"
+
+    # UTC with '+00:00'
+    ts_offset = md._extract_timestamp({"timestamp": "2026-10-30T03:45:00+00:00"})
+    assert ts_offset == "2026-10-30T09:15:00+05:30"
+
+
+def test_fyers_extract_timestamp_ist_aware_and_naive_idempotent() -> None:
+    md = FyersLiveMarketData(app_id="APP123", access_token="TOKEN456")
+
+    # Already IST aware
+    ts_ist = md._extract_timestamp({"timestamp": "2026-10-30T09:15:00+05:30"})
+    assert ts_ist == "2026-10-30T09:15:00+05:30"
+
+    # Naive wall-clock string: preserved as IST local time, not shifted
+    ts_naive = md._extract_timestamp({"timestamp": "2026-10-30 09:15:00"})
+    assert ts_naive == "2026-10-30T09:15:00+05:30"
+
+    # Idempotency: passing the output back into extraction keeps it identical
+    ts_pass2 = md._extract_timestamp({"timestamp": ts_ist})
+    assert ts_pass2 == ts_ist
+
+
+def test_fyers_extract_timestamp_fallback_on_corrupt() -> None:
+    md = FyersLiveMarketData(app_id="APP123", access_token="TOKEN456")
+
+    ts_corrupt = md._extract_timestamp({"timestamp": "not-a-timestamp"})
+    assert "+05:30" in ts_corrupt
+
+    ts_none = md._extract_timestamp({})
+    assert "+05:30" in ts_none

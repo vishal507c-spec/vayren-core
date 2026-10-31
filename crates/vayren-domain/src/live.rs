@@ -730,6 +730,8 @@ pub struct LiveState {
     pub confirm_dialog_open: bool,
     /// Explicit clock override for deterministic tests (if None, reads system time).
     pub test_clock: Option<String>,
+    /// Server code synchronization status ("SERVER CODE: UPDATED" or "SERVER CODE: NOT UPDATED").
+    pub server_code_status: String,
 }
 
 impl Default for LiveState {
@@ -826,6 +828,7 @@ impl Default for LiveState {
             eligibility: EligibilityFacts::default(),
             confirm_dialog_open: false,
             test_clock: None,
+            server_code_status: "SERVER CODE: NOT UPDATED".to_string(),
         }
     }
 }
@@ -2478,6 +2481,14 @@ impl LiveState {
             self.bars = bars.into_iter().rev().take(500).collect::<Vec<_>>();
             self.bars.reverse();
         }
+
+        if let Some(sc) = v.get("server_code") {
+            if let Some(status) = sc.get("status").and_then(|s| s.as_str()) {
+                self.server_code_status = status.to_string();
+            }
+        } else if let Some(status) = v.get("server_code_status").and_then(|s| s.as_str()) {
+            self.server_code_status = status.to_string();
+        }
     }
 
     /// The event-category chip reports the selected bucket; accept only the
@@ -3059,6 +3070,7 @@ pub struct FooterView {
     pub reconciliation: String,
     pub clock: String,
     pub snapshot_time: String,
+    pub server_code_status: String,
 }
 
 /// Unified eligibility panel (Phase-6/7 backend section, projected
@@ -5330,6 +5342,7 @@ pub fn project(state: &LiveState) -> LiveView {
         },
         clock,
         snapshot_time: snap_time,
+        server_code_status: state.server_code_status.clone(),
     };
 
     // ── GatewayView ──
@@ -8334,6 +8347,36 @@ mod tests {
         }));
         let view_updated2 = project(&st);
         assert_eq!(view_updated2.footer.snapshot_time, "21:15:00 IST");
+    }
+
+    #[test]
+    fn test_server_code_status_projection() {
+        let mut st = LiveState::default();
+        assert_eq!(st.server_code_status, "SERVER CODE: NOT UPDATED");
+        let view_default = project(&st);
+        assert_eq!(view_default.footer.server_code_status, "SERVER CODE: NOT UPDATED");
+
+        // 1. Snapshot with server_code section stating UPDATED
+        st.apply_snapshot(&serde_json::json!({
+            "server_code": {
+                "status": "SERVER CODE: UPDATED",
+                "updated": true,
+            }
+        }));
+        assert_eq!(st.server_code_status, "SERVER CODE: UPDATED");
+        let view_updated = project(&st);
+        assert_eq!(view_updated.footer.server_code_status, "SERVER CODE: UPDATED");
+
+        // 2. Snapshot with server_code section stating NOT UPDATED
+        st.apply_snapshot(&serde_json::json!({
+            "server_code": {
+                "status": "SERVER CODE: NOT UPDATED",
+                "updated": false,
+            }
+        }));
+        assert_eq!(st.server_code_status, "SERVER CODE: NOT UPDATED");
+        let view_not_updated = project(&st);
+        assert_eq!(view_not_updated.footer.server_code_status, "SERVER CODE: NOT UPDATED");
     }
 
     #[test]

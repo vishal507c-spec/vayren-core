@@ -16,7 +16,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from broker.capabilities import CapabilitySet, Caps, Domain, capability_set
@@ -693,12 +693,32 @@ class FyersLiveMarketData:
             volume = float(msg.get("vol_traded_today") or msg.get("last_traded_qty") or 0.0)
         except (TypeError, ValueError):
             volume = 0.0
+        raw_exch = (
+            msg.get("exch_feed_time")
+            or msg.get("last_traded_time")
+            or msg.get("timestamp")
+            or msg.get("feed_time")
+        )
+        exch_epoch: float | None = None
+        if raw_exch is not None:
+            try:
+                ep = float(raw_exch)
+                if ep > 0:
+                    if ep > 1e14:
+                        ep /= 1_000_000.0
+                    elif ep > 1e11:
+                        ep /= 1000.0
+                    exch_epoch = ep
+            except (ValueError, TypeError, OverflowError):
+                pass
         quote: dict[str, Any] = {
             "symbol": symbol,
             "price": price,
             "timestamp": ts_str,
             "volume": volume,
         }
+        if exch_epoch is not None:
+            quote["exchange_timestamp"] = exch_epoch
         bid_qty = self._safe_float(msg.get("bid_size") or msg.get("bidQty1"))
         ask_qty = self._safe_float(msg.get("ask_size") or msg.get("askQty1"))
         if bid > 0 or ask > 0:
@@ -712,20 +732,58 @@ class FyersLiveMarketData:
         return (quote,)
 
     def _extract_timestamp(self, msg: dict[str, Any]) -> str:
-        """Parse tick timestamp to ISO-8601 UTC string."""
-        raw_ts = msg.get("last_traded_time") or msg.get("exch_feed_time") or msg.get("timestamp")
+        """Parse tick timestamp to ISO-8601 IST (Asia/Kolkata) string.
+
+        Guarantees:
+        - Epoch timestamps (seconds, ms, us) are converted to Asia/Kolkata (IST).
+        - Aware ISO strings (UTC or other) are converted to IST.
+        - Naive timestamps are preserved in IST without double conversion.
+        - Exactly-once conversion: passing an IST timestamp keeps it unchanged.
+        """
+        raw_ts = (
+            msg.get("last_traded_time")
+            or msg.get("exch_feed_time")
+            or msg.get("timestamp")
+            or msg.get("feed_time")
+        )
         if raw_ts is not None:
+            # 1. Numeric epoch (float / int) or numeric string
             try:
-                # FYERS sometimes sends Unix epoch timestamp in seconds
                 epoch = float(raw_ts)
                 if epoch > 0:
-                    dt = datetime.fromtimestamp(epoch, tz=UTC)
+                    if epoch > 1e14:
+                        epoch /= 1_000_000.0
+                    elif epoch > 1e11:
+                        epoch /= 1000.0
+                    dt = datetime.fromtimestamp(epoch, tz=_VENUE_TZ)
                     return dt.isoformat()
-            except (ValueError, TypeError, OverflowError):
+            except (ValueError, TypeError, OverflowError, OSError):
                 pass
 
-        # Fallback to current UTC time
-        return datetime.now(UTC).isoformat()
+            # 2. String timestamp (ISO-8601 or wall-clock string)
+            if isinstance(raw_ts, str):
+                s = raw_ts.strip()
+                if s:
+                    try:
+                        dt = datetime.fromisoformat(s)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=_VENUE_TZ)
+                        else:
+                            dt = dt.astimezone(_VENUE_TZ)
+                        return dt.isoformat()
+                    except (ValueError, TypeError):
+                        pass
+
+            # 3. Datetime object
+            if isinstance(raw_ts, datetime):
+                if raw_ts.tzinfo is None:
+                    dt = raw_ts.replace(tzinfo=_VENUE_TZ)
+                else:
+                    dt = raw_ts.astimezone(_VENUE_TZ)
+                return dt.isoformat()
+
+        # Fallback to current IST time
+        return datetime.now(_VENUE_TZ).isoformat()
 
     def _normalize_symbol(self, symbol: str) -> str:
         s = str(symbol or "").strip()

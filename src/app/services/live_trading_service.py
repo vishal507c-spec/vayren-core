@@ -332,6 +332,8 @@ class LiveTradingService:
         self._mark_times: dict[str, str] = {}
         self._open_since: dict[str, str] = {}
         self._last_signal: dict[str, str] = {}
+        self._last_signal_side: dict[str, str] = {}
+        self._signals_blocked: int = 0
         self._status = "STOPPED"
         self._status_reason = ""
         # Desired state is durable operator intent; observed status is what
@@ -2200,7 +2202,7 @@ class LiveTradingService:
             strategy_state["duration"] = duration_str
             strategy_state["today_signals"] = self._signals_generated
             strategy_state["signals_executed"] = orders_filled
-            strategy_state["signals_rejected"] = orders_rejected
+            strategy_state["signals_rejected"] = max(orders_rejected, self._signals_blocked)
             strategy_state["positions_long_count"] = sum(
                 1 for p in positions if p.get("side") in ("LONG", "BUY")
             )
@@ -2209,7 +2211,7 @@ class LiveTradingService:
             )
             strategy_state["orders_filled_count"] = orders_filled
             strategy_state["orders_working_count"] = orders_pending
-            strategy_state["orders_rejected_count"] = orders_rejected
+            strategy_state["orders_rejected_count"] = max(orders_rejected, self._signals_blocked)
             strategy_state["logic"] = f"{strat_name_str} (unchanged)"
 
         from broker.providers.fyers.live_market_data import is_nse_market_open
@@ -2231,12 +2233,31 @@ class LiveTradingService:
         else:
             ws_status = "NOT CONFIGURED" if not view.get("configured") else "DISCONNECTED"
             md_status = "STOPPED" if not running else "NO DATA"
-        # A live tick stamp exists only when the venue feed actually
-        # delivered one. Nothing in this layer observes a tick clock, so the
-        # honest answer is "not observed" - never the current time, never a
-        # constant.
+        # Real venue-tick facts from feed observations
         md_last_tick = ""
+        if self._mark_times:
+            for t in self._mark_times.values():
+                if t and (not md_last_tick or t > md_last_tick):
+                    md_last_tick = t
+        if not md_last_tick:
+            md_last_tick = str(view.get("last_tick_time") or "")
         md_freshness_s: float | None = None
+        if md_last_tick:
+            with contextlib.suppress(Exception):
+                import datetime
+
+                t_clean = md_last_tick.replace("Z", "+00:00")
+                dt = datetime.datetime.fromisoformat(t_clean)
+                md_freshness_s = max(0.0, round(time.time() - dt.timestamp(), 2))
+
+        any_live_quote = any(
+            isinstance(q, dict) and q.get("price_source") == "live_feed" for q in quotes
+        )
+        market_price_source = (
+            "live_feed"
+            if (any_live_quote or (running and is_conn and any(self._marks.values())))
+            else "candle_store"
+        )
         md_session_health: dict[str, Any] = {}
         for symbol, session in self._sessions.items():
             health_fn = getattr(session, "market_data_health", None)
@@ -2278,13 +2299,10 @@ class LiveTradingService:
                 "exchange": "NSE Cash",
                 "timeframe": self._config.timeframe or "15s",
                 "subscribed_symbols": len(universe),
-                # Real venue-tick facts only. These used to be
-                # `now_time` / a hardcoded `0.4`, which reported a live
-                # freshness the feed had not proven; with no tick timestamp
-                # observed they stay empty rather than invented.
+                # Real venue-tick facts only
                 "last_tick_time": md_last_tick,
                 "freshness_age_s": md_freshness_s,
-                "price_source": "candle_store",
+                "price_source": market_price_source,
                 "health": md_session_health,
                 "delivery": md_delivery,
             },
@@ -2768,6 +2786,17 @@ class LiveTradingService:
                     self._last_signal[symbol] = (
                         f"{payload.get('signal_id', 'signal')} @ {entry.timestamp}"
                     )
+                    side_str = str(payload.get("side") or "").upper()
+                    if side_str:
+                        self._last_signal_side[symbol] = side_str
+                elif entry.kind in (
+                    "RISK_DENIED",
+                    "ORDER_REJECTED",
+                    "ORDER_BLOCKED",
+                    "ORDER_BLOCKED_UNARMED",
+                    "ORDER_BLOCKED_UNHEALTHY",
+                ):
+                    self._signals_blocked += 1
             self._journal_cursors[symbol] = len(entries)
 
     def _append_activity(self, symbol: str, entry: Any) -> None:
@@ -3015,12 +3044,7 @@ class LiveTradingService:
             change = getattr(row, "change_pct", None) if row is not None else None
 
             # Resolve live market price from marks or active session provider
-            if (
-                symbol not in self._marks
-                and clean not in self._marks
-                and clean_bare not in self._marks
-                and symbol in self._sessions
-            ):
+            if symbol in self._sessions:
                 with contextlib.suppress(Exception):
                     self._refresh_mark(symbol)
 
@@ -3064,6 +3088,22 @@ class LiveTradingService:
             planned_risk = None
             risk_util = None
             signal = "--"
+
+            if session is not None:
+                contexts = getattr(session, "_contexts", {})
+                for ctx in contexts.values():
+                    logic = getattr(ctx, "logic", None)
+                    eng = getattr(logic, "engine", None)
+                    if eng is not None:
+                        if getattr(eng, "refSet", False):
+                            ref_high = getattr(eng, "refHigh", None)
+                            ref_low = getattr(eng, "refLow", None)
+                        if getattr(eng, "ccSellSet", False):
+                            break_low = getattr(eng, "ccSellLow", None)
+                        if getattr(eng, "entryPrice", None):
+                            entry_price = getattr(eng, "entryPrice", None)
+                        if getattr(eng, "slPrice", None):
+                            stop_price = getattr(eng, "slPrice", None)
 
             source_stamp = str(getattr(row, "as_of", "") or "") if row is not None else ""
             if is_live:
@@ -3117,7 +3157,7 @@ class LiveTradingService:
                         entry_price = None
                 if signal_present:
                     watchlist_status = "SIGNAL"
-                    signal = "SELL"
+                    signal = self._last_signal_side.get(symbol) or "SELL"
                 elif pos_qty > 0:
                     watchlist_status = "IN POSITION"
                 else:
@@ -3230,19 +3270,29 @@ class LiveTradingService:
         if running:
             raw = account.get("funds")
             if isinstance(raw, dict):
-                available = _as_float(raw.get("available"))
-                if available is None:
-                    available = _as_float(raw.get("available_margin"))
-                if available is not None and available >= 0.0:
-                    return available
+                for key in (
+                    "available",
+                    "available_margin",
+                    "available_balance",
+                    "equityAmount",
+                    "net",
+                ):
+                    val = _as_float(raw.get(key))
+                    if val is not None and val >= 0.0:
+                        return val
         if view is not None and view.get("connected"):
             venue_funds = view.get("funds")
             if isinstance(venue_funds, dict):
-                available = _as_float(venue_funds.get("available"))
-                if available is None:
-                    available = _as_float(venue_funds.get("available_margin"))
-                if available is not None and available >= 0.0:
-                    return available
+                for key in (
+                    "available",
+                    "available_margin",
+                    "available_balance",
+                    "equityAmount",
+                    "net",
+                ):
+                    val = _as_float(venue_funds.get(key))
+                    if val is not None and val >= 0.0:
+                        return val
         return None
 
     def _refresh_risk_capital(self, view: dict[str, Any] | None) -> None:

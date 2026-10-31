@@ -24,6 +24,7 @@ import contextlib
 import math
 import time
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from execution.events import CandleEvent, MarketEvent
@@ -35,6 +36,69 @@ from execution.market_data.native_normalizer import (
 )
 from execution.market_data.provider import MarketDataProvider
 from market import Bucket, bucket_start, fold_tick, session_anchor_seconds, timeframe_seconds
+
+#: Venue wall clock (IST: Asia/Kolkata).
+VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def _normalize_venue_stamp(raw: Any) -> str | None:
+    """Normalize raw quote timestamp to venue wall-clock string 'YYYY-MM-DD HH:MM:SS'.
+
+    Guarantees:
+    - UTC timestamps (epoch or ISO with Z/+00:00) are converted to Asia/Kolkata (IST).
+    - Already-converted IST stamps are preserved without double-conversion.
+    - Naive wall-clock stamps are preserved verbatim without time shifting.
+    - Epoch timestamps (seconds, ms, us) are converted to IST.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        try:
+            epoch = float(raw)
+            if epoch <= 0:
+                return None
+            if epoch > 1e14:
+                epoch /= 1_000_000.0
+            elif epoch > 1e11:
+                epoch /= 1000.0
+            dt = datetime.fromtimestamp(epoch, tz=VENUE_TZ)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, OSError, OverflowError):
+            return None
+
+    if isinstance(raw, datetime):
+        if raw.tzinfo is None:
+            return raw.strftime("%Y-%m-%d %H:%M:%S")
+        return raw.astimezone(VENUE_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+    s = str(raw).strip()
+    if not s:
+        return None
+
+    try:
+        epoch = float(s)
+        if epoch > 0:
+            if epoch > 1e14:
+                epoch /= 1_000_000.0
+            elif epoch > 1e11:
+                epoch /= 1000.0
+            dt = datetime.fromtimestamp(epoch, tz=VENUE_TZ)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, OSError, OverflowError):
+        pass
+
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        return dt.astimezone(VENUE_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        pass
+
+    if len(s) >= 19 and s[4] == "-" and s[7] == "-" and s[13] == ":" and s[16] == ":":
+        return f"{s[:10]} {s[11:19]}"
+
+    return None
 
 # One open bucket: its start stamp and the kernel's OHLCV fold.
 _Open = tuple[str, Bucket]
@@ -284,7 +348,6 @@ class BrokerFeedProvider(MarketDataProvider):
         if not isinstance(quote, dict):
             return None
         symbol = str(quote.get("symbol", "") or "")
-        stamp = str(quote.get("timestamp", "") or "")[:19]
         if symbol not in self._subscribed:
             if symbol.endswith("-EQ") and symbol[:-3] in self._subscribed:
                 symbol = symbol[:-3]
@@ -292,7 +355,8 @@ class BrokerFeedProvider(MarketDataProvider):
                 symbol = f"{symbol}-EQ"
             else:
                 return None
-        if len(stamp) < 19:
+        stamp = _normalize_venue_stamp(quote.get("timestamp"))
+        if stamp is None or len(stamp) < 19:
             return None
         try:
             price = float(quote.get("price", 0.0) or 0.0)
@@ -300,9 +364,6 @@ class BrokerFeedProvider(MarketDataProvider):
             return None
         if not math.isfinite(price) or price <= 0:
             return None
-        self._last_close[symbol] = price
-        if stamp:
-            self._last_tick_time[symbol] = stamp
         try:
             dayvol = int(quote.get("volume", 0) or 0)
         except (TypeError, ValueError):
@@ -313,7 +374,20 @@ class BrokerFeedProvider(MarketDataProvider):
         if not size_s:
             return None
         bucket = bucket_start(stamp, size_s, self._anchor_s)
+
+        # Late tick check: belongs to an already closed and emitted candle
+        last_emitted = self._emitted.get(symbol)
+        if last_emitted is not None and bucket <= last_emitted:
+            return None
+
+        # Out-of-order tick check: belongs to a bucket prior to active forming bucket
         held = self._buckets.get(symbol)
+        if held is not None and bucket < held[0]:
+            return None
+
+        self._last_close[symbol] = price
+        self._last_tick_time[symbol] = stamp
+
         fresh = held is None or held[0] != bucket
         emitted: CandleEvent | None = None
         if (

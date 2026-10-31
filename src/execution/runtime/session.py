@@ -954,7 +954,19 @@ class LiveSession:
             return None
         if not isinstance(payload, dict):
             return None
-        raw_available: Any = payload.get("available")
+        raw_available: Any = (
+            payload.get("available")
+            if payload.get("available") is not None
+            else (
+                payload.get("available_margin")
+                if payload.get("available_margin") is not None
+                else (
+                    payload.get("available_balance")
+                    if payload.get("available_balance") is not None
+                    else payload.get("equityAmount")
+                )
+            )
+        )
         try:
             available = float(raw_available)
         except (TypeError, ValueError):
@@ -971,12 +983,16 @@ class LiveSession:
             return float(signal.stop_loss)
         if context is not None and context.logic is not None:
             engine = getattr(context.logic, "engine", None)
-            sl = getattr(engine, "slPrice", None) if engine is not None else None
+            sl = getattr(context.logic, "slPrice", None)
+            if sl is None and engine is not None:
+                sl = getattr(engine, "slPrice", None)
+            if sl is None:
+                sl = getattr(context.logic, "sl_price", None)
+            if sl is None and engine is not None:
+                sl = getattr(engine, "sl_price", None)
             if sl is None:
                 sl = getattr(context.logic, "_pending_sl", None)
-            if sl is None:
-                sl = getattr(context.logic, "stop_loss", None)
-            if sl is not None:
+            if sl is not None and not callable(sl):
                 try:
                     val = float(sl)
                     if val > 0:

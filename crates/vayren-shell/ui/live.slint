@@ -308,6 +308,7 @@ export struct LiveFooter {
     reconciliation: string,
     clock: string,
     snapshot-time: string,
+    server-code-status: string,
 }
 
 // ── recomposition tiers ──────────────────────────────────────────────────
@@ -1144,6 +1145,7 @@ export component LiveScreen inherits Rectangle {
     callback watchlist-search-changed(string);
     callback refresh-stocks();
     callback broker-capital-refresh();
+    callback refresh-server-code();
 
     // The selected timeframe is the BACKEND's selection (index into
     // timeframe-names), never a locally shadowed string.

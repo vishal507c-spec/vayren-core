@@ -856,6 +856,10 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
         }
     }
 
+    if let Some(sc) = sections.get("server_code") {
+        translated.insert("server_code".to_string(), sc.clone());
+    }
+
     state.apply_snapshot(&serde_json::Value::Object(translated));
     // Command capability is the ROLE the gateway granted, never an optimistic
     // guess: `bridge_wired` drives `can_start`/`can_stop`, so a
@@ -1480,6 +1484,36 @@ mod tests {
             "gates": [],
             "as_of": "2026-10-06T00:00:00",
         })
+    }
+
+    #[test]
+    fn remote_server_code_updated_is_translated_to_live_state() {
+        let mut s = sections();
+        s["server_code"] = json!({
+            "status": "SERVER CODE: UPDATED",
+            "updated": true,
+            "github_sha": "4cdf067585283271fcd4d900aa85752b300ac25f",
+            "deployed_sha": "4cdf067585283271fcd4d900aa85752b300ac25f",
+            "running_sha": "4cdf067585283271fcd4d900aa85752b300ac25f",
+        });
+        let mut state = LiveState::default();
+        apply_remote_sections(&mut state, &s, false);
+        assert_eq!(state.server_code_status, "SERVER CODE: UPDATED");
+    }
+
+    #[test]
+    fn remote_server_code_not_updated_when_running_process_differs() {
+        let mut s = sections();
+        s["server_code"] = json!({
+            "status": "SERVER CODE: NOT UPDATED",
+            "updated": false,
+            "github_sha": "4cdf067585283271fcd4d900aa85752b300ac25f",
+            "deployed_sha": "4cdf067585283271fcd4d900aa85752b300ac25f",
+            "running_sha": "9c886bd000000000000000000000000000000000",
+        });
+        let mut state = LiveState::default();
+        apply_remote_sections(&mut state, &s, false);
+        assert_eq!(state.server_code_status, "SERVER CODE: NOT UPDATED");
     }
 
     #[test]

@@ -325,3 +325,24 @@ def test_recovery_and_worker_liveness_are_projected() -> None:
     assert snap["desired_state"]["status"] == "RUNNING"
     assert snap["market"]["health"]["NSE:RELIANCE"]["stale_after_seconds"] == 1980.0
     assert snap["market"]["delivery"][0]["published"] == 22
+
+
+def test_snapshot_projects_server_code_status():
+    """Verify build_snapshot projects server_code section accurately."""
+    from remote.server_code_status import STATUS_UPDATED
+
+    snap = build_snapshot(
+        make_live(
+            server_code={
+                "status": STATUS_UPDATED,
+                "updated": True,
+                "github_sha": "4cdf067585283271fcd4d900aa85752b300ac25f",
+                "deployed_sha": "4cdf067585283271fcd4d900aa85752b300ac25f",
+                "running_sha": "4cdf067585283271fcd4d900aa85752b300ac25f",
+            }
+        )
+    )
+
+    assert "server_code" in snap
+    assert snap["server_code"]["status"] == STATUS_UPDATED
+    assert snap["server_code"]["updated"] is True

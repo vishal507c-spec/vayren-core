@@ -3780,7 +3780,9 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         reconciliation: view.footer.reconciliation.into(),
         clock: view.footer.clock.into(),
         snapshot_time: view.footer.snapshot_time.into(),
+        server_code_status: view.footer.server_code_status.clone().into(),
     });
+    ui.set_server_code_status(view.footer.server_code_status.into());
     ui.set_live_filter_chip_selected(view.filter_chip_selected);
     ui.set_live_filter_chip_counts(view.filter_chip_counts.into());
     ui.set_live_filter_chips(

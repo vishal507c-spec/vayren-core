@@ -7,7 +7,79 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (ci-100-percent-green-20261030):** ALL GITHUB ACTIONS CI RUNS 100% GREEN (RUN 41105050449 / COMMIT `4cdf067`) —
+**Latest update (system-wide-bug-hunt-complete-20261031):** COMPLETE SYSTEM-WIDE BUG HUNT, RCA & FIX ACROSS 33 SUBSYSTEMS —
+- **Bugs Discovered, Root-Caused & Fixed:**
+  1. *[CRITICAL] BUG-01 (Strategy/Risk Execution Block):* OBR C1C4 stop-loss was unresolvable by `session._resolve_signal_stop()`. `Strategy` adapter did not expose `slPrice`, and `_resolve_signal_stop()` did not inspect `context.logic.engine.slPrice` (or was blocked by callable `stop_loss`). Result: `size_position()` returned `INVALID_STOP_PRICE` and blocked ALL live orders with `RISK_DENIED: ['INVALID_STOP_PRICE']`. Fixed by exposing `slPrice` property on `Strategy` in `src/strategy/obr_source.py` and checking `context.logic.engine.slPrice`/`context.logic.slPrice` in `src/execution/runtime/session.py`.
+  2. *[HIGH] BUG-02 (Live LTP Freezing):* In `live_trading_service.py:_universe_quotes()`, if `symbol in self._marks`, `self._refresh_mark(symbol)` was skipped. As a result, once a mark was populated, it froze and never pulled fresh prices from the active session provider's `last_close`. Fixed by always calling `self._refresh_mark(symbol)` when `symbol in self._sessions`.
+  3. *[HIGH] BUG-03 (UI & Market Data Price Source Hardcoded to "candle_store"):* In `live_trading_service.py:snapshot()`, `snap["market_data"]["price_source"]` was statically hardcoded to `"candle_store"`, and `md_last_tick` was initialized to `""` and never populated from `_mark_times`. Fixed by dynamically resolving `"price_source"` as `"live_feed"` when active live quotes/marks exist, and deriving `md_last_tick` and `freshness_age_s` from live tick timestamps.
+  4. *[MEDIUM] BUG-04 (Watchlist BUY Signal Displayed as "SELL"):* In `_universe_quotes()`, line 3120 statically set `signal = "SELL"` whenever `signal_present` was True. Fixed by recording `_last_signal_side[symbol]` from `SIGNAL_GENERATED` journal payloads and rendering the actual signal side (`"BUY"` or `"SELL"`).
+  5. *[MEDIUM] BUG-05 (Pre-Submission Blocked Signals Disappearing from Metrics):* In `live_trading_service.py`, `strategy_state["signals_rejected"]` only counted rejected orders from `session.engine._orders`. Signals blocked at risk/eligibility gates before order creation were omitted. Fixed by tracking `_signals_blocked` in `_drain_activity()` and setting `signals_rejected = max(orders_rejected, self._signals_blocked)`.
+  6. *[MEDIUM] BUG-06 (Exchange Tick Latency Calculation Missing):* In `live_market_data.py`, `_last_latency_ms` was never updated because `normalize_tick()` never attached `"exchange_timestamp"` to normalized quotes. Fixed by parsing exchange epoch from `exch_feed_time`/`last_traded_time` and attaching `"exchange_timestamp"` to quotes.
+  7. *[MEDIUM] BUG-07 (Capital Limit Key Reconciliation):* In `session.py:_live_broker_capital()` and `live_trading_service.py:_live_available_funds()`, only `available` and `available_margin` were queried. If broker returned `available_balance`, `equityAmount`, or `net`, capital returned `None` and falsely blocked sizing. Fixed by checking all standard balance keys.
+  8. *[MEDIUM] BUG-08 (Remote Order Stream False "CONNECTED" Status):* In `remote/snapshot.py`, `order_stream` was hardcoded to `{"status": "CONNECTED"}` whenever `broker_connected` was True, even when `order_ws` leg was `FAILED` or degraded. Fixed by inspecting `broker_session.get("legs")` for `order_ws`/`order_stream` and setting `DEGRADED` on failures.
+  9. *[LOW] BUG-09 (Rust Core SIGNAL_GENERATED Missing Side Field):* In `crates/vayren-core/src/live_session.rs`, `SIGNAL_GENERATED` journal records omitted the `"side"` field. Fixed by adding `"side"` to match Python runtime journal schema.
+- **Testing & Verification:**
+  - Added 8 end-to-end regression tests in `src/app/tests/test_system_wide_bug_hunt.py` (8/8 passed).
+  - Validated language ownership: 431 files checked, 0 violations.
+  - Sub-second unit & impact validation: `pytest src/app/tests src/execution/tests src/broker/tests` (PASS).
+  - Rust checks: `cargo check -p vayren-core` (PASS, 0.43s), `cargo check -p vayren-shell` (PASS), `cargo test -p vayren-core` (415 passed).
+
+**Previous update (fyers-timestamp-30m-candle-alignment-20261031):** RESOLVED FYERS TIMESTAMP UTC/IST PARSING & 30-MINUTE CANDLE ALIGNMENT PIPELINE —
+- **Root Cause Confirmed:**
+  1. *Timestamp Timezone Mismatch:* `FyersLiveMarketData._extract_timestamp()` converted FYERS epoch ticks with `datetime.fromtimestamp(epoch, tz=UTC)` and returned a UTC ISO string (e.g. `2026-10-30T03:45:00+00:00` for 09:15 IST).
+  2. *Naive Slicing & Boundary Distortion:* `BrokerFeedProvider._ingest()` used `stamp = str(quote.get("timestamp"))[:19]` (`2026-10-30T03:45:00`). The Rust aggregation kernel (`crates/vayren-core/src/aggregate.rs:bucket_start`) expects venue local time (IST) because `anchor_s` is 33300 (09:15:00). Passing 03:45:00 UTC caused the bucket start to be calculated as `03:45:00` instead of `09:15:00`.
+  3. *Live Candle Dropping:* When `session_recovery` seeded `_emitted` with `2026-10-30 09:15:00` IST, live buckets with `held[0]` (`2026-10-30 03:45:00`, `04:15:00`, etc.) were lexicographically `< 09:15:00`. Consequently, `held[0] > self._emitted[symbol]` evaluated to `False` on every bucket closure, silently dropping ALL live candles and preventing the strategy from receiving any live closed candles!
+- **Tasks & Implementations Delivered:**
+  1. *FyersLiveMarketData Timestamp Parsing (`src/broker/providers/fyers/live_market_data.py`):*
+     - Correctly parses `last_traded_time`, `exch_feed_time`, `timestamp`, and `feed_time`.
+     - Handles Unix epoch in seconds (10 digits), milliseconds (13 digits, divided by 1000.0), microseconds (16 digits, divided by 1e6).
+     - Converts UTC timestamps to `Asia/Kolkata` (`_VENUE_TZ = timezone(timedelta(hours=5, minutes=30))`).
+     - Exactly-once conversion: Aware IST strings (`+05:30`) and naive wall-clock strings are preserved without double-shifting.
+     - Fallback uses `datetime.now(_VENUE_TZ).isoformat()` in IST.
+  2. *BrokerFeedProvider Ingestion & Boundary Hardening (`src/execution/market_data/broker_feed.py`):*
+     - Added `_normalize_venue_stamp(raw)` helper guaranteeing every quote timestamp is converted/validated to venue wall-clock string `"YYYY-MM-DD HH:MM:SS"`.
+     - Strictly guards against late ticks (`bucket <= last_emitted`) so delayed ticks cannot overwrite or prematurely close active forming buckets.
+     - Strictly guards against out-of-order ticks (`bucket < held[0]`) from replacing active forward buckets.
+     - Preserves OHLCV aggregation math and day-volume delta accumulation (`fold_tick`).
+  3. *Session & Historical Alignment Verified:*
+     - Historical candles from `session_recovery.py` and `candle_store.py` use `"YYYY-MM-DD HH:MM:SS"`.
+     - Live candles emitted by `_close_bucket` now match `"YYYY-MM-DD HH:MM:SS"`, enabling seamless watermark progression.
+     - Strategy receives and evaluates signals strictly on closed 30m candles (`is_closed=True`).
+- **Testing & Verification:**
+  - Added 4 timestamp unit tests in `src/broker/tests/test_fyers_websocket.py` (all 47 broker tests PASS).
+  - Added 9 comprehensive integration and boundary tests in `src/execution/tests/test_fyers_candle_alignment.py` verifying UTC-to-IST conversion, no double conversion, all 13 30-minute NSE session boundaries (09:15 to 15:15), OHLCV accuracy, duplicate ticks, late ticks, out-of-order ticks, historical-live alignment, and closed candle gating (all 255 execution tests PASS).
+  - `python tools/validate_language_ownership.py` PASSED (430 files checked).
+  - `cargo test -p vayren-core` PASSED (415 tests green).
+  - `cargo check -p vayren-shell` PASSED (0 errors).
+
+**Previous update (server-code-status-indicator-20261031):** ADDED SERVER CODE STATUS INDICATOR IN VAYREN UI & REMOTE BACKEND —
+- **Features Implemented:**
+  1. *Tri-SHA Equality Verification (`src/remote/server_code_status.py`):*
+     - `github_sha`: Fetched read-only via `git ls-remote origin refs/heads/main` with 5s timeout.
+     - `deployed_sha`: Read from EC2 working directory via `git rev-parse HEAD`.
+     - `running_sha`: In-memory SHA frozen at Python process launch in `runner.py` / `server_code_status.py`.
+     - Output: Exactly `"SERVER CODE: UPDATED"` if and only if `github_sha == deployed_sha == running_sha` (all 3 non-empty valid 40-char hashes).
+     - Any mismatch, missing/empty hash, connection drop, or git error fails closed to `"SERVER CODE: NOT UPDATED"`.
+  2. *Automatic & Manual Refresh:*
+     - Automatic caching with 30s TTL in backend snapshots (`snapshot.py`) to prevent spamming GitHub.
+     - Manual refresh supported via `server_op` `"check_code"` with `force=True`, immediately querying GitHub and updating cache.
+     - Clickable status row in UI with pointer cursor (`TouchArea`) wired to trigger manual refresh.
+  3. *Slint UI Presentation (`broker_connection.slint`, `app.slint`):*
+     - Exactly ONE simple status line with status dot:
+       - `SERVER CODE: UPDATED` (green dot, pos tone 1)
+       - `SERVER CODE: NOT UPDATED` (red dot, neg tone 3)
+     - Rendered in the Server Ops / Gateway management card alongside `Server: CONNECTED` and `Worker: STOPPED`.
+     - Zero extra cards, tables, or buttons added; satisfies minimal UI constraint.
+  4. *Rust Live State & Remote Client Integration (`live.rs`, `remote_live.rs`, `shell.rs`, `main.rs`):*
+     - `LiveState.server_code_status` and `FooterView.server_code_status` initialized to `"SERVER CODE: NOT UPDATED"`.
+     - Disconnection (`OFFLINE`) immediately sets status to `"SERVER CODE: NOT UPDATED"`.
+  5. *Testing & Verification:*
+     - Comprehensive Python unit tests (`test_server_code_status.py`, `test_server_ops.py`, `test_snapshot.py`) verifying all 7 tri-SHA permutations, including explicit requirement test: EC2 files latest (`deployed == github`), but running process old (`running != github`) -> status is `SERVER CODE: NOT UPDATED`.
+     - Rust unit tests in `vayren-domain` (`test_server_code_status_projection`) and `vayren-shell` (`remote_server_code_updated_is_translated_to_live_state`, `remote_server_code_not_updated_when_running_process_differs`).
+     - Impact benchmark: `ruff check` PASS (0.07s), `cargo test -p vayren-shell` PASS (all 87 tests green), `live_render_snapshot` PASS (8/8 green).
+     - Language ownership: `python tools/validate_language_ownership.py` PASSED (429 files checked).
+
+**Previous update (ci-100-percent-green-20261030):** ALL GITHUB ACTIONS CI RUNS 100% GREEN (RUN 41105050449 / COMMIT `4cdf067`) —
 - **GitHub Actions Run `41105050449` Result (All 7 Jobs Passed):**
   1. `quality`: **SUCCESS** (1m 45s) — Ruff format, Ruff check, Pyright type check (0 errors).
   2. `validators`: **SUCCESS** (1m 30s) — Repo graph, language ownership, import boundaries, scope cache.

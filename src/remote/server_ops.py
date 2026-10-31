@@ -50,6 +50,7 @@ APPROVED_OPERATIONS = frozenset(
         "backup",
         "deploy",
         "restart",
+        "check_code",
     }
 )
 
@@ -222,6 +223,19 @@ def _get_worker_runtime_status(data_dir: str, strategy_dir: str) -> dict[str, An
         }
 
 
+def _get_server_code_summary() -> dict[str, Any]:
+    try:
+        from remote.server_code_status import get_server_code_status
+
+        return get_server_code_status(force=False)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "SERVER CODE: NOT UPDATED",
+            "updated": False,
+            "error": str(exc),
+        }
+
+
 def op_health_check(data_dir: str, strategy_dir: str) -> dict[str, Any]:
     """Execute complete health check of EC2 host, gateway service, and trading worker."""
     service_info = _get_service_status("vayren-remote")
@@ -260,6 +274,7 @@ def op_health_check(data_dir: str, strategy_dir: str) -> dict[str, Any]:
         "active_strategy": worker_info.get("strategy", ""),
         "configured_symbols": worker_info.get("symbols_count", 0),
         "timestamp": now_iso,
+        "server_code": _get_server_code_summary(),
     }
 
 
@@ -519,6 +534,33 @@ def _restart_gateway_service(data_dir: str, caller: str) -> dict[str, Any]:
     }
 
 
+def op_check_server_code(
+    repo_dir: str = "/home/ubuntu/vayren-core", force: bool = True
+) -> dict[str, Any]:
+    """Verify server code status (tri-SHA equality: GitHub, deployed, running)."""
+    try:
+        from remote.server_code_status import get_server_code_status
+
+        status_info = get_server_code_status(repo_dir=repo_dir, force=force)
+        return {
+            "ok": True,
+            "status": status_info["status"],
+            "updated": status_info["updated"],
+            "github_sha": status_info["github_sha"],
+            "deployed_sha": status_info["deployed_sha"],
+            "running_sha": status_info["running_sha"],
+            "detail": status_info["detail"],
+            "last_checked": status_info["last_checked"],
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "status": "SERVER CODE: NOT UPDATED",
+            "updated": False,
+            "error": f"Failed to verify server code status: {exc}",
+        }
+
+
 def op_deploy_approved(
     data_dir: str,
     strategy_dir: str,
@@ -689,6 +731,10 @@ def execute_server_op(
     elif op == "deploy":
         confirmed = bool(args.get("confirmed", False))
         res = op_deploy_approved(data_dir, strategy_dir, confirmed=confirmed, caller=caller)
+    elif op == "check_code":
+        repo_dir = str(args.get("repo_dir") or "/home/ubuntu/vayren-core")
+        force = bool(args.get("force", True))
+        res = op_check_server_code(repo_dir=repo_dir, force=force)
     elif op == "restart":
         confirmed = bool(args.get("confirmed", False))
         res = op_restart_gateway(data_dir, strategy_dir, confirmed=confirmed, caller=caller)
