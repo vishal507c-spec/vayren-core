@@ -508,14 +508,6 @@
       "to": "src/core"
     },
     {
-      "from": "src/broker/providers",
-      "kind": "actual",
-      "sources": [
-        "src/broker/providers/fyers/live_market_data.py"
-      ],
-      "to": "src/data"
-    },
-    {
       "from": "src/core/ai",
       "kind": "actual",
       "sources": [
@@ -1164,11 +1156,6 @@
       "from": "src/broker/providers",
       "kind": "declared-without-actual",
       "to": "src/core"
-    },
-    {
-      "from": "src/broker/providers",
-      "kind": "actual-without-declared",
-      "to": "src/data"
     },
     {
       "from": "src/core/ai",
@@ -7416,8 +7403,7 @@
       ],
       "depends_on_actual": [
         "src/broker",
-        "src/broker/common",
-        "src/data"
+        "src/broker/common"
       ],
       "depends_on_declared": [
         "src/broker",
@@ -7562,7 +7548,6 @@
       "depended_on_by": [
         "src/app",
         "src/app/services",
-        "src/broker/providers",
         "src/data/provider"
       ],
       "depends_on_actual": [
@@ -8207,7 +8192,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 15348,
+  "relationship_count": 15346,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -25783,7 +25768,7 @@
       "file": "src/broker/providers/fyers/live_market_data.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 86,
+      "line": 88,
       "module": "src/broker/providers",
       "name": "FyersLiveMarketData",
       "public": true,
@@ -50114,7 +50099,7 @@
       "file": "crates/vayren-domain/src/live.rs",
       "kind": "mod",
       "language": "RUST",
-      "line": 5623,
+      "line": 5624,
       "module": "crates/vayren-domain",
       "name": "tests",
       "public": false,

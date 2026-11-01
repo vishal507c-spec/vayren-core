@@ -4103,7 +4103,8 @@ pub fn project(state: &LiveState) -> LiveView {
         Some(true) => {
             let s = state.broker.status.to_uppercase();
             let r = state.broker.reason.to_lowercase();
-            let disconnected_status = s == "DISCONNECTED" || s == "ERROR" || s.contains("FAIL") || s == "DEGRADED";
+            let disconnected_status =
+                s == "DISCONNECTED" || s == "ERROR" || s.contains("FAIL") || s == "DEGRADED";
             let failure_reason = r.contains("timeout")
                 || r.contains("timed out")
                 || r.contains("unreachable")

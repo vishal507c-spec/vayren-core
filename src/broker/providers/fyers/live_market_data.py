@@ -40,9 +40,11 @@ def is_nse_market_open(epoch: float | None = None) -> bool:
         return False
     date_str = dt.strftime("%Y-%m-%d")
     try:
-        from data.settings import NSE_HOLIDAYS
+        import importlib
 
-        if date_str in NSE_HOLIDAYS:
+        _settings = importlib.import_module("data.settings")
+        _holidays = getattr(_settings, "NSE_HOLIDAYS", frozenset())
+        if date_str in _holidays:
             return False
     except Exception:
         pass
