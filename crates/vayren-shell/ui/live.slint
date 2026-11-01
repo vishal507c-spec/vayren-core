@@ -1172,12 +1172,13 @@ export component LiveScreen inherits Rectangle {
     // Never optimistic: nothing here is set by a click. No glyph prefixes:
     // every surface (banner, badge) already carries the tone colour, so
     // "✕"/"✓" inside the string doubled what the tone already said.
-    property <string> start-verdict: root.setup.can-stop ? "RUNNING" : (root.blockers.length > 0 ? "START BLOCKED" : "READY TO START");
+    property <bool> setup-editable: !root.setup.can-stop && !root.setup.pending-start && !root.setup.pending-stop;
+    property <string> start-verdict: (root.setup.session-label == "● RUNNING" || root.setup.can-stop) ? "RUNNING" : (root.setup.pending-start ? "STARTING" : (root.setup.pending-stop ? "STOPPING" : (root.setup.session-label == "● ERROR" ? "ERROR" : (root.blockers.length > 0 ? "START BLOCKED" : "READY TO START"))));
     // The exact reason START is unavailable, or the outcome of the last
     // click. Rendered on the LIVE screen so a press is never silent — this
     // is the difference between "nothing happened" and "here is why".
-    property <string> start-reason: root.blockers.length > 0 ? root.blockers[0] : (root.setup.pending-start ? "waiting for backend confirmation…" : "");
-    property <int> start-reason-tone: root.blockers.length > 0 ? 3 : 2;
+    property <string> start-reason: root.setup.pending-start ? "waiting for backend confirmation…" : (root.setup.pending-stop ? "halting execution and closing entries…" : (root.blockers.length > 0 ? root.blockers[0] : ""));
+    property <int> start-reason-tone: root.blockers.length > 0 ? 3 : ((root.setup.pending-start || root.setup.pending-stop) ? 2 : ((root.setup.session-label == "● RUNNING" || root.setup.can-stop) ? 1 : 2));
 
     // The events search box owns its text like the watchlist search above:
     // the backend normalises the query, so the field never binds to the
@@ -1246,7 +1247,7 @@ export component LiveScreen inherits Rectangle {
             }
         }
 
-        if root.setup.confirmed-live && root.bar.mode == 1 && !root.setup.can-stop: Rectangle {
+        if root.setup.confirmed-live && root.bar.mode == 1 && root.setup-editable: Rectangle {
             height: 24px;
             background: VayrenPalette.bg;
             VerticalLayout {
@@ -1355,7 +1356,7 @@ export component LiveScreen inherits Rectangle {
                             horizontal-stretch: 1;
                             min-width: 125px;
                             height: 26px;
-                            enabled: !root.setup.can-stop && root.strategy-names.length > 0;
+                            enabled: root.setup-editable && root.strategy-names.length > 0;
                             model: root.strategy-names;
                             current-index: root.strategy-selected;
                             selected(v) => { root.strategy-picked(v); }
@@ -1515,7 +1516,7 @@ export component LiveScreen inherits Rectangle {
                                 horizontal-stretch: 1;
                                 min-width: 125px;
                                 height: 26px;
-                                enabled: !root.setup.can-stop && root.strategy-names.length > 0;
+                                enabled: root.setup-editable && root.strategy-names.length > 0;
                                 model: root.strategy-names;
                                 current-index: root.strategy-selected;
                                 selected(v) => { root.strategy-picked(v); }
@@ -1999,7 +2000,7 @@ export component LiveScreen inherits Rectangle {
                                                 height: 24px;
                                                 label: "SAVE UNIVERSE";
                                                 variant: 2;
-                                                enabled: root.strategy-selected > 0 && !root.setup.can-stop;
+                                                enabled: root.strategy-selected > 0 && root.setup-editable;
                                                 clicked => { root.universe-save(); }
                                             }
                                         }
@@ -2627,7 +2628,7 @@ export component LiveScreen inherits Rectangle {
                                         horizontal-stretch: 1;
                                         height: 26px;
                                         text: root.qty-text;
-                                        enabled: !root.setup.can-stop;
+                                        enabled: root.setup-editable;
                                         edited(t) => {
                                             root.qty-text = t;
                                             root.qty-dirty = true;
@@ -2663,7 +2664,7 @@ export component LiveScreen inherits Rectangle {
 
                                         tf-touch := TouchArea {
                                             mouse-cursor: pointer;
-                                            enabled: !root.setup.can-stop && root.timeframe-names.length > 0;
+                                            enabled: root.setup-editable && root.timeframe-names.length > 0;
                                             clicked => {
                                                 root.timeframe-picked(root.timeframe-names[Math.mod(root.timeframe-selected + 1, root.timeframe-names.length)]);
                                             }
@@ -2671,7 +2672,7 @@ export component LiveScreen inherits Rectangle {
 
                                         Text {
                                             text: root.selected-timeframe + "  ▾";
-                                            color: root.setup.can-stop ? VayrenPalette.faint : VayrenPalette.live-teal;
+                                            color: !root.setup-editable ? VayrenPalette.faint : VayrenPalette.live-teal;
                                             font-size: 11px;
                                             font-weight: 700;
                                             horizontal-alignment: center;
@@ -2852,7 +2853,7 @@ export component LiveScreen inherits Rectangle {
 
                                     VBadge {
                                         text: root.start-verdict;
-                                        tone: root.setup.can-stop ? 1 : (root.blockers.length > 0 ? 3 : 2);
+                                        tone: (root.setup.session-label == "● RUNNING" || root.setup.can-stop) ? 1 : ((root.setup.pending-start || root.setup.pending-stop) ? 2 : (root.blockers.length > 0 ? 3 : 2));
                                         vertical-alignment: center;
                                     }
                                 }

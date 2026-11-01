@@ -79,10 +79,13 @@ class _ServiceMarketView:
                 readiness, reason = "STALE", "store quote unreadable"
             else:
                 readiness, reason = "UNAVAILABLE", "no market data"
+            price_source = str(row.get("price_source", "") or "").strip().lower()
             states[canonical_id] = {
                 "readiness": readiness,
                 "reason": reason,
-                "provider": "live",
+                # A stored candle quote is served by the LOCAL store, never by
+                # the venue feed; labelling it "live" misreports the provider.
+                "provider": "live" if price_source == "live_feed" else "local",
                 "failed_over": False,
             }
         return states

@@ -15,14 +15,18 @@ No test here starts a session, arms consent, or touches a broker.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
+from app.services.broker_manager import BrokerManager
 from app.services.market_data_service import MarketDataService
 from remote.snapshot import build_snapshot
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _write_store(tmp_path: Path, symbol: str, stamps: list[str], closes: list[float]) -> Path:
@@ -145,6 +149,8 @@ def test_market_data_gate_says_no_live_feed_when_there_is_none(tmp_path: Path) -
     assert gate["status"] == "READY"
     assert "candle store 1/1" in gate["reason"]
     assert "no live feed" in gate["reason"]
+    # The row itself names the engine state that means no subscription.
+    assert "(session STOPPED)" in gate["reason"]
 
 
 def test_market_data_gate_live_mode_rejects_stored_candles_alone(tmp_path: Path) -> None:
@@ -164,13 +170,37 @@ def test_market_data_gate_live_mode_rejects_degraded_market_ws(tmp_path: Path) -
 
 
 def test_market_data_gate_live_mode_ready_when_feed_and_store_healthy(tmp_path: Path) -> None:
-    """LIVE streaming is READY when both candle store and live feed are healthy."""
+    """LIVE streaming is READY only when every symbol has a FRESH live tick."""
     view = {"checks": {"market_data": "READY"}}
     snap_extra = {"market_data": {"delivery": [{"transport": {"healthy": True, "reason": "ok"}}]}}
     gate = _market_data_gate(
-        tmp_path, [{"status": "AVAILABLE"}], "live", mode="LIVE", view=view, snap_extra=snap_extra
+        tmp_path,
+        [{"status": "AVAILABLE", "price_source": "live_feed"}],
+        "live",
+        mode="LIVE",
+        view=view,
+        snap_extra=snap_extra,
     )
     assert gate["status"] == "READY"
+
+
+def test_market_data_gate_live_mode_rejects_store_quotes_without_live_ticks(
+    tmp_path: Path,
+) -> None:
+    """A live socket plus stored candles is still NOT live tick delivery."""
+    view = {"checks": {"market_data": "READY"}}
+    snap_extra = {"market_data": {"delivery": [{"transport": {"healthy": True, "reason": "ok"}}]}}
+    gate = _market_data_gate(
+        tmp_path,
+        [{"status": "AVAILABLE", "price_source": "candle_store"}],
+        "live",
+        mode="LIVE",
+        view=view,
+        snap_extra=snap_extra,
+    )
+    assert gate["status"] == "NOT READY"
+    assert "venue feed connected" in gate["reason"]
+    assert "no tick stamp observed" in gate["reason"]
 
 
 def test_arming_gate_reports_correct_wording_and_consent_states(tmp_path: Path) -> None:
@@ -327,3 +357,130 @@ def test_stale_candle_age_is_reported_not_hidden(tmp_path: Path) -> None:
     assert quote.price == 101.0
     # The stamp is a day back, so any consumer reading `as_of` sees that.
     assert quote.as_of == old
+
+
+# ── Marks are per-run observations, never durable "live" facts ──────────
+
+
+def _service_with_session(tmp_path: Path, symbol: str, provider: object):
+    from app.services.live_trading_service import LiveTradingService
+
+    service = LiveTradingService(data_dir=tmp_path)
+    session = MagicMock()
+    session._provider = provider
+    session.ledger.position.return_value.flat = True
+    service._sessions[symbol] = session
+    return service
+
+
+class _LocalTailProvider:
+    """Provider shape of SqliteTailProvider: close price, no venue tick stamp."""
+
+    def __init__(self, symbol: str, price: float) -> None:
+        self.last_close = {symbol: price}
+
+
+def test_local_tail_close_is_never_labelled_live(tmp_path: Path) -> None:
+    """A stored candle close cannot become a live tick just by being polled."""
+    symbol = "NSE:KAYNES"
+    service = _service_with_session(tmp_path, symbol, _LocalTailProvider(symbol, 1250.0))
+
+    quote = service._universe_quotes((symbol,))[0]
+
+    assert quote["ltp"] == 1250.0
+    assert quote["price_source"] == "candle_store"
+    assert quote["stale"] is True
+    assert quote["last_update"] == ""
+
+
+def test_stop_clears_marks_so_a_dead_run_cannot_quote(tmp_path: Path) -> None:
+    """STOP must retire every mark the stopped feed produced."""
+    from app.services.live_trading_service import LiveTradingService
+
+    service = LiveTradingService(data_dir=tmp_path)
+    service.set_live_price("NSE:KAYNES", 1250.0, timestamp="2026-10-31T10:15:00+05:30")
+    assert service._universe_quotes(("NSE:KAYNES",))[0]["price_source"] == "live_feed"
+
+    service.stop()
+
+    quote = service._universe_quotes(("NSE:KAYNES",))[0]
+    assert quote["price_source"] == "none"
+    assert quote["stale"] is True
+    assert service._marks == {}
+    assert service._feed_kind == "none"
+
+
+def test_aged_live_mark_is_reported_stale_not_current(tmp_path: Path) -> None:
+    """A mark whose ticks stopped arriving ages out instead of staying green."""
+    import time as _time
+
+    from app.services.live_trading_service import _LIVE_MARK_MAX_AGE_S, LiveTradingService
+
+    service = LiveTradingService(data_dir=tmp_path)
+    service.set_live_price("NSE:KAYNES", 1250.0, timestamp="2026-10-31T10:15:00+05:30")
+    aged = _time.monotonic() - (_LIVE_MARK_MAX_AGE_S + 60.0)
+    for key in service._mark_epochs:
+        service._mark_epochs[key] = aged
+
+    quote = service._universe_quotes(("NSE:KAYNES",))[0]
+
+    assert quote["ltp"] == 1250.0
+    assert quote["price_source"] == "live_feed_stale"
+    assert quote["stale"] is True
+    assert quote["price_age_s"] is not None and quote["price_age_s"] > _LIVE_MARK_MAX_AGE_S
+
+
+def test_market_status_never_streams_from_store_quotes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """STOPPED means STOPPED; STREAMING requires fresh venue ticks."""
+    from app.services.live_trading_service import LiveTradingService
+
+    monkeypatch.setattr(
+        "broker.providers.fyers.live_market_data.is_nse_market_open",
+        lambda *args, **kwargs: True,  # noqa: ARG005
+    )
+    _write_store(tmp_path, "KAYNES", ["2026-10-30 15:15:00"], [3124.9])
+    service = LiveTradingService(data_dir=tmp_path)
+    service._config.symbols = ("NSE:KAYNES",)
+    manager = MagicMock(spec=BrokerManager)
+    manager.snapshot.return_value = {
+        "active_broker": "fyers",
+        "brokers": [
+            {
+                "id": "fyers",
+                "status": "CONNECTED",
+                "connected": True,
+                "configured": True,
+                "account_id": "XY12345",
+                "funds": {"available": 500000.0, "total": 500000.0},
+            }
+        ],
+    }
+    service._broker_manager = manager
+
+    # Connected broker + stored candle + stopped engine: never green.
+    assert service.snapshot()["market_data"]["status"] == "STOPPED"
+
+    # A live session with no venue tick yet waits; only a fresh mark streams.
+    service._status = "RUNNING"
+    service._feed_kind = "live"
+    assert service.snapshot()["market_data"]["status"] == "WAITING"
+
+    service.set_live_price("NSE:KAYNES", 3160.0)
+    assert service.snapshot()["market_data"]["status"] == "STREAMING"
+
+
+def test_naive_venue_stamp_freshness_uses_ist_not_host_clock(tmp_path: Path) -> None:
+    """Naive FYERS stamps are IST; a UTC host must not age them by 5.5 hours."""
+    from app.services.live_trading_service import LiveTradingService
+
+    service = LiveTradingService(data_dir=tmp_path)
+    service._config.symbols = ("NSE:KAYNES",)
+    stamp = (datetime.now(IST) - timedelta(seconds=30)).strftime("%Y-%m-%d %H:%M:%S")
+    service.set_live_price("NSE:KAYNES", 100.0, timestamp=stamp)
+
+    freshness = service.snapshot()["market_data"]["freshness_age_s"]
+
+    assert freshness is not None
+    assert 0.0 <= freshness < 180.0

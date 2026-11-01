@@ -3805,12 +3805,25 @@ fn refresh_live(handle: &slint::Weak<AppWindow>, state: &Rc<RefCell<LiveState>>)
 /// Wire LIVE interactions: the Slint surface only reports actions; the
 /// view-model validates centrally (fail-closed) and re-projects.
 pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
+    wire_live_with_dispatcher(ui, state, |_| {});
+}
+
+/// Wire LIVE interactions with an instant action dispatcher: the Slint surface reports
+/// actions; the view-model updates, any pending command is dispatched immediately, and
+/// the UI re-projects.
+pub fn wire_live_with_dispatcher<F>(ui: &AppWindow, state: Rc<RefCell<LiveState>>, on_action: F)
+where
+    F: FnMut(&mut LiveState) + 'static,
+{
+    let on_action = Rc::new(RefCell::new(on_action));
     macro_rules! wire_int {
         ($register:ident, $action:expr) => {{
             let strong = state.clone();
             let handle = ui.as_weak();
+            let cb = on_action.clone();
             ui.$register(move |arg: i32| {
                 $action(&mut strong.borrow_mut(), arg);
+                (cb.borrow_mut())(&mut strong.borrow_mut());
                 refresh_live(&handle, &strong);
             });
         }};
@@ -3819,8 +3832,10 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
         ($register:ident, $action:expr) => {{
             let strong = state.clone();
             let handle = ui.as_weak();
+            let cb = on_action.clone();
             ui.$register(move |text: slint::SharedString| {
                 $action(&mut strong.borrow_mut(), text.as_str());
+                (cb.borrow_mut())(&mut strong.borrow_mut());
                 refresh_live(&handle, &strong);
             });
         }};
@@ -3829,8 +3844,10 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
         ($register:ident, $action:expr) => {{
             let strong = state.clone();
             let handle = ui.as_weak();
+            let cb = on_action.clone();
             ui.$register(move || {
                 $action(&mut strong.borrow_mut());
+                (cb.borrow_mut())(&mut strong.borrow_mut());
                 refresh_live(&handle, &strong);
             });
         }};
@@ -3854,8 +3871,10 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
     {
         let strong = state.clone();
         let handle = ui.as_weak();
+        let cb = on_action.clone();
         ui.on_live_quantity_edited(move |text: slint::SharedString| {
             strong.borrow_mut().set_quantity(text.as_str());
+            (cb.borrow_mut())(&mut strong.borrow_mut());
             refresh_live(&handle, &strong);
         });
     }
@@ -3877,8 +3896,10 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
         // (sessions, positions, journal) is untouched.
         let strong = state.clone();
         let handle = ui.as_weak();
+        let cb = on_action.clone();
         ui.on_live_clear_events(move || {
             strong.borrow_mut().clear_events();
+            (cb.borrow_mut())(&mut strong.borrow_mut());
             refresh_live(&handle, &strong);
         });
     }

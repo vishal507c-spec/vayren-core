@@ -135,48 +135,58 @@ def test_ohlcv_accumulation_accuracy_30m() -> None:
     feed.open(("NSE:KAYNES-EQ",), "30m")
 
     # Tick 1: Opening tick at 09:15:00 IST (UTC: 03:45:00Z)
-    ev1 = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 100.0,
-        "volume": 1000,
-        "timestamp": "2026-10-30T03:45:00Z",
-    })
+    ev1 = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 100.0,
+            "volume": 1000,
+            "timestamp": "2026-10-30T03:45:00Z",
+        }
+    )
     assert ev1 is None  # forming candle, not closed
 
     # Tick 2: High push at 09:20:00 IST (UTC: 03:50:00Z)
-    ev2 = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 115.0,
-        "volume": 1250,
-        "timestamp": "2026-10-30T03:50:00Z",
-    })
+    ev2 = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 115.0,
+            "volume": 1250,
+            "timestamp": "2026-10-30T03:50:00Z",
+        }
+    )
     assert ev2 is None
 
     # Tick 3: Low drop at 09:30:00 IST (UTC: 04:00:00Z)
-    ev3 = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 92.0,
-        "volume": 1500,
-        "timestamp": "2026-10-30T04:00:00Z",
-    })
+    ev3 = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 92.0,
+            "volume": 1500,
+            "timestamp": "2026-10-30T04:00:00Z",
+        }
+    )
     assert ev3 is None
 
     # Tick 4: Close at 09:44:59 IST (UTC: 04:14:59Z)
-    ev4 = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 108.0,
-        "volume": 1800,
-        "timestamp": "2026-10-30T04:14:59Z",
-    })
+    ev4 = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 108.0,
+            "volume": 1800,
+            "timestamp": "2026-10-30T04:14:59Z",
+        }
+    )
     assert ev4 is None
 
     # Tick 5: Boundary crossover tick at 09:45:00 IST (UTC: 04:15:00Z) -> CLOSES 09:15 candle!
-    ev5 = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 110.0,
-        "volume": 2000,
-        "timestamp": "2026-10-30T04:15:00Z",
-    })
+    ev5 = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 110.0,
+            "volume": 2000,
+            "timestamp": "2026-10-30T04:15:00Z",
+        }
+    )
     assert ev5 is not None
     assert isinstance(ev5, CandleEvent)
     assert ev5.symbol == "NSE:KAYNES-EQ"
@@ -200,20 +210,24 @@ def test_duplicate_ticks_handling() -> None:
     feed.open(("NSE:KAYNES-EQ",), "30m")
 
     # Initial tick
-    feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 100.0,
-        "volume": 1000,
-        "timestamp": "2026-10-30T03:45:00Z",
-    })
+    feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 100.0,
+            "volume": 1000,
+            "timestamp": "2026-10-30T03:45:00Z",
+        }
+    )
 
     # Exact duplicate tick: same stamp, same price, same volume
-    ev_dup = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 100.0,
-        "volume": 1000,
-        "timestamp": "2026-10-30T03:45:00Z",
-    })
+    ev_dup = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 100.0,
+            "volume": 1000,
+            "timestamp": "2026-10-30T03:45:00Z",
+        }
+    )
     assert ev_dup is None
     held = feed._buckets.get("NSE:KAYNES-EQ")
     assert held is not None
@@ -227,31 +241,37 @@ def test_late_ticks_do_not_corrupt_open_bucket_or_reopen_closed() -> None:
     feed.open(("NSE:KAYNES-EQ",), "30m")
 
     # Ingest 09:15 candle ticks
-    feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 100.0,
-        "volume": 1000,
-        "timestamp": "2026-10-30T03:45:00Z",
-    })
+    feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 100.0,
+            "volume": 1000,
+            "timestamp": "2026-10-30T03:45:00Z",
+        }
+    )
 
     # Tick at 09:45:00 closes 09:15 and opens 09:45 bucket with price=105.0
-    ev_closed = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 105.0,
-        "volume": 1200,
-        "timestamp": "2026-10-30T04:15:00Z",
-    })
+    ev_closed = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 105.0,
+            "volume": 1200,
+            "timestamp": "2026-10-30T04:15:00Z",
+        }
+    )
     assert ev_closed is not None
     assert ev_closed.timestamp == "2026-10-30 09:15:00"
     assert feed.last_emitted["NSE:KAYNES-EQ"] == "2026-10-30 09:15:00"
 
     # Late tick arrives from 09:30:00 (which belongs to already emitted 09:15 candle)
-    ev_late = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 99.0,
-        "volume": 1100,
-        "timestamp": "2026-10-30T04:00:00Z",
-    })
+    ev_late = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 99.0,
+            "volume": 1100,
+            "timestamp": "2026-10-30T04:00:00Z",
+        }
+    )
     assert ev_late is None
 
     # Verify open 09:45 bucket is untouched! Open is still 105.0, bucket is 09:45:00
@@ -267,21 +287,25 @@ def test_out_of_order_ticks_do_not_replace_active_bucket() -> None:
     feed.open(("NSE:KAYNES-EQ",), "30m")
 
     # First tick opens 10:15 bucket
-    feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 200.0,
-        "volume": 5000,
-        "timestamp": "2026-10-30 10:15:00",
-    })
+    feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 200.0,
+            "volume": 5000,
+            "timestamp": "2026-10-30 10:15:00",
+        }
+    )
     assert feed._buckets["NSE:KAYNES-EQ"][0] == "2026-10-30 10:15:00"
 
     # Out-of-order tick arrives belonging to 09:45 bucket
-    ev_ooo = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 195.0,
-        "volume": 4800,
-        "timestamp": "2026-10-30 09:55:00",
-    })
+    ev_ooo = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 195.0,
+            "volume": 4800,
+            "timestamp": "2026-10-30 09:55:00",
+        }
+    )
     assert ev_ooo is None
 
     # Active bucket must remain 10:15:00
@@ -301,21 +325,25 @@ def test_historical_watermark_seed_aligns_with_live_candles() -> None:
     assert feed.last_emitted["NSE:KAYNES-EQ"] == "2026-10-30 09:15:00"
 
     # Live tick at 09:45:00 arrives (in UTC: 04:15:00Z)
-    ev1 = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 120.0,
-        "volume": 3000,
-        "timestamp": "2026-10-30T04:15:00Z",
-    })
+    ev1 = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 120.0,
+            "volume": 3000,
+            "timestamp": "2026-10-30T04:15:00Z",
+        }
+    )
     assert ev1 is None  # Opens 09:45 forming bucket
 
     # Next boundary tick at 10:15:00 closes 09:45 candle
-    ev2 = feed._ingest({
-        "symbol": "NSE:KAYNES-EQ",
-        "price": 125.0,
-        "volume": 3500,
-        "timestamp": "2026-10-30T04:45:00Z",
-    })
+    ev2 = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 125.0,
+            "volume": 3500,
+            "timestamp": "2026-10-30T04:45:00Z",
+        }
+    )
     assert ev2 is not None
     # The 09:45 candle is emitted because "2026-10-30 09:45:00" > "2026-10-30 09:15:00"
     assert ev2.timestamp == "2026-10-30 09:45:00"
@@ -333,7 +361,7 @@ class _CountingLogic:
     def warmup(self) -> int:
         return 0
 
-    def on_bar(self, _view: BarView) -> Any:
+    def on_bar(self, view: BarView) -> Any:  # noqa: ARG002
         self.evaluated_count += 1
         return None
 

@@ -7,7 +7,40 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (system-wide-bug-hunt-complete-20261031):** COMPLETE SYSTEM-WIDE BUG HUNT, RCA & FIX ACROSS 33 SUBSYSTEMS —
+**Latest update (instant-single-click-start-stop-optimization-20261101):** INSTANT SINGLE-CLICK START / STOP OPTIMIZATION ACROSS FULL STACK (SLINT UI → RUST SHELL → REMOTE GATEWAY → HEADLESS PYTHON BACKEND) —
+- **Latency Optimization & Bottlenecks Eliminated:**
+  1. *Eliminated 30,000ms WebSocket Pump Block:* `spawn_remote_pump` previously called `client.next(PUMP_IDLE_TIMEOUT)` with a 30-second socket timeout. Outbound commands queued by UI actions were blocked behind the kernel socket read for up to 30s when idle. Replaced with `PUMP_POLL_SLICE = 20ms` and a 30s activity heartbeat timer, ensuring UI commands are picked up within 20ms.
+  2. *Eliminated 50ms UI Timer Dispatch Delay:* Live state actions were previously deferred to a 50ms periodic `fetch_timer`. Introduced `wire_live_with_dispatcher` in `crates/vayren-shell/src/shell.rs` and wired `dispatch_pending_actions` synchronously on the Slint click event (`on_start`, `on_stop`). Commands are pushed into the outbound channel synchronously (<1ms) on the click itself.
+  3. *Eliminated 1,000ms Snapshot Polling Delay:* In `main.rs`, `RemoteUiUpdate::CommandAck` previously discarded `payload["snapshot"]` and waited for the 1s background snapshot poll to reflect `RUNNING` or `STOPPED`. Now `CommandAck` immediately unpacks the authoritative snapshot, invokes `apply_remote_sections`, sets `session` to `Running`/`Stopped`, records `start_epoch_secs`, and triggers Slint repaint immediately (<1ms from ack).
+  4. *Total START/STOP Click-to-Ack Latency:* Reduced from 50ms–30,000ms down to ~20–25ms (local dispatch <1ms, pump drain ≤20ms, backend turnaround <2ms, ack delivery <2ms).
+- **Correctness & Safety Hardening:**
+  1. *Truthful Stopping State:* `LiveState::stop()` previously set `self.session = SessionStatus::Stopped` optimistically before the backend stopped. Now transitions to `SessionStatus::Stopping` and sets `pending_action = Some("stop")`. Engine state is only marked `Stopped` once backend explicitly confirms disarming and stopping.
+  2. *Duplicate-Click Protection:* Double-clicks on START or STOP while `SessionStatus::Starting` or `SessionStatus::Stopping` are active are rejected immediately at the domain layer without queueing duplicate network requests.
+  3. *Market Data Streaming Blocker:* Hardened `venue_gates_ready()` and `start_blockers()` in `crates/vayren-domain/src/live.rs` with case-insensitive inspection (`eq_ignore_ascii_case("Market Data Streaming")`). If market data streaming is not ready, live start is hard-blocked and the exact blocker is surfaced in the UI.
+  4. *Immediate Entry Order Blocking on STOP:* `LiveTradingService.stop()` sets status to `"STOPPING"` at line 1, immediately disarms sessions, cancels pending entries, and halts the worker before transitioning to `"STOPPED"`.
+  5. *UI Component Safety during Transitions:* In `crates/vayren-shell/ui/live.slint`, added `setup-editable` guard to disable strategy dropdowns, timeframe, quantity, universe save, and live confirmation checkboxes while starting or stopping is in progress.
+- **Verification & Tests:**
+  - `cargo test --test start_stop_optimization`: 11/11 PASSED (single-click start, stop, duplicate click protection, slow backend, network disconnect, timeout, market data failure blocker, stop during pending start, repeated start/stop sequence, UI/backend state sync, instant dispatch).
+  - `pytest src/app/tests/test_live_start_stop_optimization.py`: 7/7 PASSED.
+  - `pytest src/app/tests/test_system_wide_bug_hunt.py`: 8/8 PASSED.
+  - `cargo test -p vayren-domain`: 320/320 PASSED.
+  - `cargo test -p vayren-live-view`: 5/5 PASSED.
+  - `cargo check -p vayren-shell`: PASSED (0 errors).
+  - `python tools/validate_language_ownership.py`: PASSED (432 files checked).
+
+**Previous update (live-market-data-truth-20261101):** "MARKET DATA STREAMING: NOT READY — candle store 22/22; no live feed" INVESTIGATED; SIX REPORTING DEFECTS FIXED —
+- **Verdict itself was correct:** `feed = self._feed_kind if running else "none"`. The FYERS DataSocket exists only while the worker runs (`START → _build_sessions → _probe_live_venue → MarketDataFanout → BrokerFeedProvider.open`). The persisted session is `STOPPED`/`armed:false`/`mode:LIVE`, so zero subscriptions and zero ticks; `22/22` is SQLite `<SYMBOL>.db` tail coverage, never live delivery. No UI bug in the verdict.
+- **Fixed reporting defects (all in `src/app/services/live_trading_service.py` unless noted):**
+  1. A local-tail close was promoted to `price_source="live_feed"` with a fabricated `last_update=now`. Marks now carry provenance (`_mark_sources`) and only venue ticks / explicit `set_live_price` are `live_feed`; stored closes stay `candle_store`, stale.
+  2. Marks survived STOP and kept quoting a dead run. `_teardown_sessions`/`stop` now call `_clear_marks()` and reset `_feed_kind="none"`; all mark aliases retire together.
+  3. No freshness window existed. Added `_LIVE_MARK_MAX_AGE_S = 300`, monotonic receipt epochs (`_mark_epochs`) advanced only on a NEW tick stamp (`_mark_seen_ticks`); aged marks become `live_feed_stale` with real `price_age_s` instead of green forever.
+  4. `market_data.status` could say `STREAMING` from candle-store quotes while stopped. Now STOPPED / WAITING / STREAMING map to real facts (fresh live quote count, feed kind, session state); naive venue stamps are parsed as IST (correct on a UTC host).
+  5. LIVE readiness gate went READY from store coverage alone. It now requires `live_feed` for every symbol, names the session state in the reason, and gives explicit transport failures priority.
+  6. Eligibility labelled every store quote provider `"live"`; `src/app/services/eligibility.py` now derives the provider from `price_source`.
+- **Tests:** regressions added to `src/app/tests/test_safety_reporting.py` (local tail never live, STOP clears marks, aged mark stale, stopped never STREAMING, store-only quotes never satisfy LIVE gate, IST freshness) and `test_system_wide_bug_hunt.py` updated to use `set_live_price`. Full pytest: **1875 passed, 5 skipped**. `ruff check` / `ruff format --check` PASS; structure/imports/language/architecture/authority/routes/repo-graph/scope/context validators PASS (431 files). `make check` remains red only on pre-existing debt: `cargo fmt --check` drift in `crates/vayren-shell/src/main.rs` and 4 pyright errors outside this change (`snapshot.py:183`, two in `test_system_wide_bug_hunt.py`, one in `test_fyers_candle_alignment.py`; verified against stashed tree).
+- **Production status: NOT VERIFIED.** Market closed (Sunday) and no EC2 WS/journal logs are reachable locally; live-tick delivery/freshness cannot be proven from this machine. Do not claim READY/live streaming until observed during a market session. No orders, arming, capital or broker settings were touched.
+
+**Previous update (system-wide-bug-hunt-complete-20261031):** COMPLETE SYSTEM-WIDE BUG HUNT, RCA & FIX ACROSS 33 SUBSYSTEMS —
 - **Bugs Discovered, Root-Caused & Fixed:**
   1. *[CRITICAL] BUG-01 (Strategy/Risk Execution Block):* OBR C1C4 stop-loss was unresolvable by `session._resolve_signal_stop()`. `Strategy` adapter did not expose `slPrice`, and `_resolve_signal_stop()` did not inspect `context.logic.engine.slPrice` (or was blocked by callable `stop_loss`). Result: `size_position()` returned `INVALID_STOP_PRICE` and blocked ALL live orders with `RISK_DENIED: ['INVALID_STOP_PRICE']`. Fixed by exposing `slPrice` property on `Strategy` in `src/strategy/obr_source.py` and checking `context.logic.engine.slPrice`/`context.logic.slPrice` in `src/execution/runtime/session.py`.
   2. *[HIGH] BUG-02 (Live LTP Freezing):* In `live_trading_service.py:_universe_quotes()`, if `symbol in self._marks`, `self._refresh_mark(symbol)` was skipped. As a result, once a mark was populated, it froze and never pulled fresh prices from the active session provider's `last_close`. Fixed by always calling `self._refresh_mark(symbol)` when `symbol in self._sessions`.

@@ -77,8 +77,7 @@ def test_live_trading_market_data_price_source_truth(tmp_path) -> None:
     """Verify market_data price_source dynamically reflects live_feed vs candle_store."""
     service = LiveTradingService(data_dir=tmp_path)
     service._status = "RUNNING"
-    service._marks["NSE:KAYNES"] = 1250.0
-    service._mark_times["NSE:KAYNES"] = "2026-10-31T10:15:00+05:30"
+    service.set_live_price("NSE:KAYNES", 1250.0, timestamp="2026-10-31T10:15:00+05:30")
     service._config.symbols = ("NSE:KAYNES",)
     service._feed_kind = "live"
 
@@ -117,7 +116,7 @@ def test_obr_c1c4_stop_loss_resolution() -> None:
         lifecycle=StrategyLifecycle(),
     )
     # Simulate engine has set slPrice
-    logic.engine.slPrice = 1260.0
+    logic.engine.slPrice = 1260.0  # type: ignore[attr-defined]
     signal = StrategySignal(
         signal_id="sig1",
         strategy_id="OBR C1C4",
@@ -130,7 +129,7 @@ def test_obr_c1c4_stop_loss_resolution() -> None:
         stop_loss=None,  # Strategy relies on engine stop
     )
 
-    resolved_sl = LiveSession._resolve_signal_stop(None, signal, context=ctx)
+    resolved_sl = LiveSession._resolve_signal_stop(None, signal, context=ctx)  # type: ignore[arg-type]
     assert resolved_sl == 1260.0
 
 
@@ -138,7 +137,7 @@ def test_signal_side_logging_and_watchlist(tmp_path) -> None:
     """Verify BUY signal is not hardcoded to SELL in activity or watchlist."""
     service = LiveTradingService(data_dir=tmp_path)
     symbol = "NSE:KAYNES"
-    service._marks[symbol] = 1250.0
+    service.set_live_price(symbol, 1250.0)
     mock_session = MagicMock()
     entry = MagicMock()
     entry.kind = "SIGNAL_GENERATED"

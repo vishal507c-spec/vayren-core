@@ -175,8 +175,9 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
     kill = live.get("kill") or {}
 
     broker_connected = bool(broker.get("connected", False))
-    broker_session = (
-        live.get("broker_session") if isinstance(live.get("broker_session"), dict) else {}
+    _raw_broker_session = live.get("broker_session")
+    broker_session: dict[str, Any] = (
+        _raw_broker_session if isinstance(_raw_broker_session, dict) else {}
     )
     feed = str(live.get("feed", "none") or "none")
     order_ws_leg = None

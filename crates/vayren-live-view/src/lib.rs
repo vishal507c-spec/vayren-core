@@ -1090,7 +1090,11 @@ mod tests {
         let action = with_view(view, |v| v.state.borrow_mut().take_action());
         let parsed: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();
         assert_eq!(parsed["action"], "stop");
-        // 1-click controls optimistically transition session to Stopped on STOP request.
+        // Single-click STOP transitions to Stopping, then Stopped on backend confirmation.
+        assert!(with_view(view, |v| {
+            matches!(v.state.borrow().session, live::SessionStatus::Stopping)
+        }));
+        snapshot(view, READY);
         assert!(with_view(view, |v| {
             matches!(v.state.borrow().session, live::SessionStatus::Stopped)
         }));

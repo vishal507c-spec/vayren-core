@@ -1181,7 +1181,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     shell::wire_portfolio(&ui, portfolio_state.clone());
     shell::wire_research(&ui, research_state.clone());
-    shell::wire_live(&ui, live_state.clone());
+    let live_cmd_tx = remote_command_tx.clone();
+    shell::wire_live_with_dispatcher(&ui, live_state.clone(), move |st| {
+        if let Some(cmd_tx) = live_cmd_tx.as_ref() {
+            vayren_shell::remote_live::dispatch_pending_actions(st, cmd_tx);
+        }
+    });
     shell::apply(&ui, &shell::demo_snapshot());
     // System production wiring (SLICE 4a): the real broker snapshot feeds
     // the native connection workspace (selection, states, field shapes).
@@ -1273,7 +1278,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let timer_broker_form = broker_form.clone();
         fetch_timer.start(
             slint::TimerMode::Repeated,
-            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(15),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
                 if let Ok(mut pending) = server_op_timer_pending.try_lock() {
@@ -1464,6 +1469,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     } else {
                                         format!("{action} refused — {detail}")
                                     });
+                                    if action == "start" {
+                                        if ok {
+                                            state.session = live::SessionStatus::Running;
+                                            if state.start_epoch_secs.is_none() {
+                                                state.start_epoch_secs = Some(
+                                                    std::time::SystemTime::now()
+                                                        .duration_since(std::time::UNIX_EPOCH)
+                                                        .map(|d| d.as_secs_f64())
+                                                        .unwrap_or(0.0),
+                                                );
+                                            }
+                                        } else {
+                                            state.session = live::SessionStatus::Stopped;
+                                        }
+                                    } else if action == "stop" {
+                                        state.session = live::SessionStatus::Stopped;
+                                        state.start_epoch_secs = None;
+                                    }
+                                    if let Some(snapshot) = payload.get("snapshot") {
+                                        if snapshot.is_object() {
+                                            vayren_shell::remote_live::apply_remote_sections(
+                                                &mut state, snapshot, true,
+                                            );
+                                        }
+                                    }
                                 }
                                 dirty = true;
                             }
@@ -1477,39 +1507,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // forwarded to the gateway (it owns the authoritative
                     // service), never to the local backend, so a click in
                     // remote mode cannot act on the wrong process.
-                    for raw in live_state.borrow_mut().drain_actions() {
-                        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-                            eprintln!("remote: ignoring malformed live action: {raw}");
-                            continue;
-                        };
-                        let action = value
-                            .get("action")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let mut params = serde_json::Map::new();
-                        if let Some(map) = value.as_object() {
-                            for (key, val) in map {
-                                if key != "action" {
-                                    params.insert(key.clone(), val.clone());
-                                }
-                            }
-                        }
-                        if action.is_empty() {
-                            continue;
-                        }
-                        if command_tx
-                            .send(vayren_shell::remote_live::RemoteCommand {
-                                action,
-                                params: serde_json::Value::Object(params),
-                            })
-                            .is_err()
-                        {
-                            eprintln!("remote: command channel closed — command not sent");
-                            live_state.borrow_mut().action_note =
-                                Some("gateway link closed — command not sent".into());
-                        }
-                    }
+                    vayren_shell::remote_live::dispatch_pending_actions(
+                        &mut live_state.borrow_mut(),
+                        &command_tx,
+                    );
                 }
 
                 // A pending action whose backend never answered must not pin
@@ -2491,7 +2492,10 @@ fn apply_server_op_ack(
                 .and_then(|v| v.as_str())
                 .unwrap_or("none");
             if let Some(sc) = payload.get("server_code").and_then(|v| v.as_object()) {
-                let sc_status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
+                let sc_status = sc
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("SERVER CODE: NOT UPDATED");
                 ui.set_server_code_status(slint::SharedString::from(sc_status));
                 let mut footer = ui.get_live_footer();
                 footer.server_code_status = slint::SharedString::from(sc_status);
@@ -2655,18 +2659,27 @@ fn wire_server_ops(
             let output = std::process::Command::new("git")
                 .args(["rev-parse", "HEAD"])
                 .output();
-            let local_sha = output.ok().and_then(|o| String::from_utf8(o.stdout).ok()).unwrap_or_default().trim().to_string();
+            let local_sha = output
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             let remote_output = std::process::Command::new("git")
                 .args(["ls-remote", "origin", "refs/heads/main"])
                 .output();
-            let remote_sha = remote_output.ok()
+            let remote_sha = remote_output
+                .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
                 .unwrap_or_default()
                 .split_whitespace()
                 .next()
                 .unwrap_or("")
                 .to_string();
-            let status = if !local_sha.is_empty() && !remote_sha.is_empty() && local_sha.eq_ignore_ascii_case(&remote_sha) {
+            let status = if !local_sha.is_empty()
+                && !remote_sha.is_empty()
+                && local_sha.eq_ignore_ascii_case(&remote_sha)
+            {
                 "SERVER CODE: UPDATED"
             } else {
                 "SERVER CODE: NOT UPDATED"
@@ -2822,7 +2835,7 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
     let live_state = Rc::new(RefCell::new(live_state));
     shell::wire(&ui);
     shell::wire_zoom(&ui, zoom.clone());
-    shell::wire_live(&ui, live_state.clone());
+
     shell::wire_portfolio(
         &ui,
         Rc::new(RefCell::new(portfolio::PortfolioState::default())),
@@ -2847,6 +2860,10 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
     live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
     let (remote_tx, remote_rx) = mpsc::channel::<RemoteUiUpdate>();
     let (command_tx, command_rx) = mpsc::channel::<RemoteCommand>();
+    let remote_live_cmd_tx = command_tx.clone();
+    shell::wire_live_with_dispatcher(&ui, live_state.clone(), move |st| {
+        vayren_shell::remote_live::dispatch_pending_actions(st, &remote_live_cmd_tx);
+    });
     // SYSTEM → BROKERS form state: which EC2 venue CONNECT targets plus the
     // schema key order its values map onto. Rebuilt from every snapshot so
     // the panel can never submit values against a stale venue or order.
@@ -2972,7 +2989,7 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
             std::time::Instant::now() + std::time::Duration::from_secs(1);
         fetch_timer.start(
             slint::TimerMode::Repeated,
-            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(15),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
                 if let Ok(mut pending) = server_op_timer_pending.try_lock() {
@@ -2989,38 +3006,10 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                 }
                 // Control intents go to the gateway, which owns the
                 // authoritative service and re-authorizes every one.
-                for raw in live_state.borrow_mut().drain_actions() {
-                    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-                        eprintln!("remote UI: malformed live action: {raw}");
-                        continue;
-                    };
-                    let action = value
-                        .get("action")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let mut params = serde_json::Map::new();
-                    if let Some(map) = value.as_object() {
-                        for (key, val) in map {
-                            if key != "action" {
-                                params.insert(key.clone(), val.clone());
-                            }
-                        }
-                    }
-                    if action.is_empty() {
-                        continue;
-                    }
-                    if command_tx
-                        .send(RemoteCommand {
-                            action,
-                            params: serde_json::Value::Object(params),
-                        })
-                        .is_err()
-                    {
-                        live_state.borrow_mut().action_note =
-                            Some("gateway link closed — command not sent".into());
-                    }
-                }
+                vayren_shell::remote_live::dispatch_pending_actions(
+                    &mut live_state.borrow_mut(),
+                    &command_tx,
+                );
                 if live_state.borrow_mut().expire_pending_action() {
                     shell::apply_live(&ui, &live_state.borrow());
                 }
@@ -3059,8 +3048,13 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status(slint::SharedString::from("CONNECTED"));
                                 ui.set_server_status_tone(1);
                             }
-                            if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
-                                let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
+                            if let Some(sc) =
+                                sections.get("server_code").and_then(|s| s.as_object())
+                            {
+                                let status = sc
+                                    .get("status")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("SERVER CODE: NOT UPDATED");
                                 ui.set_server_code_status(slint::SharedString::from(status));
                             }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
@@ -3089,8 +3083,13 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status(slint::SharedString::from("CONNECTED"));
                                 ui.set_server_status_tone(1);
                             }
-                            if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
-                                let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
+                            if let Some(sc) =
+                                sections.get("server_code").and_then(|s| s.as_object())
+                            {
+                                let status = sc
+                                    .get("status")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("SERVER CODE: NOT UPDATED");
                                 ui.set_server_code_status(slint::SharedString::from(status));
                             }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
@@ -3112,8 +3111,11 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status_tone(3);
                                 ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
                                 ui.set_worker_status_tone(0);
-                                ui.set_server_code_status(slint::SharedString::from("SERVER CODE: NOT UPDATED"));
-                                live_state.borrow_mut().server_code_status = "SERVER CODE: NOT UPDATED".to_string();
+                                ui.set_server_code_status(slint::SharedString::from(
+                                    "SERVER CODE: NOT UPDATED",
+                                ));
+                                live_state.borrow_mut().server_code_status =
+                                    "SERVER CODE: NOT UPDATED".to_string();
                             }
                             mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
                             dirty = true;
@@ -3166,6 +3168,31 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             } else {
                                 format!("{action} refused — {detail}")
                             });
+                            if action == "start" {
+                                if ok {
+                                    state.session = live::SessionStatus::Running;
+                                    if state.start_epoch_secs.is_none() {
+                                        state.start_epoch_secs = Some(
+                                            std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .map(|d| d.as_secs_f64())
+                                                .unwrap_or(0.0),
+                                        );
+                                    }
+                                } else {
+                                    state.session = live::SessionStatus::Stopped;
+                                }
+                            } else if action == "stop" {
+                                state.session = live::SessionStatus::Stopped;
+                                state.start_epoch_secs = None;
+                            }
+                            if let Some(snapshot) = payload.get("snapshot") {
+                                if snapshot.is_object() {
+                                    vayren_shell::remote_live::apply_remote_sections(
+                                        &mut state, snapshot, true,
+                                    );
+                                }
+                            }
                             drop(state);
                             dirty = true;
                         }

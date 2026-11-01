@@ -1051,6 +1051,13 @@ impl LiveState {
     /// In host mode, if the backend snapshot has evaluated readiness and only
     /// explicit operator consent / account confirmation remains blocking, venue gates are also satisfied.
     pub fn venue_gates_ready(&self) -> bool {
+        let market_data_unready = self.gates.iter().any(|g| {
+            (g.name == "Market Data Streaming" || g.name == "MARKET DATA")
+                && g.status != GateStatus::Ready
+        });
+        if market_data_unready {
+            return false;
+        }
         let has_all_gates = VENUE_GATES.iter().all(|name| {
             self.gates
                 .iter()
@@ -1128,6 +1135,22 @@ impl LiveState {
                 if self.live_confirmed || self.session == SessionStatus::Running {
                     list.retain(|b| !Self::is_confirmation_blocker(b));
                 }
+                if self.mode == ExecMode::Live {
+                    if let Some(gate) = self.gates.iter().find(|g| {
+                        (g.name.eq_ignore_ascii_case("Market Data Streaming")
+                            || g.name.eq_ignore_ascii_case("MARKET DATA"))
+                            && g.status != GateStatus::Ready
+                    }) {
+                        let msg = if !gate.reason.is_empty() {
+                            format!("market data streaming is not ready: {}", gate.reason)
+                        } else {
+                            "market data streaming is not ready (see LIVE READINESS)".to_string()
+                        };
+                        if !list.iter().any(|b| b.contains("market data")) {
+                            list.push(msg);
+                        }
+                    }
+                }
                 // The venue's reconciliation verdict is its OWN truth: a
                 // blocking reconciliation must be visible even when the
                 // backend's list did not repeat it (otherwise the screen can
@@ -1157,6 +1180,18 @@ impl LiveState {
             blockers.push("quantity must be positive".into());
         }
         if self.mode == ExecMode::Live {
+            if let Some(gate) = self.gates.iter().find(|g| {
+                (g.name.eq_ignore_ascii_case("Market Data Streaming")
+                    || g.name.eq_ignore_ascii_case("MARKET DATA"))
+                    && g.status != GateStatus::Ready
+            }) {
+                let msg = if !gate.reason.is_empty() {
+                    format!("market data streaming is not ready: {}", gate.reason)
+                } else {
+                    "market data streaming is not ready (see LIVE READINESS)".to_string()
+                };
+                blockers.push(msg);
+            }
             if !self.venue_gates_ready() {
                 blockers.push("live gates not satisfied (see LIVE READINESS)".into());
             }
@@ -1192,6 +1227,7 @@ impl LiveState {
             self.session,
             SessionStatus::Running | SessionStatus::Starting
         ) && self.pending_action.as_deref() != Some("stop")
+            && self.session != SessionStatus::Stopping
     }
 
     // ── actions (validate centrally; Slint only reports intent) ──────────
@@ -1472,7 +1508,10 @@ impl LiveState {
             self.action_note = Some(NO_BACKEND_NOTE.into());
             return;
         }
-        if self.session == SessionStatus::Running || self.pending_action.is_some() {
+        if self.session == SessionStatus::Running
+            || self.session == SessionStatus::Starting
+            || self.pending_action.is_some()
+        {
             // One action in flight at a time. A second click is a no-op, NOT
             // a second request — the backend must never see two starts.
             return;
@@ -1535,12 +1574,26 @@ impl LiveState {
             None => false,
         };
         if expired {
-            self.pending_action = None;
+            let was_action = self.pending_action.take();
             self.pending_since = None;
-            if self.session == SessionStatus::Running || self.session == SessionStatus::Starting {
-                self.session = SessionStatus::Stopped;
+            if self.session == SessionStatus::Starting {
+                self.session = SessionStatus::Error;
+                self.action_note = Some(
+                    "START timed out — backend did not answer (check connection / gateway)".into(),
+                );
+            } else if self.session == SessionStatus::Stopping {
+                self.session = SessionStatus::Error;
+                self.action_note =
+                    Some("STOP timed out — engine state uncertain, do not assume stopped!".into());
+            } else {
+                if self.session == SessionStatus::Running {
+                    self.session = SessionStatus::Stopped;
+                }
+                self.action_note = Some(format!(
+                    "{} timed out — backend did not answer",
+                    was_action.as_deref().unwrap_or("request")
+                ));
             }
-            self.action_note = Some("backend did not answer — request cleared, press again".into());
         }
         expired
     }
@@ -1567,15 +1620,14 @@ impl LiveState {
             return;
         }
         if self.host_mode {
-            // Real-time optimistic update: switch to Stopped immediately
-            self.session = SessionStatus::Stopped;
+            self.session = SessionStatus::Stopping;
             self.live_confirmed = false;
             self.set_pending("stop");
             self.push_action(serde_json::json!({"action": "stop"}));
-            self.action_note = Some("stop requested — stopped".into());
+            self.action_note = Some("stop requested — halting engine".into());
             return;
         }
-        self.session = SessionStatus::Stopped;
+        self.session = SessionStatus::Stopping;
         self.live_confirmed = false;
         self.action_note = Some("stop requested — halting ticks".into());
     }
@@ -4300,9 +4352,11 @@ pub fn project(state: &LiveState) -> LiveView {
         timeframe_names: state.timeframes.clone(),
         timeframe_selected: state.timeframe_index.map_or(-1, |i| i as i32),
         pending_start: state.session != SessionStatus::Running
-            && state.pending_action.as_deref() == Some("start"),
+            && (state.pending_action.as_deref() == Some("start")
+                || state.session == SessionStatus::Starting),
         pending_stop: state.session != SessionStatus::Stopped
-            && state.pending_action.as_deref() == Some("stop"),
+            && (state.pending_action.as_deref() == Some("stop")
+                || state.session == SessionStatus::Stopping),
     };
 
     // ── readiness (gate rows, exact backend reasons) ──
@@ -6348,6 +6402,8 @@ mod tests {
         assert!(st.take_action().is_none());
         // Stop the session so setup and mode edits are permitted
         st.stop();
+        assert_eq!(st.session, SessionStatus::Stopping);
+        st.apply_snapshot(&serde_json::json!({"session_status": "STOPPED"}));
         assert_eq!(st.session, SessionStatus::Stopped);
         let _ = st.take_action();
         // Setup edits forward the full legacy-shaped setup payload.
@@ -8354,7 +8410,10 @@ mod tests {
         let mut st = LiveState::default();
         assert_eq!(st.server_code_status, "SERVER CODE: NOT UPDATED");
         let view_default = project(&st);
-        assert_eq!(view_default.footer.server_code_status, "SERVER CODE: NOT UPDATED");
+        assert_eq!(
+            view_default.footer.server_code_status,
+            "SERVER CODE: NOT UPDATED"
+        );
 
         // 1. Snapshot with server_code section stating UPDATED
         st.apply_snapshot(&serde_json::json!({
@@ -8365,7 +8424,10 @@ mod tests {
         }));
         assert_eq!(st.server_code_status, "SERVER CODE: UPDATED");
         let view_updated = project(&st);
-        assert_eq!(view_updated.footer.server_code_status, "SERVER CODE: UPDATED");
+        assert_eq!(
+            view_updated.footer.server_code_status,
+            "SERVER CODE: UPDATED"
+        );
 
         // 2. Snapshot with server_code section stating NOT UPDATED
         st.apply_snapshot(&serde_json::json!({
@@ -8376,7 +8438,10 @@ mod tests {
         }));
         assert_eq!(st.server_code_status, "SERVER CODE: NOT UPDATED");
         let view_not_updated = project(&st);
-        assert_eq!(view_not_updated.footer.server_code_status, "SERVER CODE: NOT UPDATED");
+        assert_eq!(
+            view_not_updated.footer.server_code_status,
+            "SERVER CODE: NOT UPDATED"
+        );
     }
 
     #[test]

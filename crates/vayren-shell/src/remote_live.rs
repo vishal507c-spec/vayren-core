@@ -48,6 +48,10 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Idle deadline inside the pump; expiry sends a heartbeat `ping`.
 pub const PUMP_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Sub-second poll slice to immediately drain and dispatch control commands without waiting.
+pub const PUMP_POLL_SLICE: Duration = Duration::from_millis(20);
+/// Heartbeat deadline when no traffic is observed.
+pub const PUMP_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Bounded remote-event buffer (oldest dropped first, totals stay truthful).
 pub const REMOTE_EVENT_CAP: usize = 200;
@@ -488,6 +492,8 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
         // hidden running state.
         let session = match strategy_status.as_str() {
             "RUNNING" => "RUNNING",
+            "STARTING" => "STARTING",
+            "STOPPING" => "STOPPING",
             "ERROR" => "ERROR",
             _ => "STOPPED",
         };
@@ -1113,6 +1119,42 @@ pub struct RemoteCommand {
     pub params: serde_json::Value,
 }
 
+/// Drain actions from a LiveState and immediately dispatch to the remote command channel.
+pub fn dispatch_pending_actions(state: &mut LiveState, command_tx: &mpsc::Sender<RemoteCommand>) {
+    for raw in state.drain_actions() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            eprintln!("remote: ignoring malformed live action: {raw}");
+            continue;
+        };
+        let action = value
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let mut params = serde_json::Map::new();
+        if let Some(map) = value.as_object() {
+            for (key, val) in map {
+                if key != "action" {
+                    params.insert(key.clone(), val.clone());
+                }
+            }
+        }
+        if action.is_empty() {
+            continue;
+        }
+        if command_tx
+            .send(RemoteCommand {
+                action,
+                params: serde_json::Value::Object(params),
+            })
+            .is_err()
+        {
+            eprintln!("remote: command channel closed — command not sent");
+            state.action_note = Some("gateway link closed — command not sent".into());
+        }
+    }
+}
+
 /// Blocking initial connect: hello → welcome → snapshot → subscribe.
 /// Resolves the token inside, drops it before returning, and never logs it.
 /// Errors name the STAGE only, never the credential.
@@ -1249,6 +1291,7 @@ pub fn spawn_remote_pump(
             let mut in_flight: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
             let mut last_ping: Option<std::time::Instant> = None;
+            let mut last_activity = std::time::Instant::now();
             loop {
                 // Drain queued commands before blocking on the socket: a START
                 // pressed between two frames must not wait for the next one.
@@ -1268,8 +1311,9 @@ pub fn spawn_remote_pump(
                         in_flight.insert(request_id, command.action.clone());
                     }
                 }
-                match client.next(PUMP_IDLE_TIMEOUT) {
+                match client.next(PUMP_POLL_SLICE) {
                     Ok(ClientEvent::Snapshot { sections, resync }) => {
+                        last_activity = std::time::Instant::now();
                         let _ = tx.send(RemoteUiUpdate::Snapshot { sections, resync });
                         let _ = tx.send(RemoteUiUpdate::Heartbeat {
                             rtt_ms: None,
@@ -1277,6 +1321,7 @@ pub fn spawn_remote_pump(
                         });
                     }
                     Ok(ClientEvent::StateUpdate { sections, .. }) => {
+                        last_activity = std::time::Instant::now();
                         let _ = tx.send(RemoteUiUpdate::StateUpdate { sections });
                         let _ = tx.send(RemoteUiUpdate::Heartbeat {
                             rtt_ms: None,
@@ -1299,6 +1344,7 @@ pub fn spawn_remote_pump(
                         request_id,
                         payload,
                     }) => {
+                        last_activity = std::time::Instant::now();
                         // The gateway's own verdict on a control command:
                         // `ok` false carries the refusal reasons, which is
                         // what clears the pending action honestly.
@@ -1386,9 +1432,12 @@ pub fn spawn_remote_pump(
                     Ok(ClientEvent::Closed) => break,
                     Ok(ClientEvent::Welcome { .. }) => {}
                     Err(ClientError::Timeout) => {
-                        last_ping = Some(std::time::Instant::now());
-                        if client.ping().is_err() {
-                            break;
+                        if last_activity.elapsed() >= PUMP_HEARTBEAT_INTERVAL {
+                            last_ping = Some(std::time::Instant::now());
+                            last_activity = std::time::Instant::now();
+                            if client.ping().is_err() {
+                                break;
+                            }
                         }
                     }
                     // A malformed frame is a per-message refusal, not a dead

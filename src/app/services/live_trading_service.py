@@ -76,6 +76,11 @@ _ACTIVITY_CAP = 500
 _TICK_MS = 1000
 #: Bounded START-time order-WebSocket proof (the adapter waits, never retries).
 _LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 1.0
+#: A venue mark stays "live" only while ticks keep arriving. The window is
+#: wider than the 1 s poll (an illiquid symbol must not flip stale between
+#: trades) yet far shorter than a session, so a dead socket can never keep
+#: presenting the last price of a previous run as current market data.
+_LIVE_MARK_MAX_AGE_S = 300.0
 
 #: Recovery phases that mean the operator still has an interrupted run to
 #: resolve. A restart while desired==RUNNING is the normal way to enter one.
@@ -330,6 +335,15 @@ class LiveTradingService:
         self._activity: deque[dict[str, Any]] = deque(maxlen=_ACTIVITY_CAP)
         self._marks: dict[str, float] = {}
         self._mark_times: dict[str, str] = {}
+        # Provenance of each mark. A price copied from a local candle tail is
+        # NOT a live tick; only marks written by a venue-backed provider (or
+        # an explicit ``set_live_price`` push) may ever be labelled live.
+        self._mark_sources: dict[str, str] = {}
+        # Monotonic receipt epoch of the last NEW venue tick per alias. It is
+        # deliberately not refreshed on every poll: a silent socket must age
+        # the mark instead of looking fresh because the UI read it again.
+        self._mark_epochs: dict[str, float] = {}
+        self._mark_seen_ticks: dict[str, str] = {}
         self._open_since: dict[str, str] = {}
         self._last_signal: dict[str, str] = {}
         self._last_signal_side: dict[str, str] = {}
@@ -1474,6 +1488,11 @@ class LiveTradingService:
                 blockers.append(
                     f"{name} broker adapter is not connected — reconnect in SYSTEM → BROKERS"
                 )
+            checks = session.get("checks") or {}
+            if isinstance(checks, dict):
+                md_check = str(checks.get("market_data", "") or "")
+                if md_check.startswith("FAILED"):
+                    blockers.append(f"{name} market data streaming failed: {md_check}")
         venue_id = self._resolve_live_venue_id(name)
         if venue_id is None:
             blockers.append(
@@ -1618,8 +1637,8 @@ class LiveTradingService:
         Validation is forced fresh at START (config may have gone stale
         since the last UI poll); tick cadences reset for a clean cycle.
         """
-        if self._status == "RUNNING":
-            return False, ("already running",)
+        if self._status in ("RUNNING", "STARTING"):
+            return False, ("already running or start in progress",)
         was_pending = self.recovery_pending
         if self._config.mode == "LIVE" and confirmed:
             self.confirm_live_execution()
@@ -1818,6 +1837,9 @@ class LiveTradingService:
 
     def stop(self, reason: str = "operator stop") -> None:
         """Halt immediately: no new signals; open orders stay tracked."""
+        if self._status in ("STOPPED", "HALTED") and not self._sessions:
+            return
+        self._status = "STOPPING"
         self._timer.stop()
         self._worker_started = False
         for session in self._sessions.values():
@@ -2218,6 +2240,9 @@ class LiveTradingService:
 
         market_open = is_nse_market_open()
         is_conn = bool((running and feed == "live") or view.get("connected"))
+        fresh_live_quotes = sum(
+            1 for q in quotes if isinstance(q, dict) and q.get("price_source") == "live_feed"
+        )
         if is_conn:
             if not market_open:
                 ws_status = "MARKET CLOSED"
@@ -2225,11 +2250,22 @@ class LiveTradingService:
             elif view.get("status") == "DEGRADED":
                 ws_status = "DEGRADED"
                 md_status = "STALE"
+            elif not running:
+                # Broker auth is not a feed: a stopped engine streaming
+                # nothing must never inherit STREAMING from stored candles.
+                ws_status = "CONNECTED"
+                md_status = "STOPPED"
+            elif feed != "live":
+                ws_status = "CONNECTED"
+                md_status = "STALE"
+            elif fresh_live_quotes:
+                ws_status = "LIVE"
+                md_status = "STREAMING"
             else:
-                ws_status = "LIVE" if running else "CONNECTED"
-                md_status = (
-                    "STREAMING" if (running and (quotes or feed != "none")) or quotes else "NO DATA"
-                )
+                # Socket/subscriptions are up but no venue tick has landed
+                # yet. Amber WAITING, never green STREAMING.
+                ws_status = "CONNECTED"
+                md_status = "WAITING"
         else:
             ws_status = "NOT CONFIGURED" if not view.get("configured") else "DISCONNECTED"
             md_status = "STOPPED" if not running else "NO DATA"
@@ -2244,20 +2280,20 @@ class LiveTradingService:
         md_freshness_s: float | None = None
         if md_last_tick:
             with contextlib.suppress(Exception):
-                import datetime
-
                 t_clean = md_last_tick.replace("Z", "+00:00")
-                dt = datetime.datetime.fromisoformat(t_clean)
+                dt = datetime.fromisoformat(t_clean)
+                if dt.tzinfo is None:
+                    # Venue stamps are IST wall-clock; interpreting them as
+                    # the host clock makes freshness wrong on a UTC server.
+                    dt = dt.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
                 md_freshness_s = max(0.0, round(time.time() - dt.timestamp(), 2))
 
         any_live_quote = any(
             isinstance(q, dict) and q.get("price_source") == "live_feed" for q in quotes
         )
-        market_price_source = (
-            "live_feed"
-            if (any_live_quote or (running and is_conn and any(self._marks.values())))
-            else "candle_store"
-        )
+        # Provenance, not presence: a local-tail mark is stored data even while
+        # the engine runs, so only a quote the resolver labelled live counts.
+        market_price_source = "live_feed" if any_live_quote else "candle_store"
         md_session_health: dict[str, Any] = {}
         for symbol, session in self._sessions.items():
             health_fn = getattr(session, "market_data_health", None)
@@ -2758,6 +2794,11 @@ class LiveTradingService:
             with contextlib.suppress(Exception):
                 fanout.close()
         self._market_fanouts.clear()
+        # Feed observations belong to the sessions just stopped: keeping the
+        # old marks/kind would let a dead run keep quoting (and a stopped
+        # service still report a live provider in eligibility diagnostics).
+        self._clear_marks()
+        self._feed_kind = "none"
 
     def _load_history(self, symbol: str, timeframe: str) -> tuple[Bar, ...]:
         try:
@@ -2877,25 +2918,73 @@ class LiveTradingService:
             }
         )
 
+    @staticmethod
+    def _mark_keys(symbol: str) -> tuple[str, ...]:
+        """Every alias a mark is stored under (bare, NSE:, -EQ forms)."""
+        clean = _clean_symbol(symbol)
+        clean_bare = clean[:-3] if clean.endswith("-EQ") else clean
+        return (
+            symbol,
+            clean,
+            clean_bare,
+            f"NSE:{clean}",
+            f"NSE:{clean_bare}",
+            f"NSE:{clean_bare}-EQ",
+            f"{clean_bare}-EQ",
+        )
+
+    def _clear_marks(self) -> None:
+        """Forget every price mark: a mark dies with the feed that produced it.
+
+        Marks are per-run observations, never durable state. Keeping them past
+        a STOP made the last tick of a previous session render as a live price
+        with ``stale=False`` — a stopped engine quoting a market it no longer
+        listens to.
+        """
+        self._marks.clear()
+        self._mark_times.clear()
+        self._mark_sources.clear()
+        self._mark_epochs.clear()
+        self._mark_seen_ticks.clear()
+
+    def _resolve_mark(
+        self, symbol: str, clean: str, clean_bare: str
+    ) -> tuple[float | None, str, float | None, str]:
+        """Latest mark for one symbol: (price, tick stamp, receipt age, source).
+
+        ``source`` is ``"live"`` only for venue-backed observations or an
+        explicit :meth:`set_live_price` push; a price copied from a local
+        candle tail is ``"local"`` and can never be labelled live.
+        """
+        keys = (
+            symbol,
+            clean,
+            clean_bare,
+            f"NSE:{clean}",
+            f"NSE:{clean_bare}",
+            f"NSE:{clean_bare}-EQ",
+        )
+        price = next((self._marks.get(k) for k in keys if self._marks.get(k)), None)
+        if price is None:
+            return None, "", None, ""
+        stamp = next((self._mark_times.get(k) for k in keys if self._mark_times.get(k)), "")
+        source = next((self._mark_sources.get(k) for k in keys if self._mark_sources.get(k)), "")
+        epoch = next((self._mark_epochs.get(k) for k in keys if self._mark_epochs.get(k)), None)
+        age = max(0.0, time.monotonic() - epoch) if epoch else None
+        return float(price), str(stamp or ""), age, str(source or "")
+
     def set_live_price(self, symbol: str, price: float, timestamp: str | None = None) -> None:
-        """Record the latest live market price and timestamp for a symbol."""
+        """Record an explicit live market price push (never a stored candle)."""
         try:
             px = float(price)
             if px > 0 and math.isfinite(px):
-                clean = _clean_symbol(symbol)
-                clean_bare = clean[:-3] if clean.endswith("-EQ") else clean
                 ts = str(timestamp or _utcnow_iso())
-                for key in (
-                    symbol,
-                    clean,
-                    clean_bare,
-                    f"NSE:{clean}",
-                    f"NSE:{clean_bare}",
-                    f"NSE:{clean_bare}-EQ",
-                    f"{clean_bare}-EQ",
-                ):
+                epoch = time.monotonic()
+                for key in self._mark_keys(symbol):
                     self._marks[key] = px
                     self._mark_times[key] = ts
+                    self._mark_sources[key] = "live"
+                    self._mark_epochs[key] = epoch
         except (TypeError, ValueError):
             pass
 
@@ -2903,15 +2992,44 @@ class LiveTradingService:
         """Update the mark from the session's own provider (zero extra reads).
 
         Providers track the latest close they produced; a DB read here
-        would duplicate that work every tick on the UI thread.
+        would duplicate that work every tick on the UI thread. Only a
+        provider that also reports VENUE tick stamps (the broker-backed feed)
+        produces a live mark, and its receipt epoch advances only when a new
+        tick stamp appears — polling the same last price again is not
+        freshness.
         """
         session = self._sessions.get(symbol)
         if session is None:
             return
         provider = getattr(session, "_provider", None)
-        last_close = getattr(provider, "last_close", None)
         clean = _clean_symbol(symbol)
         clean_bare = clean[:-3] if clean.endswith("-EQ") else clean
+
+        last_time = getattr(provider, "last_tick_time", None)
+        tick_stamp = ""
+        if isinstance(last_time, dict):
+            raw_stamp = (
+                last_time.get(symbol)
+                or last_time.get(clean)
+                or last_time.get(clean_bare)
+                or last_time.get(f"NSE:{clean}")
+                or last_time.get(f"NSE:{clean_bare}")
+                or last_time.get(f"NSE:{clean_bare}-EQ")
+            )
+            if raw_stamp:
+                tick_stamp = str(raw_stamp)
+
+        source = "live" if tick_stamp else "local"
+        epoch = 0.0
+        if source == "live":
+            seen = self._mark_seen_ticks.get(symbol)
+            if seen != tick_stamp:
+                self._mark_seen_ticks[symbol] = tick_stamp
+                epoch = time.monotonic()
+            else:
+                epoch = self._mark_epochs.get(symbol) or time.monotonic()
+
+        last_close = getattr(provider, "last_close", None)
         if isinstance(last_close, dict):
             price = (
                 last_close.get(symbol)
@@ -2926,38 +3044,18 @@ class LiveTradingService:
             except (TypeError, ValueError):
                 price_value = 0.0
             if price_value > 0:
-                for key in (
-                    symbol,
-                    clean,
-                    clean_bare,
-                    f"NSE:{clean}",
-                    f"NSE:{clean_bare}",
-                    f"NSE:{clean_bare}-EQ",
-                    f"{clean_bare}-EQ",
-                ):
+                for key in self._mark_keys(symbol):
                     self._marks[key] = price_value
-        last_time = getattr(provider, "last_tick_time", None)
-        if isinstance(last_time, dict):
-            ts = (
-                last_time.get(symbol)
-                or last_time.get(clean)
-                or last_time.get(clean_bare)
-                or last_time.get(f"NSE:{clean}")
-                or last_time.get(f"NSE:{clean_bare}")
-                or last_time.get(f"NSE:{clean_bare}-EQ")
-            )
-            if ts:
-                ts_str = str(ts)
-                for key in (
-                    symbol,
-                    clean,
-                    clean_bare,
-                    f"NSE:{clean}",
-                    f"NSE:{clean_bare}",
-                    f"NSE:{clean_bare}-EQ",
-                    f"{clean_bare}-EQ",
-                ):
-                    self._mark_times[key] = ts_str
+                    self._mark_sources[key] = source
+                    self._mark_epochs[key] = epoch
+        if tick_stamp:
+            for key in self._mark_keys(symbol):
+                self._mark_times[key] = tick_stamp
+        elif source == "local":
+            # A local tail has no venue tick stamp; any previously copied
+            # stamp must not survive as if this close were a venue tick.
+            for key in self._mark_keys(symbol):
+                self._mark_times.pop(key, None)
 
     def _track_open_since(self) -> None:
         for symbol, session in self._sessions.items():
@@ -3043,22 +3141,26 @@ class LiveTradingService:
             price = getattr(row, "price", None) if row is not None else None
             change = getattr(row, "change_pct", None) if row is not None else None
 
-            # Resolve live market price from marks or active session provider
+            # Resolve the latest mark from the active session provider. A mark
+            # is a live quote ONLY when a venue tick produced it AND that tick
+            # is recent; a stored candle close (or a mark left over from an
+            # older run) is never promoted to a live price.
             if symbol in self._sessions:
                 with contextlib.suppress(Exception):
                     self._refresh_mark(symbol)
 
-            live_price = (
-                self._marks.get(symbol)
-                or self._marks.get(clean)
-                or self._marks.get(clean_bare)
-                or self._marks.get(f"NSE:{clean}")
-                or self._marks.get(f"NSE:{clean_bare}")
-                or self._marks.get(f"NSE:{clean_bare}-EQ")
+            mark_price, mark_stamp, mark_age_s, mark_source = self._resolve_mark(
+                symbol, clean, clean_bare
             )
-            is_live = live_price is not None and live_price > 0
-            if is_live and live_price is not None:
-                live_val = round(float(live_price), 2)
+            is_live = bool(
+                mark_price is not None
+                and mark_price > 0
+                and mark_source == "live"
+                and mark_age_s is not None
+                and mark_age_s <= _LIVE_MARK_MAX_AGE_S
+            )
+            if mark_price is not None and mark_price > 0:
+                live_val = round(float(mark_price), 2)
                 base_px = getattr(row, "price", None)
                 if base_px is not None and base_px > 0:
                     change = round(100.0 * (live_val - base_px) / base_px, 2)
@@ -3106,18 +3208,22 @@ class LiveTradingService:
                             stop_price = getattr(eng, "slPrice", None)
 
             source_stamp = str(getattr(row, "as_of", "") or "") if row is not None else ""
-            if is_live:
-                live_stamp = (
-                    self._mark_times.get(symbol)
-                    or self._mark_times.get(clean)
-                    or self._mark_times.get(clean_bare)
-                    or self._mark_times.get(f"NSE:{clean}")
-                    or self._mark_times.get(f"NSE:{clean_bare}")
-                    or self._mark_times.get(f"NSE:{clean_bare}-EQ")
-                )
-                last_update = live_stamp if live_stamp else _utcnow_iso()
-                price_source = "live_feed"
-                stale = False
+            price_age_s: float | None = None
+            if mark_price is not None and mark_price > 0:
+                # The mark's own stamp is the only honest update time; a local
+                # tail has no venue stamp, so the stored candle time stands in.
+                # Never substitute the wall clock for a tick that did not
+                # arrive.
+                last_update = mark_stamp or source_stamp
+                price_age_s = round(mark_age_s, 1) if mark_age_s is not None else None
+                if is_live:
+                    price_source = "live_feed"
+                    stale = False
+                else:
+                    # Old venue observation (cache the age) or a local tail
+                    # close (no venue provenance at all).
+                    price_source = "live_feed_stale" if mark_source == "live" else "candle_store"
+                    stale = True
             elif price is not None:
                 last_update = source_stamp
                 price_source = "candle_store"
@@ -3126,7 +3232,6 @@ class LiveTradingService:
                 last_update = ""
                 price_source = "none"
                 stale = True
-            price_age_s: float | None = None
 
             # Reference levels, entry and stop come from REAL state only.
             #
@@ -3146,7 +3251,7 @@ class LiveTradingService:
             # everything below is already keyed off those two fields.
             signal_present = self._last_signal.get(symbol, "") not in ("", "no signal yet")
 
-            if ((clean and clean in store and price is not None) or is_live) and price is not None:
+            if price is not None:
                 status = "AVAILABLE"
                 # An OPEN position is the one case where the entry price is a
                 # real, ledger-owned number rather than a strategy level.
@@ -3542,13 +3647,53 @@ class LiveTradingService:
                 + (f", {nodata} without data" if nodata else "")
             )
             live_feed = str(snap.get("feed", "none") or "none")
-            feed_label = {
-                "live": "venue feed connected (no tick stamp observed)",
-                "local": "local tail only",
-            }.get(live_feed, "no live feed")
+            live_available = sum(1 for q in quotes if q.get("price_source") == "live_feed")
+            if live_feed == "live":
+                feed_label = (
+                    f"venue feed connected, live ticks {live_available}/{len(quotes)}"
+                    if live_available
+                    else "venue feed connected (no tick stamp observed)"
+                )
+            else:
+                feed_label = {"local": "local tail only"}.get(live_feed, "no live feed")
+            session_word = str(snap.get("session_status") or self._status or "STOPPED")
+            if session_word != "RUNNING":
+                # The commonest honest reason for "no live feed": nothing is
+                # running, so nothing is subscribed. Say it in the row instead
+                # of leaving the operator to infer it from another card.
+                feed_label = f"{feed_label} (session {session_word})"
             reason = f"{store_reason}; {feed_label}"
             if self._config.mode == "LIVE":
-                if live_feed != "live" or missing or nodata:
+                unhealthy_transport = any(
+                    not d.get("transport", {}).get("healthy", True)
+                    for d in (snap.get("market_data") or {}).get("delivery", [])
+                )
+                md_check = str((view.get("checks") or {}).get("market_data", ""))
+                if unhealthy_transport or md_check.startswith("FAILED"):
+                    # An explicit transport failure is the most actionable
+                    # reason; it outranks coverage counts.
+                    fail_reason = (
+                        md_check
+                        if md_check.startswith("FAILED")
+                        else next(
+                            (
+                                d.get("transport", {}).get("reason", "")
+                                for d in (snap.get("market_data") or {}).get("delivery", [])
+                                if not d.get("transport", {}).get("healthy", True)
+                            ),
+                            "feed degraded",
+                        )
+                    )
+                    gates.append(
+                        {
+                            "name": "Market Data Streaming",
+                            "status": "NOT READY",
+                            "reason": f"{store_reason}; {fail_reason}",
+                        }
+                    )
+                elif live_feed != "live" or missing or nodata or live_available < len(quotes):
+                    # Stored candles are NOT tick delivery: every symbol needs
+                    # its own FRESH live mark before this row may go green.
                     gates.append(
                         {
                             "name": "Market Data Streaming",
@@ -3557,39 +3702,13 @@ class LiveTradingService:
                         }
                     )
                 else:
-                    unhealthy_transport = any(
-                        not d.get("transport", {}).get("healthy", True)
-                        for d in (snap.get("market_data") or {}).get("delivery", [])
+                    gates.append(
+                        {
+                            "name": "Market Data Streaming",
+                            "status": "READY",
+                            "reason": reason,
+                        }
                     )
-                    md_check = str((view.get("checks") or {}).get("market_data", ""))
-                    if unhealthy_transport or md_check.startswith("FAILED"):
-                        fail_reason = (
-                            md_check
-                            if md_check.startswith("FAILED")
-                            else next(
-                                (
-                                    d.get("transport", {}).get("reason", "")
-                                    for d in (snap.get("market_data") or {}).get("delivery", [])
-                                    if not d.get("transport", {}).get("healthy", True)
-                                ),
-                                "feed degraded",
-                            )
-                        )
-                        gates.append(
-                            {
-                                "name": "Market Data Streaming",
-                                "status": "NOT READY",
-                                "reason": f"{store_reason}; {fail_reason}",
-                            }
-                        )
-                    else:
-                        gates.append(
-                            {
-                                "name": "Market Data Streaming",
-                                "status": "READY",
-                                "reason": reason,
-                            }
-                        )
             elif not missing and not nodata:
                 gates.append(
                     {

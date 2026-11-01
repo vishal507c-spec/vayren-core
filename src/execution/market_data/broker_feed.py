@@ -100,6 +100,7 @@ def _normalize_venue_stamp(raw: Any) -> str | None:
 
     return None
 
+
 # One open bucket: its start stamp and the kernel's OHLCV fold.
 _Open = tuple[str, Bucket]
 
