@@ -66,7 +66,9 @@ def test_screenshot_scenario_operator_confirmed_true_account_unconfirmed(
         patch.object(
             service,
             "_universe_quotes",
-            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+            return_value=[
+                {"symbol": "NSE:KAYNES", "status": "AVAILABLE", "price_source": "live_feed"}
+            ],
         ),
     ):
         ok, blockers = service.start(confirmed=True)
@@ -112,10 +114,16 @@ def test_operator_confirmed_true_and_account_confirmed(service: LiveTradingServi
         patch.object(
             service,
             "_universe_quotes",
-            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+            return_value=[
+                {"symbol": "NSE:KAYNES", "status": "AVAILABLE", "price_source": "live_feed"}
+            ],
         ),
         patch.object(service, "_live_available_funds", return_value=500000.0),
         patch.object(service, "_build_sessions"),
+        patch(
+            "broker.providers.fyers.live_market_data.is_nse_market_open",
+            return_value=True,
+        ),
     ):
         assert service.is_account_confirmed()
         ok, blockers = service.start(confirmed=True)
@@ -151,7 +159,9 @@ def test_operator_unconfirmed_and_account_unconfirmed(service: LiveTradingServic
         patch.object(
             service,
             "_universe_quotes",
-            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+            return_value=[
+                {"symbol": "NSE:KAYNES", "status": "AVAILABLE", "price_source": "live_feed"}
+            ],
         ),
     ):
         assert not service.is_account_confirmed()
@@ -278,7 +288,9 @@ def test_capital_unavailable_blocks_live_start(service: LiveTradingService) -> N
         patch.object(
             service,
             "_universe_quotes",
-            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+            return_value=[
+                {"symbol": "NSE:KAYNES", "status": "AVAILABLE", "price_source": "live_feed"}
+            ],
         ),
         patch.object(service, "_live_available_funds", return_value=None),
     ):
@@ -313,7 +325,9 @@ def test_zero_broker_capital_reports_insufficient_capital_blocker(
         patch.object(
             service,
             "_universe_quotes",
-            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+            return_value=[
+                {"symbol": "NSE:KAYNES", "status": "AVAILABLE", "price_source": "live_feed"}
+            ],
         ),
     ):
         assert service._live_available_funds(broker_view) == 0.0
