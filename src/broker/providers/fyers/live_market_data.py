@@ -30,11 +30,22 @@ _SESSION_END_MINUTE = 15 * 60 + 30  # 15:30 IST
 
 
 def is_nse_market_open(epoch: float | None = None) -> bool:
-    """True if epoch (default now) is within regular NSE hours (Mon-Fri 09:15-15:30 IST)."""
+    """True if epoch (default now) is within regular NSE hours.
+
+    Mon-Fri 09:15-15:30 IST, excluding exchange holidays.
+    """
     t = epoch if epoch is not None else time.time()
     dt = datetime.fromtimestamp(t, _VENUE_TZ)
     if dt.weekday() >= 5:  # Saturday or Sunday
         return False
+    date_str = dt.strftime("%Y-%m-%d")
+    try:
+        from data.settings import NSE_HOLIDAYS
+
+        if date_str in NSE_HOLIDAYS:
+            return False
+    except Exception:
+        pass
     minute_of_day = dt.hour * 60 + dt.minute
     return _SESSION_START_MINUTE <= minute_of_day < _SESSION_END_MINUTE
 

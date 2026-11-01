@@ -1493,6 +1493,13 @@ class LiveTradingService:
                 md_check = str(checks.get("market_data", "") or "")
                 if md_check.startswith("FAILED"):
                     blockers.append(f"{name} market data streaming failed: {md_check}")
+        from broker.providers.fyers.live_market_data import is_nse_market_open
+
+        if not is_nse_market_open():
+            blockers.append(
+                "market data streaming is not ready: Market Closed (15:30 IST) "
+                "— exchange session closed"
+            )
         venue_id = self._resolve_live_venue_id(name)
         if venue_id is None:
             blockers.append(
@@ -1837,22 +1844,20 @@ class LiveTradingService:
 
     def stop(self, reason: str = "operator stop") -> None:
         """Halt immediately: no new signals; open orders stay tracked."""
-        if self._status in ("STOPPED", "HALTED") and not self._sessions:
-            # Marks can exist without a session (e.g. a pushed quote or a
-            # previous run); an explicit STOP must still retire them so a dead
-            # run cannot keep quoting.
-            self._clear_marks()
-            self._feed_kind = "none"
-            return
-        self._status = "STOPPING"
+        had_sessions = bool(self._sessions)
+        self._status = "STOPPING" if had_sessions else self._status
         self._timer.stop()
         self._worker_started = False
-        for session in self._sessions.values():
-            with contextlib.suppress(Exception):
-                session.disarm(f"stop: {reason}")
-            with contextlib.suppress(Exception):
-                session.stop()
-        self._teardown_sessions()
+        if had_sessions:
+            for session in list(self._sessions.values()):
+                with contextlib.suppress(Exception):
+                    session.disarm(f"stop: {reason}")
+                with contextlib.suppress(Exception):
+                    session.stop()
+            self._teardown_sessions()
+        else:
+            self._clear_marks()
+            self._feed_kind = "none"
         self._drain_activity()
         halted = "halt" in str(reason).lower()
         self._status = "HALTED" if halted else "STOPPED"
@@ -3696,9 +3701,26 @@ class LiveTradingService:
                             "reason": f"{store_reason}; {fail_reason}",
                         }
                     )
-                elif live_feed != "live" or missing or nodata or live_available < len(quotes):
-                    # Stored candles are NOT tick delivery: every symbol needs
-                    # its own FRESH live mark before this row may go green.
+                from broker.providers.fyers.live_market_data import is_nse_market_open
+
+                market_open = is_nse_market_open()
+                is_running = session_word == "RUNNING"
+                if (
+                    live_feed == "live"
+                    and not missing
+                    and not nodata
+                    and live_available >= len(quotes)
+                ):
+                    # Active verified live feed streaming fresh ticks for every symbol
+                    gates.append(
+                        {
+                            "name": "Market Data Streaming",
+                            "status": "READY",
+                            "reason": reason,
+                        }
+                    )
+                elif live_feed == "live":
+                    # Socket is connected but symbol marks are missing or not live ticks
                     gates.append(
                         {
                             "name": "Market Data Streaming",
@@ -3706,11 +3728,52 @@ class LiveTradingService:
                             "reason": reason,
                         }
                     )
+                elif not market_open:
+                    # Outside market hours with no live feed
+                    gates.append(
+                        {
+                            "name": "Market Data Streaming",
+                            "status": "NOT READY",
+                            "reason": (
+                                f"{store_reason}; no live feed (Market Closed 15:30 IST, "
+                                f"session {session_word})"
+                            ),
+                        }
+                    )
+                elif not is_running:
+                    # Pre-start readiness during regular market hours
+                    if missing or nodata:
+                        gates.append(
+                            {
+                                "name": "Market Data Streaming",
+                                "status": "NOT READY",
+                                "reason": f"{store_reason}; symbols missing historical store data",
+                            }
+                        )
+                    elif not view.get("connected"):
+                        gates.append(
+                            {
+                                "name": "Market Data Streaming",
+                                "status": "NOT READY",
+                                "reason": f"{store_reason}; broker not connected for streaming",
+                            }
+                        )
+                    else:
+                        gates.append(
+                            {
+                                "name": "Market Data Streaming",
+                                "status": "READY",
+                                "reason": (
+                                    f"{store_reason}; feed ready to stream "
+                                    f"(market open, session {session_word})"
+                                ),
+                            }
+                        )
                 else:
                     gates.append(
                         {
                             "name": "Market Data Streaming",
-                            "status": "READY",
+                            "status": "NOT READY",
                             "reason": reason,
                         }
                     )

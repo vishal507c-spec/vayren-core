@@ -301,6 +301,7 @@ def test_live_action_requires_explicit_consent(tmp_path: Path):
         with (
             patch("execution.modes.gates_from_env") as gates,
             patch.object(LiveTradingService, "_build_sessions", return_value=None),
+            patch("broker.providers.fyers.live_market_data.is_nse_market_open", return_value=True),
         ):
             gates.return_value.missing.return_value = ()
             ok_conf, reasons_conf = service.start(confirmed=True)

@@ -843,6 +843,30 @@ pub const VENUE_GATES: [&str; 5] = [
     "EXECUTION_SAFETY_ENABLED",
 ];
 
+pub fn is_venue_gate_name(name: &str, canonical: &str) -> bool {
+    if name.eq_ignore_ascii_case(canonical) {
+        return true;
+    }
+    match canonical {
+        "BROKER_ADAPTER_READY" => {
+            name.eq_ignore_ascii_case("Broker Connected") || name.eq_ignore_ascii_case("BROKER")
+        }
+        "CREDENTIALS_READY" => {
+            name.eq_ignore_ascii_case("Credentials Valid")
+                || name.eq_ignore_ascii_case("CREDENTIALS")
+        }
+        "ACCOUNT_CONFIRMED" => name.eq_ignore_ascii_case("Account Confirmed"),
+        "RISK_CONFIGURATION_VALID" => {
+            name.eq_ignore_ascii_case("Risk Engine Ready") || name.eq_ignore_ascii_case("RISK")
+        }
+        "EXECUTION_SAFETY_ENABLED" => {
+            name.eq_ignore_ascii_case("Execution Safety Enabled")
+                || name.eq_ignore_ascii_case("EXECUTION")
+        }
+        _ => false,
+    }
+}
+
 /// Fixed LIVE event filter buckets (the backend tags every activity entry
 /// with exactly one; the UI renders one chip per bucket, never per-row
 /// inventions).
@@ -1052,16 +1076,26 @@ impl LiveState {
     /// explicit operator consent / account confirmation remains blocking, venue gates are also satisfied.
     pub fn venue_gates_ready(&self) -> bool {
         let market_data_unready = self.gates.iter().any(|g| {
-            (g.name == "Market Data Streaming" || g.name == "MARKET DATA")
+            (g.name.eq_ignore_ascii_case("Market Data Streaming")
+                || g.name.eq_ignore_ascii_case("MARKET DATA"))
                 && g.status != GateStatus::Ready
         });
         if market_data_unready {
             return false;
         }
-        let has_all_gates = VENUE_GATES.iter().all(|name| {
+        let broker_unready = self.gates.iter().any(|g| {
+            (g.name.eq_ignore_ascii_case("Broker Connected")
+                || g.name.eq_ignore_ascii_case("BROKER_ADAPTER_READY")
+                || g.name.eq_ignore_ascii_case("BROKER"))
+                && g.status != GateStatus::Ready
+        });
+        if broker_unready {
+            return false;
+        }
+        let has_all_gates = VENUE_GATES.iter().all(|canonical| {
             self.gates
                 .iter()
-                .any(|g| g.name == *name && g.status == GateStatus::Ready)
+                .any(|g| is_venue_gate_name(&g.name, canonical) && g.status == GateStatus::Ready)
         });
         if has_all_gates {
             return true;
@@ -1073,6 +1107,36 @@ impl LiveState {
             }
         }
         false
+    }
+
+    /// Extract all active unready gate reasons for truthful operator reporting.
+    pub fn venue_unready_blockers(&self) -> Vec<String> {
+        let mut list = Vec::new();
+        if let Some(blockers) = &self.backend_start_blockers {
+            for b in blockers {
+                if !Self::is_confirmation_blocker(b) && !list.contains(b) {
+                    list.push(b.clone());
+                }
+            }
+        }
+        for gate in &self.gates {
+            if gate.name.eq_ignore_ascii_case("Operator Confirmation")
+                || gate.name.eq_ignore_ascii_case("ACCOUNT_CONFIRMED")
+            {
+                continue;
+            }
+            if gate.status != GateStatus::Ready {
+                let desc = if !gate.reason.is_empty() {
+                    format!("{}: {}", gate.name, gate.reason)
+                } else {
+                    format!("{}: NOT READY", gate.name)
+                };
+                if !list.iter().any(|b| b.contains(&gate.name)) {
+                    list.push(desc);
+                }
+            }
+        }
+        list
     }
 
     /// Capital sufficiency check: in LIVE mode, broker capital must be explicitly
@@ -1193,7 +1257,16 @@ impl LiveState {
                 blockers.push(msg);
             }
             if !self.venue_gates_ready() {
-                blockers.push("live gates not satisfied (see LIVE READINESS)".into());
+                let unready = self.venue_unready_blockers();
+                if unready.is_empty() {
+                    blockers.push("live gates not satisfied (see LIVE READINESS)".into());
+                } else {
+                    for u in unready {
+                        if !blockers.contains(&u) {
+                            blockers.push(u);
+                        }
+                    }
+                }
             }
             if !self.live_confirmed {
                 blockers.push("live confirmation required (explicit operator consent)".into());
@@ -1519,7 +1592,23 @@ impl LiveState {
         // Mandatory LIVE confirmation gate: never auto-confirm LIVE on start
         if self.mode == ExecMode::Live && !self.live_confirmed {
             if !self.venue_gates_ready() {
-                self.action_note = Some("live gates not satisfied (see LIVE READINESS)".into());
+                let unready = self.venue_unready_blockers();
+                let note = if unready.is_empty() {
+                    "START BLOCKED: live safety gates not satisfied (see LIVE READINESS)".into()
+                } else if unready.len() == 1 {
+                    format!("START BLOCKED: {}", unready[0])
+                } else {
+                    format!(
+                        "START BLOCKED: {}",
+                        unready
+                            .iter()
+                            .enumerate()
+                            .map(|(i, b)| format!("[{}] {}", i + 1, b))
+                            .collect::<Vec<_>>()
+                            .join(" · ")
+                    )
+                };
+                self.action_note = Some(note);
                 return;
             }
             self.confirm_dialog_open = true;
@@ -1529,11 +1618,23 @@ impl LiveState {
         }
         // Start safety check: consult can_start() and backend blockers
         if !self.can_start() {
-            if let Some(reason) = self.start_blockers().first() {
-                self.action_note = Some(reason.clone());
+            let blockers = self.start_blockers();
+            let note = if blockers.is_empty() {
+                "START BLOCKED: preconditions not met".into()
+            } else if blockers.len() == 1 {
+                format!("START BLOCKED: {}", blockers[0])
             } else {
-                self.action_note = Some("START blocked: preconditions not met".into());
-            }
+                format!(
+                    "START BLOCKED: {}",
+                    blockers
+                        .iter()
+                        .enumerate()
+                        .map(|(i, b)| format!("[{}] {}", i + 1, b))
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                )
+            };
+            self.action_note = Some(note);
             return;
         }
         if self.host_mode {
@@ -4002,7 +4103,7 @@ pub fn project(state: &LiveState) -> LiveView {
         Some(true) => {
             let s = state.broker.status.to_uppercase();
             let r = state.broker.reason.to_lowercase();
-            let disconnected_status = s == "DISCONNECTED" || s == "ERROR" || s.contains("FAIL");
+            let disconnected_status = s == "DISCONNECTED" || s == "ERROR" || s.contains("FAIL") || s == "DEGRADED";
             let failure_reason = r.contains("timeout")
                 || r.contains("timed out")
                 || r.contains("unreachable")
@@ -4014,6 +4115,8 @@ pub fn project(state: &LiveState) -> LiveView {
     };
     let broker_tone = if is_really_connected {
         1
+    } else if state.broker.status.trim().to_uppercase() == "DEGRADED" {
+        2
     } else if broker_name == "NOT CONFIGURED" || broker_name == "N/A" {
         0
     } else {
@@ -4043,6 +4146,13 @@ pub fn project(state: &LiveState) -> LiveView {
                 (format!("○ Disconnected ({})", r), 3)
             } else {
                 ("○ Disconnected".into(), 3)
+            }
+        } else if state.broker.status.trim().to_uppercase() == "DEGRADED" {
+            let r = state.broker.reason.trim();
+            if !r.is_empty() {
+                (format!("○ Degraded ({})", r), 2)
+            } else {
+                ("○ Degraded (Check SYSTEM → BROKERS)".into(), 2)
             }
         } else if !r.is_empty() && broker_name != "NOT CONFIGURED" && broker_name != "N/A" {
             (format!("○ Disconnected ({})", r), 3)
@@ -4084,6 +4194,7 @@ pub fn project(state: &LiveState) -> LiveView {
     let note_tone = match state.action_note.as_deref() {
         Some(n) if n.starts_with("start requested") || n.starts_with("stop requested") => 4,
         Some(n) if n.starts_with("EXECUTION HALTED") => 3,
+        Some(n) if n.starts_with("START BLOCKED") || n.starts_with("live gates not satisfied") => 3,
         Some(n) if n.is_empty() => 0,
         Some(_) => 2,
         None => 0,
@@ -7798,7 +7909,7 @@ mod tests {
         assert!(st.take_action().is_none());
         assert_eq!(
             st.action_note.as_deref(),
-            Some("live gates not satisfied (see LIVE READINESS)")
+            Some("START BLOCKED: [1] BROKER_ADAPTER_READY: not configured · [2] CREDENTIALS_READY: not configured")
         );
 
         // 2. Explicit modal dialog lifecycle

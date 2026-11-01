@@ -113,6 +113,10 @@ def test_confirmed_start_satisfies_consent(dirs: tuple[str, str]) -> None:
         p3,
         patch("strategy.registry.get_strategy_registry") as reg,
         patch("app.services.live_trading_service.load_strategy_record") as load,
+        patch(
+            "broker.providers.fyers.live_market_data.is_nse_market_open",
+            return_value=True,
+        ),
     ):
         reg.return_value.contains.return_value = False
         load.return_value = SimpleNamespace(
@@ -127,6 +131,7 @@ def test_confirmed_start_satisfies_consent(dirs: tuple[str, str]) -> None:
         with (
             patch("execution.modes.gates_from_env") as gates,
             patch.object(LiveTradingService, "_build_sessions", return_value=None),
+            patch("broker.providers.fyers.live_market_data.is_nse_market_open", return_value=True),
         ):
             gates.return_value.missing.return_value = ()
             ok, reasons = service.start(confirmed=True)
@@ -152,6 +157,10 @@ def test_unconfirmed_start_lists_consent_exactly_once(
         p3,
         patch("strategy.registry.get_strategy_registry") as reg,
         patch("app.services.live_trading_service.load_strategy_record") as load,
+        patch(
+            "broker.providers.fyers.live_market_data.is_nse_market_open",
+            return_value=True,
+        ),
     ):
         reg.return_value.contains.return_value = False
         load.return_value = SimpleNamespace(

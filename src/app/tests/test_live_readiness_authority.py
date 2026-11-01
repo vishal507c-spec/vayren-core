@@ -179,6 +179,13 @@ class _Registry:
         raise KeyError(name)
 
 
+@pytest.fixture(autouse=True)
+def _mock_market_open_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    import broker.providers.fyers.live_market_data as lmd_mod
+
+    monkeypatch.setattr(lmd_mod, "is_nse_market_open", lambda: True)
+
+
 @pytest.fixture()
 def service(tmp_path) -> LiveTradingService:
     data_dir = tmp_path / "data"

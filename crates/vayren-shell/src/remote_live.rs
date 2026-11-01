@@ -898,6 +898,7 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             status: match status.as_str() {
                 "CONNECTED" => GateStatus::Ready,
                 "DISCONNECTED" => GateStatus::Blocked,
+                "DEGRADED" => GateStatus::Warning,
                 _ => GateStatus::Unknown,
             },
             reason: text_at(sections, "order_stream", "detail"),

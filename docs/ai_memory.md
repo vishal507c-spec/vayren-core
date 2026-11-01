@@ -7,7 +7,38 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (instant-single-click-start-stop-optimization-20261101):** INSTANT SINGLE-CLICK START / STOP OPTIMIZATION ACROSS FULL STACK (SLINT UI → RUST SHELL → REMOTE GATEWAY → HEADLESS PYTHON BACKEND) —
+**Latest update (live-start-blocker-root-cause-20261101):** LIVE START BLOCKER ROOT CAUSE INVESTIGATION & PERMANENT FIX ACROSS RUST DOMAIN, SLINT UI & PYTHON BACKEND —
+- **Primary Root Causes Diagnosed & Categorized:**
+  1. *Genuine Safety Blocker (Market Closed):* Screen was captured on Sunday (01 Nov 2026, 14:12 IST). NSE exchange session is closed (`is_nse_market_open() == False`). Neither live orders nor real-time ticks can stream outside trading hours.
+  2. *Genuine Safety Blocker (Broker Degraded):* FYERS server closed idle weekend WebSocket connections (`WSAECONNRESET 10054: wsasend: An existing connection was forcibly closed by the remote host`). Leg failure degraded the broker session.
+  3. *Genuine Safety Blocker (Live Arming Required):* LIVE mode explicitly requires operator confirmation before armed order execution.
+  4. *Software Defect 1 (Pre-Start Circular Dependency on Market Data Streaming):* In `src/app/services/live_trading_service.py:_readiness_gates`, line 3699 required `live_feed == "live"` and `live_available >= len(quotes)` for `Market Data Streaming` to be READY. But while the engine is `STOPPED`, `feed` is `"none"` and symbol sessions are not subscribed until START! Thus `Market Data Streaming` was *always* `NOT READY` when stopped, creating a circular dependency that prevented starting even during open market hours. Fixed to evaluate pre-start readiness based on candle store coverage, broker connectivity, and market calendar (`feed ready to stream (market open, session STOPPED)`).
+  5. *Software Defect 2 (Rust vs Python Gate Schema Name Mismatch):* `crates/vayren-domain/src/live.rs:VENUE_GATES` checked screaming snake case names (`BROKER_ADAPTER_READY`, `CREDENTIALS_READY`), whereas Python backend `_readiness_gates` emitted title case names (`Broker Connected`, `Credentials Valid`). Consequently, `has_all_gates` in `venue_gates_ready()` evaluated to `false` every single time regardless of actual readiness. Fixed by introducing `is_venue_gate_name` helper accepting both schemas.
+  6. *Software Defect 3 (Vague Error Banner & Concealed Gate Failure Reasons):* `crates/vayren-domain/src/live.rs:start()` hardcoded `self.action_note = Some("live gates not satisfied (see LIVE READINESS)".into())` whenever `!self.venue_gates_ready()`. It never extracted or formatted the actual gate failure reasons. Fixed by adding `venue_unready_blockers(&self) -> Vec<String>` and formatting exact blocker reasons into `START BLOCKED: [1] <gate>: <reason> · [2] ...` with error tone 3.
+  7. *Software Defect 4 (Top Header Card Honest Degraded State):* In `live.rs:project()`, when `state.broker.status == "DEGRADED"`, `is_really_connected` was returning `true`, painting the top card `● Connected` (green, tone 1) while the bottom status bar showed `BROKER: Fyers (DEGRADED)`. Fixed so top card honestly renders `○ Degraded (<reason>)` with tone 2 (amber).
+- **Files Modified:**
+  - `src/broker/providers/fyers/live_market_data.py`: Added `NSE_HOLIDAYS` check to `is_nse_market_open()`; formatted docstring.
+  - `src/app/services/live_trading_service.py`: Added market open check to `_live_blockers()`; fixed pre-start circular dependency in `_readiness_gates()`.
+  - `crates/vayren-shell/src/remote_live.rs`: Mapped broker `"DEGRADED"` status to `GateStatus::Warning`.
+  - `crates/vayren-domain/src/live.rs`: Added `is_venue_gate_name`, `venue_unready_blockers()`, detailed START blocked notes, honest top card Degraded rendering.
+  - `src/app/tests/test_live_start_blocker_root_cause.py`: New regression suite covering all 10 Phase 5 requirements (10/10 PASSED).
+  - `src/app/tests/test_live_readiness_authority.py`: Isolated market hours in unit tests with autouse fixture.
+  - `src/app/tests/test_live_actions.py` & `src/app/tests/test_broker_status_transitions.py`: Isolated market hours in consent unit tests.
+- **Verification & Test Results:**
+  - `pytest src/app/tests/test_live_start_blocker_root_cause.py`: 10/10 PASSED.
+  - `pytest src/app/tests/test_safety_reporting.py`: 8/8 PASSED.
+  - `pytest src/app/tests/test_live_start_stop_optimization.py`: 7/7 PASSED.
+  - `pytest src/app/tests/test_live_readiness_authority.py`: 14/14 PASSED.
+  - `pytest src/app/tests/test_live_actions.py`: 12/12 PASSED.
+  - `pytest src/app/tests/test_broker_status_transitions.py`: 7/7 PASSED.
+  - `cargo test -p vayren-domain`: 320/320 PASSED.
+  - `cargo test --test start_stop_optimization`: 11/11 PASSED.
+  - `cargo check -p vayren-shell`: PASSED (0 errors).
+  - `python tools/validate_language_ownership.py`: PASSED (433 files checked).
+  - `ruff check`: All checks passed.
+  - Verification run time: sub-second inner loop (<2s), full suites ~8.5s.
+
+**Previous update (instant-single-click-start-stop-optimization-20261101):** INSTANT SINGLE-CLICK START / STOP OPTIMIZATION ACROSS FULL STACK (SLINT UI → RUST SHELL → REMOTE GATEWAY → HEADLESS PYTHON BACKEND) —
 - **Latency Optimization & Bottlenecks Eliminated:**
   1. *Eliminated 30,000ms WebSocket Pump Block:* `spawn_remote_pump` previously called `client.next(PUMP_IDLE_TIMEOUT)` with a 30-second socket timeout. Outbound commands queued by UI actions were blocked behind the kernel socket read for up to 30s when idle. Replaced with `PUMP_POLL_SLICE = 20ms` and a 30s activity heartbeat timer, ensuring UI commands are picked up within 20ms.
   2. *Eliminated 50ms UI Timer Dispatch Delay:* Live state actions were previously deferred to a 50ms periodic `fetch_timer`. Introduced `wire_live_with_dispatcher` in `crates/vayren-shell/src/shell.rs` and wired `dispatch_pending_actions` synchronously on the Slint click event (`on_start`, `on_stop`). Commands are pushed into the outbound channel synchronously (<1ms) on the click itself.
