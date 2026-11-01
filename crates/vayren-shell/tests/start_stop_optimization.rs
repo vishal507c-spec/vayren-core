@@ -16,11 +16,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 use vayren_domain::live::{
-    ExecMode, Gate, GateStatus, LiveState, SessionStatus, SymbolPick, project,
+    project, ExecMode, Gate, GateStatus, LiveState, SessionStatus, SymbolPick,
 };
-use vayren_shell::remote_live::{
-    RemoteCommand, apply_remote_sections, dispatch_pending_actions,
-};
+use vayren_shell::remote_live::{apply_remote_sections, dispatch_pending_actions, RemoteCommand};
 
 fn setup_ready_state() -> LiveState {
     let mut state = LiveState::default();
@@ -206,13 +204,11 @@ fn test_5_and_6_backend_timeout_and_disconnection() {
     assert_eq!(state.pending_action, None);
     // Never fakes Stopped or Running on timeout: marks ERROR
     assert_eq!(state.session, SessionStatus::Error);
-    assert!(
-        state
-            .action_note
-            .as_deref()
-            .unwrap_or("")
-            .contains("timed out")
-    );
+    assert!(state
+        .action_note
+        .as_deref()
+        .unwrap_or("")
+        .contains("timed out"));
 }
 
 #[test]
@@ -353,7 +349,9 @@ fn test_12_instant_synchronous_action_dispatch() {
 
     dispatch_pending_actions(&mut state.borrow_mut(), &tx);
 
-    let cmd = rx.try_recv().expect("Command must be dispatched immediately");
+    let cmd = rx
+        .try_recv()
+        .expect("Command must be dispatched immediately");
     assert_eq!(cmd.action, "start");
     assert!(rx.try_recv().is_err(), "Only 1 command should be queued");
 }
