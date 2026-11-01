@@ -2000,7 +2000,7 @@ export component LiveScreen inherits Rectangle {
                                                 height: 24px;
                                                 label: "SAVE UNIVERSE";
                                                 variant: 2;
-                                                enabled: root.strategy-selected > 0 && root.setup-editable;
+                                                enabled: root.strategy-selected > 0 && !root.setup.can-stop;
                                                 clicked => { root.universe-save(); }
                                             }
                                         }

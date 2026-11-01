@@ -1838,6 +1838,11 @@ class LiveTradingService:
     def stop(self, reason: str = "operator stop") -> None:
         """Halt immediately: no new signals; open orders stay tracked."""
         if self._status in ("STOPPED", "HALTED") and not self._sessions:
+            # Marks can exist without a session (e.g. a pushed quote or a
+            # previous run); an explicit STOP must still retire them so a dead
+            # run cannot keep quoting.
+            self._clear_marks()
+            self._feed_kind = "none"
             return
         self._status = "STOPPING"
         self._timer.stop()
