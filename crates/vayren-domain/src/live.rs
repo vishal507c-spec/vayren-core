@@ -24,7 +24,7 @@
 /// How long a dispatched control action may stay pending before the model
 /// clears it. Generous enough for a broker round-trip, short enough that a
 /// dropped answer does not leave the operator staring at `STARTING…`.
-pub const PENDING_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+pub const PENDING_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
 
 /// Note shown when a control is pressed with no execution backend attached.
 /// Named once so the UI, the arm panel and the tests agree on the wording.
@@ -1680,7 +1680,7 @@ impl LiveState {
             if self.session == SessionStatus::Starting {
                 self.session = SessionStatus::Error;
                 self.action_note = Some(
-                    "START timed out — backend did not answer (check connection / gateway)".into(),
+                    "START timed out after 25s — backend did not answer (check connection / gateway)".into(),
                 );
             } else if self.session == SessionStatus::Stopping {
                 self.session = SessionStatus::Error;
@@ -1813,10 +1813,16 @@ impl LiveState {
                     .get("status_reason")
                     .and_then(|r| r.as_str())
                     .unwrap_or("");
+                let is_start_refusal = status_reason.starts_with("START blocked")
+                    || status_reason.starts_with("start blocked")
+                    || v.get("start_blockers")
+                        .and_then(|b| b.as_array())
+                        .map(|a| !a.is_empty())
+                        .unwrap_or(false);
                 let update_session = match (self.pending_action.as_deref(), ns) {
-                    (Some("start"), SessionStatus::Stopped) => !status_reason.is_empty(),
-                    (Some("stop"), SessionStatus::Running) => false,
-                    (Some("halt"), SessionStatus::Running) => false,
+                    (Some("start"), SessionStatus::Stopped) => is_start_refusal,
+                    (Some("stop"), SessionStatus::Running | SessionStatus::Starting) => false,
+                    (Some("halt"), SessionStatus::Running | SessionStatus::Starting) => false,
                     _ => true,
                 };
                 if update_session {
@@ -1826,7 +1832,7 @@ impl LiveState {
                         SessionStatus::Running | SessionStatus::Halted | SessionStatus::Error
                     ) || (ns == SessionStatus::Stopped
                         && (self.pending_action.as_deref() != Some("start")
-                            || !status_reason.is_empty()))
+                            || is_start_refusal))
                     {
                         self.pending_action = None;
                         self.pending_since = None;

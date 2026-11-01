@@ -1701,6 +1701,9 @@ class LiveTradingService:
             )
             self.state_changed.emit()
             return False, blockers
+        self._status = "STARTING"
+        self._status_reason = "initializing live engine and sessions"
+        self.state_changed.emit()
         if was_pending:
             # Durable in-progress marker: if the gateway dies while sessions
             # are being rebuilt, the next restore still sees a pending
@@ -2530,26 +2533,36 @@ class LiveTradingService:
 
                     venue_rec = default_registry().get(self._live_venue_id)
                     trading_face = venue_rec.plugin.face(Domain.TRADING)
-            for symbol in self._config.symbols:
-                session_bars: tuple[Bar, ...] = ()
-                if mode == ExecutionMode.LIVE and trading_face is not None:
-                    from app.services.session_recovery import (
-                        HistoricalRecoveryError,
-                        fetch_and_validate_session_candles,
-                    )
+            session_bars_by_symbol: dict[str, tuple[Bar, ...]] = {}
+            if mode == ExecutionMode.LIVE and trading_face is not None:
+                from concurrent.futures import ThreadPoolExecutor
 
-                    try:
-                        session_bars, _ = fetch_and_validate_session_candles(
-                            trading_face,
-                            symbol,
-                            self._config.timeframe,
-                            data_dir=self._data_dir,
-                            fail_fast=True,
-                        )
-                    except HistoricalRecoveryError as exc:
-                        raise LiveConfigError(
-                            f"historical session recovery failed for {symbol}: {exc}"
-                        ) from exc
+                from app.services.session_recovery import (
+                    HistoricalRecoveryError,
+                    fetch_and_validate_session_candles,
+                )
+
+                def _fetch_sym(sym: str) -> tuple[str, tuple[Bar, ...]]:
+                    bars, _ = fetch_and_validate_session_candles(
+                        trading_face,
+                        sym,
+                        self._config.timeframe,
+                        data_dir=self._data_dir,
+                        fail_fast=True,
+                    )
+                    return sym, bars
+
+                syms_list = list(self._config.symbols)
+                max_w = min(8, len(syms_list)) if syms_list else 1
+                try:
+                    with ThreadPoolExecutor(max_workers=max_w) as pool:
+                        for sym, bars in pool.map(_fetch_sym, syms_list):
+                            session_bars_by_symbol[sym] = bars
+                except HistoricalRecoveryError as exc:
+                    raise LiveConfigError(str(exc)) from exc
+
+            for symbol in self._config.symbols:
+                session_bars: tuple[Bar, ...] = session_bars_by_symbol.get(symbol, ())
                 history = self._load_history(symbol, self._config.timeframe)
                 if not history and has_local_store and not session_bars:
                     raise LiveConfigError(f"no market data for {symbol}")

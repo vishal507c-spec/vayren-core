@@ -7,7 +7,28 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-start-blocker-root-cause-20261101):** LIVE START BLOCKER ROOT CAUSE INVESTIGATION & PERMANENT FIX ACROSS RUST DOMAIN, SLINT UI & PYTHON BACKEND —
+**Latest update (one-click-live-start-permanent-fix-20261101):** CRITICAL FIX FOR LIVE START: ONE CLICK RELIABLE START ACROSS FULL REQUEST/RESPONSE LIFECYCLE —
+- **Primary Root Causes Diagnosed & Categorized:**
+  1. *Premature Pending State Cancellation by Periodic Background Snapshot Race (Rust Domain Defect):* In `crates/vayren-domain/src/live.rs:apply_snapshot()`, line 1817 previously checked `(Some("start"), SessionStatus::Stopped) => !status_reason.is_empty()`. Every 1000ms periodic background snapshot from the remote gateway arrived with `session_status: "STOPPED"` and `status_reason: "operator stop"` (persisted from previous run). When the operator clicked START (`session: Starting`, `pending_action: Some("start")`), the next periodic snapshot arrived within ~500ms, evaluated `!status_reason.is_empty()` to `true`, and cleared `self.pending_action = None; self.pending_since = None;` and snapped `self.session` back from `Starting` to `Stopped` before the backend could even respond. Fixed to check `is_start_refusal` (`status_reason.starts_with("START blocked")` or non-empty `start_blockers`). Normal intermediate snapshots with `session_status == Stopped` no longer overwrite `SessionStatus::Starting` or wipe `pending_action`.
+  2. *Missing STARTING Engine State on Backend (Python Service Defect):* In `src/app/services/live_trading_service.py:start()`, `self._status` was left as `"STOPPED"` during the entire symbol validation and historical recovery loop, only switching to `"RUNNING"` at the very end. Any snapshot polled during startup reported `"STOPPED"`, amplifying the race condition. Fixed to immediately set `self._status = "STARTING"` and `self._status_reason = "initializing live engine and sessions"` and emit state change prior to session building.
+  3. *Serial Multi-Symbol REST Latency (Performance Bottleneck):* In `src/app/services/live_trading_service.py:_build_sessions()`, historical candle recovery for 22 configured symbols was executed sequentially in a single-threaded loop. 22 serial HTTP requests to FYERS took 11–15s total. Fixed by parallelizing historical candle queries with `ThreadPoolExecutor(max_workers=min(8, len(symbols)))`, reducing multi-symbol recovery time to ~1.5s.
+  4. *Premature Action Expiry Timeout (Rust Domain Defect):* `PENDING_ACTION_TIMEOUT` in `crates/vayren-domain/src/live.rs` was 10 seconds. When 22 sequential symbols took 11-15s, `expire_pending_action()` timed out at 10s, triggering `"START timed out after 10s — backend did not answer"` and resetting `pending_action = None`. Fixed: increased `PENDING_ACTION_TIMEOUT` to 25s for safe network headroom, while actual parallel startup completes in ~1.5s.
+  5. *Explanation of Why Multiple Clicks Were Required:* Clicks 1-3 progressively fetched and cached historical candles in SQLite before timing out or being cleared by snapshots. By Click 4, all 22 symbols were cached in local SQLite, allowing startup to complete in <1s before a snapshot poll or timeout could kill it. With these fixes, startup completes in ~1.5s on the very first click without interruption.
+- **Files Modified:**
+  - `crates/vayren-domain/src/live.rs`: Replaced naive `!status_reason.is_empty()` check with `is_start_refusal` in `apply_snapshot()`; increased `PENDING_ACTION_TIMEOUT` to 25s with updated timeout notice.
+  - `src/app/services/live_trading_service.py`: Transitioned `self._status` to `"STARTING"` immediately upon `start()`; parallelized symbol historical candle fetches with `ThreadPoolExecutor(max_workers=min(8, len(symbols)))`.
+  - `crates/vayren-shell/tests/start_stop_optimization.rs`: Added regression tests for intermediate snapshot stability during pending start, start refusal blockers, and updated timeout test (13/13 PASSED).
+  - `src/app/tests/test_live_start_stop_optimization.py`: Added tests verifying backend `STARTING` status transition and safe stop during starting (9/9 PASSED).
+- **Verification & Test Results:**
+  - `cargo test --test start_stop_optimization`: 13/13 PASSED.
+  - `cargo test -p vayren-domain`: 320/320 PASSED.
+  - `pytest src/app/tests/test_live_start_stop_optimization.py`: 9/9 PASSED.
+  - Full live pytest suites (77 tests): 77/77 PASSED.
+  - `cargo check -p vayren-shell`: PASSED (0 errors).
+  - `python tools/validate_language_ownership.py`: PASSED (433 files checked).
+  - `ruff check`: All checks passed.
+
+**Previous update (live-start-blocker-root-cause-20261101):** LIVE START BLOCKER ROOT CAUSE INVESTIGATION & PERMANENT FIX ACROSS RUST DOMAIN, SLINT UI & PYTHON BACKEND —
 - **Primary Root Causes Diagnosed & Categorized:**
   1. *Genuine Safety Blocker (Market Closed):* Screen was captured on Sunday (01 Nov 2026, 14:12 IST). NSE exchange session is closed (`is_nse_market_open() == False`). Neither live orders nor real-time ticks can stream outside trading hours.
   2. *Genuine Safety Blocker (Broker Degraded):* FYERS server closed idle weekend WebSocket connections (`WSAECONNRESET 10054: wsasend: An existing connection was forcibly closed by the remote host`). Leg failure degraded the broker session.

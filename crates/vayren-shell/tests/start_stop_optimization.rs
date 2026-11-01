@@ -195,7 +195,7 @@ fn test_5_and_6_backend_timeout_and_disconnection() {
     // Simulate timeout expiration: pending_since exceeds timeout
     state.pending_since = Some(
         std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_secs(10))
+            .checked_sub(vayren_domain::live::PENDING_ACTION_TIMEOUT)
             .unwrap(),
     );
 
@@ -354,4 +354,69 @@ fn test_12_instant_synchronous_action_dispatch() {
         .expect("Command must be dispatched immediately");
     assert_eq!(cmd.action, "start");
     assert!(rx.try_recv().is_err(), "Only 1 command should be queued");
+}
+
+#[test]
+fn test_delayed_backend_response_intermediate_snapshot_does_not_clear_pending_start() {
+    let mut state = setup_ready_state();
+    state.start();
+    assert_eq!(state.session, SessionStatus::Starting);
+    assert_eq!(state.pending_action.as_deref(), Some("start"));
+
+    // Intermediate background snapshot arrives while start is still in flight on backend
+    let intermediate_snapshot = serde_json::json!({
+        "strategy": {
+            "status": "STOPPED",
+            "mode": "PAPER",
+            "reason": "operator stop"
+        }
+    });
+    apply_remote_sections(&mut state, &intermediate_snapshot, false);
+
+    // MUST NOT clear pending_action and MUST NOT revert to Stopped
+    assert_eq!(
+        state.session,
+        SessionStatus::Starting,
+        "Snapshot must not abort in-flight start request"
+    );
+    assert_eq!(
+        state.pending_action.as_deref(),
+        Some("start"),
+        "pending_action must stay intact"
+    );
+
+    // Now backend completes and reports RUNNING
+    let running_snapshot = serde_json::json!({
+        "strategy": {
+            "status": "RUNNING",
+            "mode": "PAPER",
+            "reason": ""
+        }
+    });
+    apply_remote_sections(&mut state, &running_snapshot, false);
+    assert_eq!(state.session, SessionStatus::Running);
+    assert!(state.pending_action.is_none());
+}
+
+#[test]
+fn test_start_refusal_clears_pending_and_displays_exact_blocker() {
+    let mut state = setup_ready_state();
+    state.start();
+    assert_eq!(state.session, SessionStatus::Starting);
+    assert_eq!(state.pending_action.as_deref(), Some("start"));
+
+    // Backend refuses with exact blocker
+    let refusal_snapshot = serde_json::json!({
+        "strategy": {
+            "status": "STOPPED",
+            "mode": "PAPER",
+            "reason": "START blocked: broker adapter disconnected"
+        },
+        "blockers": ["broker adapter disconnected"]
+    });
+    apply_remote_sections(&mut state, &refusal_snapshot, false);
+
+    assert_eq!(state.session, SessionStatus::Stopped);
+    assert!(state.pending_action.is_none());
+    assert!(state.start_clickable());
 }

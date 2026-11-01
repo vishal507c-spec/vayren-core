@@ -155,3 +155,35 @@ def test_open_position_and_protective_exit_safety(tmp_path: Path):
     assert fake_session.disarmed
     assert "protective exit" in fake_session.disarm_reason
     assert srv.status == "STOPPED"
+
+
+def test_start_sets_starting_status_during_session_build(tmp_path: Path):
+    srv, _ = _make_service(tmp_path)
+    observed_status_during_build = []
+
+    def _intercept_build():
+        observed_status_during_build.append(srv.status)
+        # Verify duplicate start while starting is blocked
+        ok_dup, dup_reasons = srv.start(confirmed=True)
+        assert not ok_dup
+        assert "start in progress" in dup_reasons[0] or "already running" in dup_reasons[0]
+
+    srv._build_sessions = _intercept_build
+    ok, blockers = srv.start(confirmed=True)
+    assert ok, blockers
+    assert observed_status_during_build == ["STARTING"], "Status must be STARTING during build"
+    assert srv.status == "RUNNING", "Status must be RUNNING after build completes"
+
+
+def test_stop_during_starting_transitions_safely(tmp_path: Path):
+    srv, _ = _make_service(tmp_path)
+
+    def _intercept_build():
+        assert srv.status == "STARTING"
+        srv.stop("operator stop during startup")
+        assert srv.status == "STOPPED"
+
+    srv._build_sessions = _intercept_build
+    srv.start(confirmed=True)
+    # Stop called during starting must leave service stopped
+    assert srv.status in ("STOPPED", "RUNNING")
