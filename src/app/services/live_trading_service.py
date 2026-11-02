@@ -1491,15 +1491,8 @@ class LiveTradingService:
             checks = session.get("checks") or {}
             if isinstance(checks, dict):
                 md_check = str(checks.get("market_data", "") or "")
-                if md_check.startswith("FAILED"):
+                if md_check.startswith("FAILED") and "market closed" not in md_check.lower():
                     blockers.append(f"{name} market data streaming failed: {md_check}")
-        from broker.providers.fyers.live_market_data import is_nse_market_open
-
-        if not is_nse_market_open():
-            blockers.append(
-                "market data streaming is not ready: Market Closed (15:30 IST) "
-                "— exchange session closed"
-            )
         venue_id = self._resolve_live_venue_id(name)
         if venue_id is None:
             blockers.append(
@@ -1665,7 +1658,12 @@ class LiveTradingService:
                 # A confirmed start SATISFIES the consent requirement — the
                 # validate() consent line must not block the start.
                 blockers = tuple(
-                    b for b in blockers if "confirmation" not in b and "consent" not in b
+                    b
+                    for b in blockers
+                    if "confirmation" not in b.lower()
+                    and "consent" not in b.lower()
+                    and "arming" not in b.lower()
+                    and "disarmed" not in b.lower()
                 )
             elif not any("confirmation" in b or "consent" in b for b in blockers):
                 blockers = (
@@ -2003,7 +2001,7 @@ class LiveTradingService:
         fill_count = 0
         recon_status = "NOT CONFIGURED"
         recon_blocks = False
-        kill_halted = False
+        kill_halted = bool(self.is_halted())
         lifecycle = "STOPPED"
         strategy_state: dict[str, Any] | None = None
         if self._sessions:
@@ -2230,6 +2228,30 @@ class LiveTradingService:
             if str(o.get("status", "")).upper() in ("REJECTED", "CANCELLED", "EXPIRED", "DENIED")
         )
 
+        from broker.providers.fyers.live_market_data import (
+            get_nse_market_session,
+            is_nse_market_open,
+        )
+
+        market_open = is_nse_market_open()
+        market_session = get_nse_market_session()
+        if market_open and not market_session.get("is_open", False):
+            market_session = {
+                "session": "OPEN",
+                "is_open": True,
+                "description": "Market Open (Regular Trading Session)",
+                "current_time_ist": market_session.get("current_time_ist", ""),
+                "next_session": "15:30 IST (Market Close)",
+            }
+        elif not market_open and market_session.get("is_open", False):
+            market_session = {
+                "session": "CLOSED",
+                "is_open": False,
+                "description": "Market Closed",
+                "current_time_ist": market_session.get("current_time_ist", ""),
+                "next_session": "09:15 IST (Market Open)",
+            }
+
         if isinstance(strategy_state, dict):
             strat_name_str = str(strategy_state.get("id") or "")
             strategy_state["started_at"] = started_str
@@ -2248,10 +2270,21 @@ class LiveTradingService:
             strategy_state["orders_working_count"] = orders_pending
             strategy_state["orders_rejected_count"] = max(orders_rejected, self._signals_blocked)
             strategy_state["logic"] = f"{strat_name_str} (unchanged)"
-
-        from broker.providers.fyers.live_market_data import is_nse_market_open
-
-        market_open = is_nse_market_open()
+            if running:
+                if not market_open:
+                    strategy_state["runtime_status"] = "WAITING_FOR_MARKET"
+                    strategy_state["runtime_label"] = "WAITING FOR MARKET"
+                    strategy_state["status_message"] = (
+                        "Engine running; awaiting market open (09:15 IST)"
+                    )
+                else:
+                    strategy_state["runtime_status"] = "RUNNING"
+                    strategy_state["runtime_label"] = "RUNNING"
+                    strategy_state["status_message"] = "Strategy evaluating live market ticks"
+            else:
+                strategy_state["runtime_status"] = "LOADED"
+                strategy_state["runtime_label"] = "STOPPED"
+                strategy_state["status_message"] = "Strategy loaded and ready"
         is_conn = bool((running and feed == "live") or view.get("connected"))
         fresh_live_quotes = sum(
             1 for q in quotes if isinstance(q, dict) and q.get("price_source") == "live_feed"
@@ -2452,6 +2485,83 @@ class LiveTradingService:
             "orders_filled": orders_filled,
             "orders_rejected": orders_rejected,
         }
+        # 7 Authoritative State Dimensions
+        eng_dim = (
+            "RUNNING"
+            if self._status == "RUNNING"
+            else (
+                "STARTING"
+                if self._status == "STARTING"
+                else (
+                    "STOPPING"
+                    if self._status == "STOPPING"
+                    else ("FAILED" if self._status in ("ERROR", "FAILED") else "STOPPED")
+                )
+            )
+        )
+        mkt_dim = str(market_session.get("session", "CLOSED"))
+        if running and not market_open:
+            md_dim = "IDLE"
+        elif running and fresh_live_quotes:
+            md_dim = "LIVE"
+        elif running and view.get("connected"):
+            md_dim = "CONNECTING"
+        elif view.get("status") == "DEGRADED":
+            md_dim = "STALE"
+        elif view.get("connected"):
+            md_dim = "IDLE"
+        else:
+            md_dim = "DISCONNECTED"
+
+        brk_dim = (
+            "CONNECTED"
+            if view.get("connected")
+            else ("ERROR" if view.get("status") in ("ERROR", "FAILED") else "DISCONNECTED")
+        )
+        if running and not market_open:
+            strat_dim = "WAITING_FOR_MARKET"
+        elif running and market_open:
+            strat_dim = "RUNNING"
+        elif self._status == "STARTING":
+            strat_dim = "INITIALIZING"
+        elif self._status in ("ERROR", "FAILED"):
+            strat_dim = "ERROR"
+        else:
+            strat_dim = "LOADED"
+
+        risk_val = str(self._risk_status or risk_status).upper()
+        if "BLOCKED" in risk_val or "FAIL" in risk_val or "NOT READY" in risk_val:
+            rsk_dim = "BLOCKED"
+        elif risk_val in ("READY", "OK", "PASS"):
+            rsk_dim = "READY"
+        else:
+            rsk_dim = "NOT_VALIDATED"
+
+        if kill_halted:
+            exec_dim = "HALTED"
+        elif self._config.mode == "LIVE" and self.is_live_confirmed():
+            exec_dim = "ARMED"
+        else:
+            exec_dim = "DISARMED"
+
+        snap["engine_state"] = eng_dim
+        snap["market_state"] = mkt_dim
+        snap["market_data_state"] = md_dim
+        snap["broker_state"] = brk_dim
+        snap["strategy_state_dim"] = strat_dim
+        snap["risk_state"] = rsk_dim
+        snap["execution_state"] = exec_dim
+        snap["authoritative_state"] = {
+            "engine": eng_dim,
+            "market": mkt_dim,
+            "market_data": md_dim,
+            "broker": brk_dim,
+            "strategy": strat_dim,
+            "risk": rsk_dim,
+            "execution": exec_dim,
+        }
+        snap["market_session"] = market_session
+
         # Readiness rows always exist (idle included): the checklist renders
         # backend verdicts, never an empty panel.
         snap["gates"] = self._readiness_gates(snap, view, quotes)
@@ -3446,8 +3556,12 @@ class LiveTradingService:
             self._risk_engine.raw_capital = capital.available or 0.0
             self._risk_engine.leverage = LEVERAGE_MULTIPLIER
             self._risk_engine.per_trade_risk_pct = PER_TRADE_RISK_PCT
-            self._risk_status = READY
-            self._risk_reason = READY
+            if capital.available and capital.available > 0.0:
+                self._risk_status = READY
+                self._risk_reason = READY
+            else:
+                self._risk_status = "NOT READY"
+                self._risk_reason = "insufficient broker capital (zero funds reported)"
         else:
             self._risk_engine.raw_capital = 0.0
             self._risk_status = "NOT READY"
@@ -3742,17 +3856,38 @@ class LiveTradingService:
                         }
                     )
                 elif not market_open:
-                    # Outside market hours with no live feed
-                    gates.append(
-                        {
-                            "name": "Market Data Streaming",
-                            "status": "NOT READY",
-                            "reason": (
-                                f"{store_reason}; no live feed (Market Closed 15:30 IST, "
-                                f"session {session_word})"
-                            ),
-                        }
-                    )
+                    # Outside market hours: pipeline is READY if store and broker are ready
+                    if not missing and not nodata and view.get("connected"):
+                        pipe_status = "active" if is_running else "ready"
+                        gates.append(
+                            {
+                                "name": "Market Data Streaming",
+                                "status": "READY",
+                                "reason": (
+                                    f"{store_reason}; pipeline {pipe_status} "
+                                    "(market closed, awaiting 09:15 IST open)"
+                                ),
+                            }
+                        )
+                    elif missing or nodata:
+                        gates.append(
+                            {
+                                "name": "Market Data Streaming",
+                                "status": "NOT READY",
+                                "reason": f"{store_reason}; symbols missing historical store data",
+                            }
+                        )
+                    else:
+                        gates.append(
+                            {
+                                "name": "Market Data Streaming",
+                                "status": "NOT READY",
+                                "reason": (
+                                    f"{store_reason}; no live feed "
+                                    f"(market closed, session {session_word})"
+                                ),
+                            }
+                        )
                 elif not is_running:
                     # Pre-start readiness during regular market hours
                     if missing or nodata:

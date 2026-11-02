@@ -855,7 +855,11 @@ pub fn is_venue_gate_name(name: &str, canonical: &str) -> bool {
             name.eq_ignore_ascii_case("Credentials Valid")
                 || name.eq_ignore_ascii_case("CREDENTIALS")
         }
-        "ACCOUNT_CONFIRMED" => name.eq_ignore_ascii_case("Account Confirmed"),
+        "ACCOUNT_CONFIRMED" => {
+            name.eq_ignore_ascii_case("Account Confirmed")
+                || name.eq_ignore_ascii_case("Operator Confirmation")
+                || name.eq_ignore_ascii_case("Arming")
+        }
         "RISK_CONFIGURATION_VALID" => {
             name.eq_ignore_ascii_case("Risk Engine Ready") || name.eq_ignore_ascii_case("RISK")
         }
@@ -1029,7 +1033,10 @@ impl LiveState {
     /// Check if a blocker string represents the operator confirmation / consent / ACCOUNT_CONFIRMED gate.
     pub fn is_confirmation_blocker(b: &str) -> bool {
         let lower = b.to_lowercase();
-        lower.contains("live confirmation required") || lower.contains("operator consent")
+        lower.contains("live confirmation required")
+            || lower.contains("operator consent")
+            || lower.contains("disarmed")
+            || lower.contains("confirm in start dialog")
     }
 
     /// Deduplicate blockers list while normalizing prefixes like "START blocked:" and whitespace.
@@ -1079,6 +1086,7 @@ impl LiveState {
             (g.name.eq_ignore_ascii_case("Market Data Streaming")
                 || g.name.eq_ignore_ascii_case("MARKET DATA"))
                 && g.status != GateStatus::Ready
+                && !g.reason.to_lowercase().contains("market closed")
         });
         if market_data_unready {
             return false;
@@ -1093,6 +1101,10 @@ impl LiveState {
             return false;
         }
         let has_all_gates = VENUE_GATES.iter().all(|canonical| {
+            if *canonical == "ACCOUNT_CONFIRMED" {
+                // Operator confirmation / arming is performed during the START confirmation flow
+                return true;
+            }
             self.gates
                 .iter()
                 .any(|g| is_venue_gate_name(&g.name, canonical) && g.status == GateStatus::Ready)
@@ -1103,7 +1115,10 @@ impl LiveState {
         if self.host_mode {
             if let Some(blockers) = &self.backend_start_blockers {
                 return blockers.is_empty()
-                    || blockers.iter().all(|s| Self::is_confirmation_blocker(s));
+                    || blockers.iter().all(|s| {
+                        Self::is_confirmation_blocker(s)
+                            || s.to_lowercase().contains("market closed")
+                    });
             }
         }
         false
@@ -1114,7 +1129,10 @@ impl LiveState {
         let mut list = Vec::new();
         if let Some(blockers) = &self.backend_start_blockers {
             for b in blockers {
-                if !Self::is_confirmation_blocker(b) && !list.contains(b) {
+                if !Self::is_confirmation_blocker(b)
+                    && !b.to_lowercase().contains("market closed")
+                    && !list.contains(b)
+                {
                     list.push(b.clone());
                 }
             }
@@ -1122,10 +1140,17 @@ impl LiveState {
         for gate in &self.gates {
             if gate.name.eq_ignore_ascii_case("Operator Confirmation")
                 || gate.name.eq_ignore_ascii_case("ACCOUNT_CONFIRMED")
+                || gate.name.eq_ignore_ascii_case("Arming")
             {
                 continue;
             }
             if gate.status != GateStatus::Ready {
+                if (gate.name.eq_ignore_ascii_case("Market Data Streaming")
+                    || gate.name.eq_ignore_ascii_case("MARKET DATA"))
+                    && gate.reason.to_lowercase().contains("market closed")
+                {
+                    continue;
+                }
                 let desc = if !gate.reason.is_empty() {
                     format!("{}: {}", gate.name, gate.reason)
                 } else {
@@ -1196,6 +1221,8 @@ impl LiveState {
         if self.host_mode {
             if let Some(blockers) = &self.backend_start_blockers {
                 let mut list = blockers.clone();
+                // Market closed is never a start blocker under Always-On Engine architecture
+                list.retain(|b| !b.to_lowercase().contains("market closed"));
                 if self.live_confirmed || self.session == SessionStatus::Running {
                     list.retain(|b| !Self::is_confirmation_blocker(b));
                 }
@@ -1204,6 +1231,7 @@ impl LiveState {
                         (g.name.eq_ignore_ascii_case("Market Data Streaming")
                             || g.name.eq_ignore_ascii_case("MARKET DATA"))
                             && g.status != GateStatus::Ready
+                            && !g.reason.to_lowercase().contains("market closed")
                     }) {
                         let msg = if !gate.reason.is_empty() {
                             format!("market data streaming is not ready: {}", gate.reason)
@@ -1248,6 +1276,7 @@ impl LiveState {
                 (g.name.eq_ignore_ascii_case("Market Data Streaming")
                     || g.name.eq_ignore_ascii_case("MARKET DATA"))
                     && g.status != GateStatus::Ready
+                    && !g.reason.to_lowercase().contains("market closed")
             }) {
                 let msg = if !gate.reason.is_empty() {
                     format!("market data streaming is not ready: {}", gate.reason)
@@ -2181,7 +2210,7 @@ impl LiveState {
             }
         }
         if let Some(q) = v.get("quantity").and_then(|q| q.as_f64()) {
-            if q.is_finite() && q >= 0.0 {
+            if q.is_finite() && q > 0.0 {
                 self.quantity = q;
             }
         }
@@ -4198,13 +4227,35 @@ pub fn project(state: &LiveState) -> LiveView {
     };
     let blockers = state.start_blockers();
 
-    let note_tone = match state.action_note.as_deref() {
-        Some(n) if n.starts_with("start requested") || n.starts_with("stop requested") => 4,
-        Some(n) if n.starts_with("EXECUTION HALTED") => 3,
-        Some(n) if n.starts_with("START BLOCKED") || n.starts_with("live gates not satisfied") => 3,
-        Some(n) if n.is_empty() => 0,
-        Some(_) => 2,
-        None => 0,
+    let (note_text, note_tone) = match state.action_note.as_deref() {
+        Some(n) if n.starts_with("start requested") || n.starts_with("stop requested") => {
+            (n.to_string(), 4)
+        }
+        Some(n) if n.starts_with("EXECUTION HALTED") => (n.to_string(), 3),
+        Some(n)
+            if n.starts_with("START BLOCKED")
+                || n.starts_with("live gates not satisfied")
+                || n.contains("No execution backend")
+                || n.contains("timed out") =>
+        {
+            (n.to_string(), 3)
+        }
+        Some(n) if n.is_empty() => (String::new(), 0),
+        Some(n) => (n.to_string(), 2),
+        None => {
+            if state.session == SessionStatus::Running
+                && (state.websocket.status == "MARKET CLOSED"
+                    || state.market_data.status == "MARKET CLOSED")
+            {
+                (
+                    "● ENGINE RUNNING · Awaiting market open (09:15 IST) — data pipeline & broker ready"
+                        .to_string(),
+                    1,
+                )
+            } else {
+                (String::new(), 0)
+            }
+        }
     };
     let capital_valid = state.has_valid_capital();
     // STEP 6: "NOT READY" alone did not say WHY. The sub-line names the
@@ -4357,7 +4408,7 @@ pub fn project(state: &LiveState) -> LiveView {
         .into(),
         exec_tone: if state.kill_halted { 3 } else { 1 },
         inspector_open: state.inspector_open,
-        note: state.action_note.clone().unwrap_or_default(),
+        note: note_text,
         note_tone,
         capital_broker_name: cap_broker_name,
         capital_value: cap_value,

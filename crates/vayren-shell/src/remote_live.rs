@@ -801,7 +801,9 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     // "3m"-against-30m drift class). An absent key leaves the previous
     // server-stated ladder in place downstream.
     if let Some(qty) = sections.get("quantity").and_then(|v| v.as_f64()) {
-        translated.insert("quantity".to_string(), serde_json::json!(qty));
+        if qty > 0.0 {
+            translated.insert("quantity".to_string(), serde_json::json!(qty));
+        }
     }
     if let Some(ss) = sections.get("selected_symbol").and_then(|v| v.as_str()) {
         translated.insert(
@@ -965,6 +967,7 @@ pub fn push_remote_event(state: &mut LiveState, name: &str, payload: &serde_json
 /// command-capable role (see [`apply_role`]).
 pub fn init_remote_state() -> LiveState {
     let mut state = LiveState::default();
+    state.quantity = 1.0;
     state.host_mode = true;
     state.bridge_wired = false;
     // No strategy names are seeded: before the first server snapshot the

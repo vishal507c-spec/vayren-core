@@ -1122,26 +1122,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         shell::demo_live_state()
     };
-    println!("Requesting live snapshot...");
-    match PythonBackend::lock_send(&backend, BackendCommand::GetLiveSnapshot)? {
-        BackendResponse::LiveSnapshot { data } => {
-            live_state.apply_snapshot(&data);
-            println!(
-                "Live ready: {} {} ({} bars, last {})",
-                live_state.market_symbol,
-                live_state.market_timeframe,
-                live_state.market_bar_count,
-                live_state
-                    .market_last_price
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| "N/A".to_string())
-            );
-        }
-        BackendResponse::Error { data } => {
-            eprintln!("Live snapshot failed: {}", data.message);
-        }
-        _ => {
-            eprintln!("Unexpected response");
+    if !is_remote {
+        println!("Requesting live snapshot...");
+        match PythonBackend::lock_send(&backend, BackendCommand::GetLiveSnapshot)? {
+            BackendResponse::LiveSnapshot { data } => {
+                live_state.apply_snapshot(&data);
+                println!(
+                    "Live ready: {} {} ({} bars, last {})",
+                    live_state.market_symbol,
+                    live_state.market_timeframe,
+                    live_state.market_bar_count,
+                    live_state
+                        .market_last_price
+                        .map(|p| p.to_string())
+                        .unwrap_or_else(|| "N/A".to_string())
+                );
+            }
+            BackendResponse::Error { data } => {
+                eprintln!("Live snapshot failed: {}", data.message);
+            }
+            _ => {
+                eprintln!("Unexpected response");
+            }
         }
     }
     let live_state = Rc::new(RefCell::new(live_state));
@@ -1781,7 +1783,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .apply_universe_result(&strategy, saved, &error);
                     }
                     shell::apply_lab(&ui, &lab_state.borrow());
-                    if any_saved {
+                    if any_saved && !is_remote {
                         let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
                         live_busy += 1;
                         let backend = Arc::clone(&backend);

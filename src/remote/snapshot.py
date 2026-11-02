@@ -357,7 +357,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "selected_symbols": scrub(live.get("selected_symbols", [])),
         "available_timeframes": scrub(live.get("available_timeframes", [])),
         "selected_timeframe": str(live.get("selected_timeframe", "") or ""),
-        "quantity": float(live.get("quantity", 0.0) or 0.0),
+        "quantity": float(live.get("quantity", 1.0) or 1.0),
         "risk_engine": scrub(risk_engine),
         "brokers": scrub(live.get("brokers", [])),
         "as_of": str(live.get("as_of", "") or ""),

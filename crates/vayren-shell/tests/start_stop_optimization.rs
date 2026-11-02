@@ -240,6 +240,17 @@ fn test_7_start_blocked_by_market_data_failure() {
         blockers
     );
     assert!(!state.can_start());
+
+    // Single click on START while blocked must immediately surface the exact blocker in action_note
+    state.start();
+    let note = state.action_note.as_deref().unwrap();
+    assert!(note.starts_with("START BLOCKED:"));
+    assert!(note.contains("market data streaming is not ready"));
+    let view = vayren_domain::live::project(&state);
+    assert_eq!(view.bar.note_tone, 3);
+    assert!(view.bar.note.starts_with("START BLOCKED:"));
+    assert_eq!(state.session, SessionStatus::Stopped);
+    assert!(state.pending_action.is_none());
 }
 
 #[test]

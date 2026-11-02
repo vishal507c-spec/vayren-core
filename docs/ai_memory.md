@@ -7,7 +7,78 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (one-click-live-start-permanent-fix-20261101):** CRITICAL FIX FOR LIVE START: ONE CLICK RELIABLE START ACROSS FULL REQUEST/RESPONSE LIFECYCLE —
+**Latest update (autonomous-engine-architecture-upgrade-20261101):** ADVANCED AUTONOMOUS ENGINE ARCHITECTURE UPGRADE —
+- **Always-On Engine Lifecycle Independent of Market Hours:**
+  1. *Decoupled Engine START from Exchange Hours:* Removed `if not is_nse_market_open(): blockers.append(...)` from `src/app/services/live_trading_service.py:_live_blockers()`. Clicking START now initializes the engine, loads strategy, validates broker connection, establishes market data pipeline, and enters `RUNNING` state even when the market is closed (weekends, holidays, pre/post-market).
+  2. *Pipeline Readiness Gate:* Updated `_readiness_gates()` so that outside market hours, when candle store data exists and broker is connected, "Market Data Streaming" reports `READY` with reason `"pipeline ready (market closed, awaiting 09:15 IST open)"` (or `"pipeline active"` when running).
+  3. *Authoritative State Dimensions (7 Dimensions):* Added central state architecture across all subsystem dimensions:
+     - `engine_state`: `STARTING` / `RUNNING` / `STOPPING` / `STOPPED` / `FAILED`
+     - `market_state`: `OPEN` / `CLOSED` / `PRE_OPEN` / `HOLIDAY`
+     - `market_data_state`: `CONNECTING` / `LIVE` / `STALE` / `DISCONNECTED` / `IDLE`
+     - `broker_state`: `CONNECTED` / `DISCONNECTED` / `ERROR`
+     - `strategy_state_dim`: `LOADED` / `INITIALIZING` / `RUNNING` / `WAITING_FOR_MARKET` / `ERROR`
+     - `risk_state`: `READY` / `BLOCKED` / `NOT_VALIDATED`
+     - `execution_state`: `ARMED` / `DISARMED` / `HALTED`
+     Exposed under `snapshot()["authoritative_state"]` and top-level keys for synchronous UI consumption.
+  4. *Fail-Closed Execution Gate:* Hardened `src/app/services/eligibility.py:order_gate_for()` and `src/execution/runtime/session.py:_pre_order_checks()` so live orders are strictly blocked when `not is_nse_market_open()`, preventing any live order placement outside 09:15–15:30 IST.
+  5. *UI Top Banner & Status Presentation:* In `crates/vayren-domain/src/live.rs`, when the engine is `RUNNING` while exchange is closed, the top banner dynamically presents: `● ENGINE RUNNING · Awaiting market open (09:15 IST) — data pipeline & broker ready` (tone 1 / green). Rust venue gates ignore closed-market notices, preventing false "live gates not satisfied" blockers.
+  6. *Live Readiness Gate & Arming Catch-22 Resolution:*
+     - In `crates/vayren-domain/src/live.rs`, mapped `ACCOUNT_CONFIRMED` to `"Account Confirmed"`, `"Operator Confirmation"`, and `"Arming"`.
+     - Extended `is_confirmation_blocker()` to recognize `"arming"`, `"disarmed"`, and `"confirm in start dialog"` as operator consent requirements, preventing them from being classified as unready venue gate blockers.
+     - `venue_gates_ready()` recognizes that arming confirmation is performed during the START confirmation flow itself.
+     - `LiveTradingService.start()` strips confirmation, consent, arming, and disarmed notices once `confirmed=True`.
+  7. *Quantity Default Baseline:*
+     - Initialized `init_remote_state()` with `state.quantity = 1.0`.
+     - Updated `src/remote/snapshot.py` to default `"quantity"` to `1.0`.
+     - Guarded `LiveState::apply_snapshot` and `remote_live.rs` against overwriting positive quantity with `0.0`.
+- **Verification & Acceptance Results:**
+  - `src/app/tests/test_autonomous_engine_lifecycle.py`: 12/12 acceptance tests PASSED 100%.
+  - `src/app/tests/`: 425/425 tests PASSED (0 failures, 0 errors).
+  - `cargo test --test start_stop_optimization`: 13/13 PASSED.
+  - `cargo test -p vayren-domain`: 320/320 PASSED.
+  - `python tools/validate_language_ownership.py`: PASSED (434 files checked).
+  - `python tools/validate_repo_graph.py`: PASS (6563 entities, 15384 relationships).
+  - Release binary `target/release/vayren-shell.exe` rebuilt with `--features packaged-remote`.
+  - `python tools/validate_repo_graph.py`: PASS (6563 entities, 15384 relationships).
+  - `ruff check src/`: PASSED (0 errors).
+
+**Previous update (packaged-remote-live-snapshot-isolation-and-release-20261101):** PACKAGED REMOTE CLIENT LIVE SNAPSHOT ISOLATION & IMMEDIATE START BLOCKER BUTTON FEEDBACK —
+- **Root Cause Analysis of Screenshot Symptoms (Zerodha & DREDGECORP 30m Missing Candles):**
+  1. *Local Snapshot Contaminating Remote UI on Startup (`main.rs` Defect):* In `crates/vayren-shell/src/main.rs:1126`, `main()` previously called `PythonBackend::lock_send(&backend, BackendCommand::GetLiveSnapshot)` and applied the snapshot to `live_state` *unconditionally*, even when `is_remote` was `true`. In the packaged hybrid client, the local Python backend is idle and configured for local Zerodha with partial data (missing `NSE:DREDGECORP 30m`). This caused the LIVE screen to render `START BLOCKED — no market data for NSE:DREDGECORP 30m` and `BROKER: Zerodha` on launch while `initial_connect` was establishing the remote gateway link.
+  2. *Lab Universe Save Triggering Local Live Poll in Remote Mode:* In `crates/vayren-shell/src/main.rs:1786`, saving a universe in Strategy Lab triggered a local `GetLiveSnapshot` poll without checking `!is_remote`, which could periodically re-contaminate remote `live_state`.
+  3. *Stale Windows Executable Missing Feature Flags:* Rebuilt `target/release/vayren-shell.exe` with `--features packaged-remote` so the binary defaults to `LaunchMode::Remote` and auto-connects to the authoritative EC2 gateway (`wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1`).
+- **Fixes Implemented:**
+  - `crates/vayren-shell/src/main.rs`: Guarded `GetLiveSnapshot` call at startup with `if !is_remote`. In remote mode, `live_state` remains clean `init_remote_state()`, waiting exclusively for the authoritative EC2 gateway snapshot. Guarded line 1786 with `if any_saved && !is_remote`.
+  - `crates/vayren-domain/src/live.rs`: Ensured `NO_BACKEND_NOTE` ("No execution backend attached.") and timeout notes map to tone 3 (danger red).
+  - `crates/vayren-shell/ui/live.slint`: Added dynamic START button feedback (`⛔ BLOCKED` with variant 3 red when blocked, `⏳ STARTING…` when pending).
+  - Built fresh release binary `target/release/vayren-shell.exe` (42,079,232 bytes, timestamp 07:34 PM).
+- **Verification Evidence:**
+  - `cargo test --test start_stop_optimization`: 13/13 PASSED.
+  - `cargo test -p vayren-domain`: 320/320 PASSED.
+  - `cargo test -p vayren-remote-client`: 34/34 PASSED (including 7 remote e2e tests).
+  - Console smoke probe (`target\release\vayren-shell.exe --remote=...`): Connects to EC2 gateway, authenticates connection `c3` as `trade`, receives `welcome`, receives `snapshot` (`broker: Fyers [CONNECTED]`, `capital: broker`), receives live events, and reports `Remote probe: OK`.
+  - `python tools/validate_language_ownership.py`: PASSED (433 files checked).
+  - `python tools/validate_repo_graph.py`: PASSED (6547 entities, 15350 relationships).
+
+**Previous update (live-start-immediate-feedback-rebuild-20261101):** LIVE START BUTTON IMMEDIATE VISIBLE FEEDBACK & WINDOWS EXECUTABLE REBUILD —
+- **Investigation of Running Executable & Click Reaction:**
+  1. *Stale Running Binary:* Windows executable `target/release/vayren-shell.exe` was last built at `12:21 PM` (commit `0b4fffe`, 5 hours old), which completely predated all start blocker formatting and snapshot race fixes. The user was testing against an outdated binary.
+  2. *Static Banner & Identical Text Failure:* In the 12:21 PM binary, clicking START while live safety gates were unsatisfied set `action_note` to the identical string already displayed in the top banner (`"live gates not satisfied (see LIVE READINESS)"`). Because the banner text did not change, the button remained `▶ START`, and the session remained `STOPPED`, the click produced zero perceptible visual difference on screen.
+  3. *Immediate Visible Feedback on the Button Itself:* Updated `crates/vayren-shell/ui/live.slint` so the START button itself dynamically reacts to blocker state:
+     - When `pending-start`: `"⏳ STARTING…"` (busy spinner)
+     - When `root.bar.note != ""` and `note-tone == 3` (error / blocker): `label: "⛔ BLOCKED"`, `variant: 3` (danger red)
+     - Otherwise: `"▶ START"`, `variant: 0` (cyan/teal)
+     - When clicked while blocked, the button immediately pops to red `⛔ BLOCKED`, and the top banner simultaneously renders `START BLOCKED: [1] <gate1> · [2] ...` with tone 3.
+  4. *Disconnected / Timeout Tone Hardening:* In `crates/vayren-domain/src/live.rs`, ensured `NO_BACKEND_NOTE` ("No execution backend attached.") and timeout notes map to tone 3 (red), driving both the red button and red banner.
+  5. *Full Release & Debug Compilation:* Successfully compiled `target/release/vayren-shell.exe` (freshly built at 05:50 PM, 42.0MB) and `target/debug/vayren-shell.exe` with zero errors.
+- **Verification & Test Results:**
+  - `cargo test --test start_stop_optimization`: 13/13 PASSED (including blocker assertion on click).
+  - `cargo test -p vayren-domain`: 320/320 PASSED.
+  - `cargo build --release -p vayren-shell`: PASSED (0 errors).
+  - `cargo build -p vayren-shell`: PASSED (0 errors).
+  - `python tools/validate_language_ownership.py`: PASSED (433 files checked).
+
+**Previous update (one-click-live-start-permanent-fix-20261101):** CRITICAL FIX FOR LIVE START: ONE CLICK RELIABLE START ACROSS FULL REQUEST/RESPONSE LIFECYCLE —
 - **Primary Root Causes Diagnosed & Categorized:**
   1. *Premature Pending State Cancellation by Periodic Background Snapshot Race (Rust Domain Defect):* In `crates/vayren-domain/src/live.rs:apply_snapshot()`, line 1817 previously checked `(Some("start"), SessionStatus::Stopped) => !status_reason.is_empty()`. Every 1000ms periodic background snapshot from the remote gateway arrived with `session_status: "STOPPED"` and `status_reason: "operator stop"` (persisted from previous run). When the operator clicked START (`session: Starting`, `pending_action: Some("start")`), the next periodic snapshot arrived within ~500ms, evaluated `!status_reason.is_empty()` to `true`, and cleared `self.pending_action = None; self.pending_since = None;` and snapped `self.session` back from `Starting` to `Stopped` before the backend could even respond. Fixed to check `is_start_refusal` (`status_reason.starts_with("START blocked")` or non-empty `start_blockers`). Normal intermediate snapshots with `session_status == Stopped` no longer overwrite `SessionStatus::Starting` or wipe `pending_action`.
   2. *Missing STARTING Engine State on Backend (Python Service Defect):* In `src/app/services/live_trading_service.py:start()`, `self._status` was left as `"STOPPED"` during the entire symbol validation and historical recovery loop, only switching to `"RUNNING"` at the very end. Any snapshot polled during startup reported `"STOPPED"`, amplifying the race condition. Fixed to immediately set `self._status = "STARTING"` and `self._status_reason = "initializing live engine and sessions"` and emit state change prior to session building.

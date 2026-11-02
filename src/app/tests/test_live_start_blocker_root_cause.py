@@ -40,22 +40,20 @@ def _create_service(tmp_path: Path) -> LiveTradingService:
 
 
 def test_1_market_closed_blocks_start_with_exact_reason(tmp_path: Path) -> None:
-    """Requirement 1: When market is closed, START is blocked with exact reason."""
+    """Requirement 1: Market closed must NEVER block engine START; pipeline reports ready."""
     svc = _create_service(tmp_path)
     with patch(
         "broker.providers.fyers.live_market_data.is_nse_market_open",
         return_value=False,
     ):
         blockers = svc._live_blockers()
-        assert any("Market Closed" in b and "exchange session closed" in b for b in blockers), (
-            f"Expected market closed blocker, got: {blockers}"
-        )
+        assert not any("Market Closed" in b for b in blockers)
 
-        # Gate row must also reflect Market Closed
-        gates = svc._readiness_gates({}, {}, [{"status": "AVAILABLE"}])
+        # Gate row must reflect pipeline ready (market closed) when connected
+        gates = svc._readiness_gates({}, {"connected": True}, [{"status": "AVAILABLE"}])
         md_gate = next(g for g in gates if g["name"] == "Market Data Streaming")
-        assert md_gate["status"] == "NOT READY"
-        assert "Market Closed 15:30 IST" in md_gate["reason"]
+        assert md_gate["status"] == "READY"
+        assert "market closed, awaiting 09:15 IST open" in md_gate["reason"]
 
 
 def test_2_market_open_and_valid_market_feed_ready(tmp_path: Path) -> None:
@@ -225,11 +223,11 @@ def test_8_multiple_failed_gates_all_blockers_reported(tmp_path: Path) -> None:
         patch.object(svc, "_live_available_funds", return_value=100.0),
     ):
         blockers = svc._live_blockers()
-        # Verify all 3 blockers appear simultaneously:
-        assert any("Market Closed" in b for b in blockers)
+        # Market closed does NOT block start, but genuine safety gates do:
+        assert not any("Market Closed" in b for b in blockers)
         assert any("broker session is degraded" in b for b in blockers)
         assert any("live confirmation required" in b for b in blockers)
-        assert len(blockers) >= 3
+        assert len(blockers) >= 2
 
 
 def test_9_stop_clears_stale_ready_state(tmp_path: Path) -> None:

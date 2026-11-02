@@ -1401,9 +1401,9 @@ export component LiveScreen inherits Rectangle {
                 VButton {
                     width: 104px;
                     height: 34px;
-                    label: root.setup.pending-start ? "⏳ STARTING…" : "▶ START";
+                    label: root.setup.pending-start ? "⏳ STARTING…" : (root.bar.note != "" && root.bar.note-tone == 3 ? "⛔ BLOCKED" : "▶ START");
                     busy: root.setup.pending-start;
-                    variant: 0;
+                    variant: root.bar.note != "" && root.bar.note-tone == 3 ? 3 : 0;
                     enabled: root.setup.start-clickable;
                     clicked => { root.start-requested(); }
                 }
@@ -1562,9 +1562,9 @@ export component LiveScreen inherits Rectangle {
                     VButton {
                         width: 104px;
                         height: 34px;
-                        label: root.setup.pending-start ? "⏳ STARTING…" : "▶ START";
+                        label: root.setup.pending-start ? "⏳ STARTING…" : (root.bar.note != "" && root.bar.note-tone == 3 ? "⛔ BLOCKED" : "▶ START");
                         busy: root.setup.pending-start;
-                        variant: 0;
+                        variant: root.bar.note != "" && root.bar.note-tone == 3 ? 3 : 0;
                         enabled: root.setup.start-clickable;
                         clicked => { root.start-requested(); }
                     }

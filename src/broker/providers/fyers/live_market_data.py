@@ -25,19 +25,35 @@ from broker.vocab import BrokerError, ErrorCode
 logger = logging.getLogger(__name__)
 
 _VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
+_SESSION_PRE_OPEN_MINUTE = 9 * 60  # 09:00 IST
 _SESSION_START_MINUTE = 9 * 60 + 15  # 09:15 IST
 _SESSION_END_MINUTE = 15 * 60 + 30  # 15:30 IST
 
 
-def is_nse_market_open(epoch: float | None = None) -> bool:
-    """True if epoch (default now) is within regular NSE hours.
+def get_nse_market_session(epoch: float | None = None) -> dict[str, Any]:
+    """Authoritative market session state and schedule for NSE Cash.
 
-    Mon-Fri 09:15-15:30 IST, excluding exchange holidays.
+    Returns a dict with:
+      - session: 'OPEN' | 'CLOSED' | 'PRE_OPEN' | 'HOLIDAY'
+      - is_open: bool (True only during regular trading hours 09:15-15:30 IST)
+      - description: human-readable status
+      - current_time_ist: 'HH:MM:SS'
+      - next_session: description of next session transition
     """
     t = epoch if epoch is not None else time.time()
     dt = datetime.fromtimestamp(t, _VENUE_TZ)
+    time_str = dt.strftime("%H:%M:%S")
+
     if dt.weekday() >= 5:  # Saturday or Sunday
-        return False
+        day_name = "Saturday" if dt.weekday() == 5 else "Sunday"
+        return {
+            "session": "CLOSED",
+            "is_open": False,
+            "description": f"Market Closed (Weekend: {day_name})",
+            "current_time_ist": time_str,
+            "next_session": "Monday 09:15 IST",
+        }
+
     date_str = dt.strftime("%Y-%m-%d")
     try:
         import importlib
@@ -45,11 +61,53 @@ def is_nse_market_open(epoch: float | None = None) -> bool:
         _settings = importlib.import_module("data.settings")
         _holidays = getattr(_settings, "NSE_HOLIDAYS", frozenset())
         if date_str in _holidays:
-            return False
+            return {
+                "session": "HOLIDAY",
+                "is_open": False,
+                "description": f"Market Closed (Exchange Holiday: {date_str})",
+                "current_time_ist": time_str,
+                "next_session": "Next Trading Day 09:15 IST",
+            }
     except Exception:
         pass
+
     minute_of_day = dt.hour * 60 + dt.minute
-    return _SESSION_START_MINUTE <= minute_of_day < _SESSION_END_MINUTE
+    if minute_of_day < _SESSION_PRE_OPEN_MINUTE:
+        return {
+            "session": "CLOSED",
+            "is_open": False,
+            "description": "Market Closed (Pre-market, reopens 09:15 IST)",
+            "current_time_ist": time_str,
+            "next_session": "09:00 IST (Pre-Open)",
+        }
+    if _SESSION_PRE_OPEN_MINUTE <= minute_of_day < _SESSION_START_MINUTE:
+        return {
+            "session": "PRE_OPEN",
+            "is_open": False,
+            "description": "Pre-Open Session (09:00–09:15 IST)",
+            "current_time_ist": time_str,
+            "next_session": "09:15 IST (Market Open)",
+        }
+    if _SESSION_START_MINUTE <= minute_of_day < _SESSION_END_MINUTE:
+        return {
+            "session": "OPEN",
+            "is_open": True,
+            "description": "Market Open (Regular Trading Session: 09:15–15:30 IST)",
+            "current_time_ist": time_str,
+            "next_session": "15:30 IST (Market Close)",
+        }
+    return {
+        "session": "CLOSED",
+        "is_open": False,
+        "description": "Market Closed (Post-market, closed at 15:30 IST)",
+        "current_time_ist": time_str,
+        "next_session": "Next Trading Day 09:15 IST",
+    }
+
+
+def is_nse_market_open(epoch: float | None = None) -> bool:
+    """True if epoch (default now) is within regular NSE hours (09:15-15:30 IST)."""
+    return get_nse_market_session(epoch)["is_open"]
 
 
 #: A stream that WAS delivering and then goes quiet this long is stale.

@@ -256,6 +256,14 @@ def order_gate_for(service: Any) -> Any:
             log.warning("eligibility evaluation failed: %s", exc)
             return f"eligibility evaluation failed: {exc}"
         if verdict.allowed:
+            if mode == "LIVE":
+                from broker.providers.fyers.live_market_data import is_nse_market_open
+
+                if not is_nse_market_open():
+                    return (
+                        "market is closed — live order execution permitted only during"
+                        " 09:15–15:30 IST"
+                    )
             return None
         reasons = "; ".join(verdict.blocking_reasons) or "blocked"
         return f"eligibility blocked: {reasons}"
