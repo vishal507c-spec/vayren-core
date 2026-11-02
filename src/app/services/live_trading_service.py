@@ -80,7 +80,8 @@ _LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 1.0
 #: wider than the 1 s poll (an illiquid symbol must not flip stale between
 #: trades) yet far shorter than a session, so a dead socket can never keep
 #: presenting the last price of a previous run as current market data.
-_LIVE_MARK_MAX_AGE_S = 300.0
+_VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
+_LIVE_MARK_MAX_AGE_S = 60.0
 
 #: Recovery phases that mean the operator still has an interrupted run to
 #: resolve. A restart while desired==RUNNING is the normal way to enter one.
@@ -3266,6 +3267,13 @@ class LiveTradingService:
                 quotes = {}
                 with contextlib.suppress(Exception):
                     reader.refresh()
+        from broker.providers.fyers.live_market_data import is_nse_market_open
+
+        running = self._status == "RUNNING"
+        broker_name = self.broker_name()
+        is_conn = bool(self._broker_manager and self._broker_manager.is_connected(broker_name))
+        market_open = is_nse_market_open()
+
         out: list[dict[str, Any]] = []
         for symbol in listed:
             clean = _clean_symbol(symbol)
@@ -3330,35 +3338,60 @@ class LiveTradingService:
                     logic = getattr(ctx, "logic", None)
                     eng = getattr(logic, "engine", None)
                     if eng is not None:
-                        if getattr(eng, "refSet", False):
-                            ref_high = getattr(eng, "refHigh", None)
-                            ref_low = getattr(eng, "refLow", None)
-                        if getattr(eng, "ccSellSet", False):
-                            break_low = getattr(eng, "ccSellLow", None)
-                        if getattr(eng, "entryPrice", None):
-                            entry_price = getattr(eng, "entryPrice", None)
-                        if getattr(eng, "slPrice", None):
-                            stop_price = getattr(eng, "slPrice", None)
+                        now_ist = datetime.now(_VENUE_TZ)
+                        today_ist = now_ist.date()
+
+                        eng_date = getattr(eng, "prev_date_key", None)
+                        if eng_date is not None and eng_date != today_ist:
+                            if hasattr(eng, "reset_for_new_day"):
+                                eng.reset_for_new_day(today_ist)
+                            else:
+                                eng.refHigh = None
+                                eng.refLow = None
+                                eng.refSet = False
+                                eng.ccSellLow = None
+                                eng.ccSellSet = False
+                                eng.entryPrice = None
+                                eng.slPrice = None
+
+                        ref_idx = getattr(getattr(eng, "cfg", None), "refIndex", 3)
+                        c_count = getattr(eng, "candleCount", 0)
+                        is_today_active = getattr(eng, "prev_date_key", None) == today_ist
+                        c3_complete = is_today_active and (c_count >= ref_idx)
+
+                        if c3_complete:
+                            if getattr(eng, "refSet", False):
+                                ref_high = getattr(eng, "refHigh", None)
+                                ref_low = getattr(eng, "refLow", None)
+                            if getattr(eng, "ccSellSet", False):
+                                break_low = getattr(eng, "ccSellLow", None)
+                            if getattr(eng, "entryPrice", None):
+                                entry_price = getattr(eng, "entryPrice", None)
+                            if getattr(eng, "slPrice", None):
+                                stop_price = getattr(eng, "slPrice", None)
 
             source_stamp = str(getattr(row, "as_of", "") or "") if row is not None else ""
             price_age_s: float | None = None
             if mark_price is not None and mark_price > 0:
-                # The mark's own stamp is the only honest update time; a local
-                # tail has no venue stamp, so the stored candle time stands in.
-                # Never substitute the wall clock for a tick that did not
-                # arrive.
-                last_update = mark_stamp or source_stamp
+                raw_time = mark_stamp or source_stamp
+                if ("T" in raw_time or " " in raw_time) and len(raw_time) >= 19:
+                    last_update = raw_time[11:19]
+                else:
+                    last_update = raw_time
                 price_age_s = round(mark_age_s, 1) if mark_age_s is not None else None
                 if is_live:
                     price_source = "live_feed"
                     stale = False
                 else:
-                    # Old venue observation (cache the age) or a local tail
-                    # close (no venue provenance at all).
                     price_source = "live_feed_stale" if mark_source == "live" else "candle_store"
                     stale = True
             elif price is not None:
-                last_update = source_stamp
+                raw_time = source_stamp
+                if ("T" in raw_time or " " in raw_time) and len(raw_time) >= 19:
+                    last_update = raw_time[11:19]
+                else:
+                    last_update = raw_time
+                price_age_s = None
                 price_source = "candle_store"
                 stale = True
             else:
@@ -3366,28 +3399,10 @@ class LiveTradingService:
                 price_source = "none"
                 stale = True
 
-            # Reference levels, entry and stop come from REAL state only.
-            #
-            # This block used to carry three hardcoded demo symbols (KAYNES at
-            # 1218.50/1245.00, RVNL, POWERGRID) and, for every other symbol,
-            # invented a "reference high" as `ltp * 1.006` and a "reference
-            # low" as `ltp * 0.986`. Those numbers then drove the REAL risk
-            # engine, so the screen showed a confident per-stock risk/share,
-            # qty and planned risk for a stock whose C1-C4 levels the backend
-            # had never computed. A risk figure derived from a made-up level is
-            # worse than no figure: it looks validated and it is not.
-            #
-            # The strategy's reference window is not exposed to this layer, so
-            # the honest answer today is "not yet known" — entry/stop stay None
-            # and every derived risk cell renders as unavailable. The moment the
-            # session reports real levels they flow through unchanged, because
-            # everything below is already keyed off those two fields.
             signal_present = self._last_signal.get(symbol, "") not in ("", "no signal yet")
 
             if price is not None:
                 status = "AVAILABLE"
-                # An OPEN position is the one case where the entry price is a
-                # real, ledger-owned number rather than a strategy level.
                 if pos_qty > 0 and session is not None:
                     try:
                         entry_price = round(float(session.ledger.position(symbol).avg_price), 2)
@@ -3398,6 +3413,12 @@ class LiveTradingService:
                     signal = self._last_signal_side.get(symbol) or "SELL"
                 elif pos_qty > 0:
                     watchlist_status = "IN POSITION"
+                elif running and is_conn and market_open:
+                    if stale:
+                        status = "STALE" if price_source == "live_feed_stale" else "NO TICKS"
+                        watchlist_status = status
+                    else:
+                        watchlist_status = "WAITING"
                 else:
                     watchlist_status = "WAITING"
             elif clean and clean in store:

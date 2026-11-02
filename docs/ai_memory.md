@@ -7,7 +7,29 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (autonomous-engine-architecture-upgrade-20261101):** ADVANCED AUTONOMOUS ENGINE ARCHITECTURE UPGRADE —
+**Latest update (live-ltp-updates-and-daily-reference-reset-20261102):** LIVE LTP UPDATES & DAILY REFERENCE HIGH/LOW RESET PERMANENT FIX —
+- **Issue 1: Live LTP Updates in Strategy Watchlist:**
+  1. *Root Cause Identified in Ingestion Pipeline:* In `src/execution/market_data/broker_feed.py:BrokerFeedProvider._ingest()`, `self._last_close[symbol] = price` and `self._last_tick_time[symbol] = stamp` were previously placed after the candle-builder bucket check (`bucket <= last_emitted`). During a 30m candle, once historical catchup or candle building set `last_emitted`, subsequent intra-candle ticks were dropped before updating `_last_close`.
+  2. *Pipeline Fix:* Moved mark recording to the top of `_ingest()` so every valid incoming tick immediately updates `self._last_close` and `_last_tick_time`.
+  3. *Symbol Matching Normalization:* In `src/broker/market_data_fanout.py`, updated `_symbol_matches()` to symmetrically match bare tickers (`KAYNES`), `-EQ` suffixed symbols (`KAYNES-EQ`), and exchange-prefixed variants (`NSE:KAYNES`). In `src/broker/providers/fyers/live_market_data.py`, populated `_venue_to_requested` with normalized, bare, and `-EQ` keys so FYERS DataSocket incoming ticks always map to the requested universe symbol.
+  4. *Live Mark Age & Stale Tone:* In `src/app/services/live_trading_service.py`, reduced `_LIVE_MARK_MAX_AGE_S` to 60.0s. When session is RUNNING and exchange is open, rows with ticks older than 60s report `"STALE"`, and rows with no ticks report `"NO TICKS"`, mapped to Tone 3 (red/amber dot) in `crates/vayren-domain/src/live.rs`. Formatted `last_update` as `HH:MM:SS` from incoming tick stamps.
+- **Issue 2: Daily Reference High/Low Reset at Trading Day Boundary:**
+  1. *Root Cause Identified in OBR C1C4 Engine:* In `src/strategy/obr_source.py` Layer 12 (`process_bar`), `self.refHigh`, `self.refLow`, `self.refBar`, and `self.refSet` were not reset when `is_new_day` occurred. Previous trading day's reference levels lingered into subsequent sessions.
+  2. *Day Boundary Reset Method:* Added `reset_for_new_day(self, current_date=None)` to `OBREngine` in `src/strategy/obr_source.py` to cleanly clear all active intraday levels (`refHigh`, `refLow`, `refBar`, `refSet`, `ccSellLow`, `ccSellSet`, `entryPrice`, `slPrice`, `activeTrade`).
+  3. *Candle 3 Completion Guard:* In `src/app/services/live_trading_service.py:_universe_quotes()`, strictly gated `ref_high`, `ref_low`, `break_low`, `entry_price`, `stop_price` behind `c3_complete` (`is_today_active and candleCount >= refIndex`). Before Candle 3 (10:15–10:45 IST) completes on the active trading day, all reference levels evaluate to `None` and display as `—`.
+  4. *Checkpoint Day Reset:* In `src/execution/runtime/session.py`, saved `"session_date"` in IST in checkpoints. In `recover()`, if checkpoint is from an earlier trading date, reset `orders_today = 0`, `last_order_epoch = None`, and cleared active stop levels.
+- **Verification Results:**
+  - `src/app/tests/test_live_ltp_and_reference_reset.py`: 4/4 PASSED.
+  - `src/strategy/tests`: 208/208 PASSED.
+  - `src/execution/tests`: 255/255 PASSED.
+  - `cargo test -p vayren-domain`: 320/320 PASSED.
+  - `cargo check -p vayren-shell`: PASSED (1.56s).
+  - `python tools/validate_language_ownership.py`: PASSED (435 files checked).
+  - `python tools/validate_repo_graph.py`: PASS (6570 entities, 15391 relationships, 0 unresolved).
+  - `ruff check`: All checks passed.
+  - `cargo fmt --check` & `ruff format --check`: PASSED.
+
+**Previous update (autonomous-engine-architecture-upgrade-20261101):** ADVANCED AUTONOMOUS ENGINE ARCHITECTURE UPGRADE —
 - **Always-On Engine Lifecycle Independent of Market Hours:**
   1. *Decoupled Engine START from Exchange Hours:* Removed `if not is_nse_market_open(): blockers.append(...)` from `src/app/services/live_trading_service.py:_live_blockers()`. Clicking START now initializes the engine, loads strategy, validates broker connection, establishes market data pipeline, and enters `RUNNING` state even when the market is closed (weekends, holidays, pre/post-market).
   2. *Pipeline Readiness Gate:* Updated `_readiness_gates()` so that outside market hours, when candle store data exists and broker is connected, "Market Data Streaming" reports `READY` with reason `"pipeline ready (market closed, awaiting 09:15 IST open)"` (or `"pipeline active"` when running).

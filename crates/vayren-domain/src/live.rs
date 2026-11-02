@@ -1860,8 +1860,7 @@ impl LiveState {
                         ns,
                         SessionStatus::Running | SessionStatus::Halted | SessionStatus::Error
                     ) || (ns == SessionStatus::Stopped
-                        && (self.pending_action.as_deref() != Some("start")
-                            || is_start_refusal))
+                        && (self.pending_action.as_deref() != Some("start") || is_start_refusal))
                     {
                         self.pending_action = None;
                         self.pending_since = None;
@@ -5144,9 +5143,9 @@ pub fn project(state: &LiveState) -> LiveView {
         };
 
         let status_tone = match row.status.as_str() {
-            "READY" | "IN POSITION" => 1,
+            "READY" | "IN POSITION" | "LIVE" => 1,
             "WAITING" | "WAIT" => 2,
-            "NO DATA" | "NOT FOUND" => 3,
+            "NO DATA" | "NOT FOUND" | "STALE" | "NO TICKS" => 3,
             _ => 0,
         };
 

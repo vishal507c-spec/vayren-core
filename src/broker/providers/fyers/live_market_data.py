@@ -308,7 +308,16 @@ class FyersLiveMarketData:
             return
         for s in symbols:
             if s:
-                self._venue_to_requested[self._normalize_symbol(s)] = s
+                norm = self._normalize_symbol(s)
+                self._venue_to_requested[norm] = s
+                bare = s.split(":")[-1].strip().upper()
+                self._venue_to_requested[bare] = s
+                if not bare.endswith("-EQ"):
+                    self._venue_to_requested[f"{bare}-EQ"] = s
+                else:
+                    self._venue_to_requested[bare[:-3]] = s
+                if not s.endswith("-EQ"):
+                    self._venue_to_requested[f"{s}-EQ"] = s
         self._subscriptions.update(to_add)
 
         if self._state == STATE_CONNECTED and self._ws_client is not None:

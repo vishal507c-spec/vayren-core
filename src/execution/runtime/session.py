@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from math import floor
 from pathlib import Path
 from typing import Any, cast
@@ -82,6 +82,8 @@ from risk.sizing import (
     validate_planned_quantity,
 )
 from strategy import StrategyDefinition, StrategyLogic, StrategyParameters, StrategyState
+
+VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
 
 #: Broker-reported order states that mean the order is FINISHED at the venue.
 #: A row with any other (or no) status is still worked by the venue and
@@ -1830,6 +1832,7 @@ class LiveSession:
                 ]
                 for key, ctx in self._contexts.items()
             },
+            "session_date": datetime.now(VENUE_TZ).strftime("%Y-%m-%d"),
             "orders_today": self._orders_today,
             "last_order_epoch": self._last_order_epoch,
             "engine": self._engine.snapshot(),
@@ -1877,35 +1880,46 @@ class LiveSession:
                 for b in raw
             )
             LiveStrategyDriver(ctx).restore_window(bars)
-        self._orders_today = int(checkpoint.get("orders_today", 0))
-        self._last_order_epoch = checkpoint.get("last_order_epoch")
-        # Restored stop requirements re-arm as PENDING: live SL orders are
-        # placed only after broker reconciliation (see reconcile_now).
-        raw_levels = checkpoint.get("stop_levels", {})
-        if isinstance(raw_levels, dict):
-            for symbol, stop in raw_levels.items():
-                try:
-                    price = float(stop)
-                except (TypeError, ValueError):
-                    continue
-                if price > 0:
-                    self._stop_levels[str(symbol)] = price
-        try:
-            self._sl_seq = int(checkpoint.get("sl_seq", 0))
-        except (TypeError, ValueError):
+        today_date_str = datetime.now(VENUE_TZ).strftime("%Y-%m-%d")
+        cp_date = str(checkpoint.get("session_date") or "")
+        is_same_day = cp_date == today_date_str
+
+        if is_same_day:
+            self._orders_today = int(checkpoint.get("orders_today", 0))
+            self._last_order_epoch = checkpoint.get("last_order_epoch")
+            # Restored stop requirements re-arm as PENDING: live SL orders are
+            # placed only after broker reconciliation (see reconcile_now).
+            raw_levels = checkpoint.get("stop_levels", {})
+            if isinstance(raw_levels, dict):
+                for symbol, stop in raw_levels.items():
+                    try:
+                        price = float(stop)
+                    except (TypeError, ValueError):
+                        continue
+                    if price > 0:
+                        self._stop_levels[str(symbol)] = price
+            try:
+                self._sl_seq = int(checkpoint.get("sl_seq", 0))
+            except (TypeError, ValueError):
+                self._sl_seq = 0
+            raw_prot = checkpoint.get("stop_protection", {})
+            if isinstance(raw_prot, dict):
+                for symbol, prot in raw_prot.items():
+                    if not isinstance(prot, dict):
+                        continue
+                    self._stop_protection[str(symbol)] = {
+                        "stop_price": prot.get("stop_price"),
+                        "quantity": prot.get("quantity"),
+                        "state": "PENDING",
+                        "client_order_id": None,
+                        "broker_order_id": prot.get("broker_order_id"),
+                    }
+        else:
+            self._orders_today = 0
+            self._last_order_epoch = None
+            self._stop_levels.clear()
+            self._stop_protection.clear()
             self._sl_seq = 0
-        raw_prot = checkpoint.get("stop_protection", {})
-        if isinstance(raw_prot, dict):
-            for symbol, prot in raw_prot.items():
-                if not isinstance(prot, dict):
-                    continue
-                self._stop_protection[str(symbol)] = {
-                    "stop_price": prot.get("stop_price"),
-                    "quantity": prot.get("quantity"),
-                    "state": "PENDING",
-                    "client_order_id": None,
-                    "broker_order_id": prot.get("broker_order_id"),
-                }
         # Idempotency state rebuilds BEFORE any new submission (FINAL §K):
         # restored orders (incl. UNKNOWN) must reconcile before trading.
         engine_data = checkpoint.get("engine", {})

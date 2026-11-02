@@ -345,17 +345,29 @@ class BrokerFeedProvider(MarketDataProvider):
         except Exception:
             return None
 
+    def _match_symbol(self, raw_sym: str) -> str | None:
+        if raw_sym in self._subscribed:
+            return raw_sym
+        bare_raw = raw_sym.split(":")[-1].strip().upper()
+        if bare_raw.endswith("-EQ"):
+            bare_raw = bare_raw[:-3]
+        for sub in self._subscribed:
+            if sub == raw_sym:
+                return sub
+            bare_sub = sub.split(":")[-1].strip().upper()
+            if bare_sub.endswith("-EQ"):
+                bare_sub = bare_sub[:-3]
+            if bare_raw == bare_sub:
+                return sub
+        return None
+
     def _ingest(self, quote: Any) -> CandleEvent | None:
         if not isinstance(quote, dict):
             return None
-        symbol = str(quote.get("symbol", "") or "")
-        if symbol not in self._subscribed:
-            if symbol.endswith("-EQ") and symbol[:-3] in self._subscribed:
-                symbol = symbol[:-3]
-            elif f"{symbol}-EQ" in self._subscribed:
-                symbol = f"{symbol}-EQ"
-            else:
-                return None
+        raw_sym = str(quote.get("symbol", "") or "")
+        symbol = self._match_symbol(raw_sym)
+        if symbol is None:
+            return None
         stamp = _normalize_venue_stamp(quote.get("timestamp"))
         if stamp is None or len(stamp) < 19:
             return None
@@ -371,6 +383,12 @@ class BrokerFeedProvider(MarketDataProvider):
             dayvol = 0
         if not math.isfinite(dayvol) or dayvol < 0:
             dayvol = 0
+
+        # Always record latest mark for LTP and tick freshness monitoring:
+        self._last_close[symbol] = price
+        self._last_tick_time[symbol] = stamp
+        self._last_seen[symbol] = self._clock()
+
         size_s = self._size_s()
         if not size_s:
             return None
@@ -386,9 +404,6 @@ class BrokerFeedProvider(MarketDataProvider):
         if held is not None and bucket < held[0]:
             return None
 
-        self._last_close[symbol] = price
-        self._last_tick_time[symbol] = stamp
-
         fresh = held is None or held[0] != bucket
         emitted: CandleEvent | None = None
         if (
@@ -403,7 +418,6 @@ class BrokerFeedProvider(MarketDataProvider):
             fold_tick(previous, price, dayvol, self._last_dayvol.get(symbol)),
         )
         self._last_dayvol[symbol] = dayvol
-        self._last_seen[symbol] = self._clock()
         return emitted
 
     def _close_bucket(self, symbol: str, held: _Open) -> CandleEvent:

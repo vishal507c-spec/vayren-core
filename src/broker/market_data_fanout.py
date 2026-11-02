@@ -37,15 +37,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _normalize_bare_ticker(s: str) -> str:
+    ticker = str(s or "").split(":")[-1].strip().upper()
+    if ticker.endswith("-EQ"):
+        ticker = ticker[:-3]
+    return ticker
+
+
 def _symbol_matches(subscribed: str, quote_symbol: str) -> bool:
-    """Exact symbol, or the ``-EQ``/bare equivalence the venues emit."""
+    """Exact symbol, or the ``-EQ``/bare/exchange-prefixed equivalence."""
     if subscribed == quote_symbol:
         return True
-    if quote_symbol.endswith("-EQ") and quote_symbol[:-3] == subscribed:
-        return True
-    if subscribed.endswith("-EQ"):
-        return subscribed[:-3] == quote_symbol
-    return False
+    return _normalize_bare_ticker(subscribed) == _normalize_bare_ticker(quote_symbol)
 
 
 @dataclass
