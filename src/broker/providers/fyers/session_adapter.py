@@ -1088,7 +1088,14 @@ class FyersSessionAdapter:
             )
         )
 
-        if self._usable and self._session is not None:
+        usable = False
+        try:
+            self._require_usable()
+            usable = True
+        except Exception:
+            usable = False
+
+        if usable:
             payload = {
                 "data": [
                     {
