@@ -7,7 +7,31 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (strategy-watchlist-todays-change-pct-fix-20261103):** TODAY'S CHANGE % (CHG%) IN STRATEGY WATCHLIST FIX —
+**Latest update (intraday-mis-buying-power-margin-validation-20261103):** INTRADAY MIS BUYING-POWER & BROKER MARGIN VALIDATION —
+- **Problem Statement & Root Cause:**
+  1. *Hardcoded / Blanket Leverage Assumption:* Previously, position sizing assumed a blanket leverage multiplier (4x / 5x) across all stocks. In reality, under SEBI Peak Margin regulations (VaR + ELM), intraday MIS margin requirements vary significantly per stock (from 20% to 25%, 40%, or 100% for high volatility/T2T stocks).
+  2. *Missing Pre-Order Broker Margin Gate:* Neither the standalone monolith (`vayren.py`) nor the modular backend (`vayren-core`) validated the actual broker-required MIS margin for an order against available funds prior to order submission. Sizing based purely on risk budget (`max_risk / risk_per_share`) could size a position whose gross order value required more intraday margin than available cash, causing post-submission broker rejections ("Insufficient funds/margin").
+- **Permanent Solution Implemented:**
+  1. *`vayren.py` Standalone Monolith (Updated in Scratch & Packaged to `scratch/vayren-main-updated.zip`):*
+     - Added `BrokerGateway.get_order_margin(exchange, tradingsymbol, tx_type, qty, order_type, product, trigger_price, price)` to fetch actual broker-required MIS margin using Kite `order_margins()` API or exchange margin rules, never assuming fixed 5x leverage.
+     - Added strict buying-power validation in `OrderEngine._place_sell`: immediately before `_gateway.place_order()`, fetches `available_funds = _gateway.get_equity_capital()` and `required_margin = _gateway.get_order_margin(...)`. If `required_margin > available_funds`, the order is blocked with `INSUFFICIENT_BUYING_POWER`, logged, and prevented from reaching the broker. Evaluates every stock independently.
+     - Mock test verified: `scratch/test_vayren_buying_power.py` 100% PASS (SBIN with sufficient funds passes; RELIANCE with margin > funds blocked independently).
+  2. *`vayren-core` Modular Repository:*
+     - *`src/broker/interfaces/faces.py` (`TradingFace`):* Added `order_margin(self, plan: Any) -> float` to the trading protocol contract.
+     - *`src/broker/providers/fyers/session_adapter.py`:* Implemented `order_margin(self, plan: Any) -> float` querying FYERS API v3 endpoint `POST https://api-t1.fyers.in/api/v3/multiorder/margin`. Returns actual broker-required MIS margin (`margin_total` / `margins[0].margin`) for that specific stock independently. Safe offline/mock fallback computes stock-specific margin without blanket 5x leverage assumption.
+     - *`src/execution/runtime/session.py` (`LiveSession._pre_order_checks`):* Added authoritative buying-power gate for all entry orders. Queries `broker.order_margin(plan)` and compares with available funds from `broker.funds()`. Blocks orders with `("ORDER_BLOCKED", "insufficient buying power: required margin ₹... exceeds available funds ₹...")` if funds are insufficient or unreadable.
+     - *`src/execution/tests/test_live_sizing_gate.py`:* Added 3 comprehensive test cases (`test_pre_order_buying_power_passes_when_funds_sufficient`, `test_pre_order_buying_power_blocks_when_margin_exceeds_funds`, `test_independent_per_stock_margin_evaluation_without_fixed_leverage`). All 8 sizing tests PASS.
+- **Verification Evidence:**
+  - `pytest src/execution/tests/test_live_sizing_gate.py`: 8/8 PASSED in 1.42s.
+  - `pytest src/risk/tests src/execution/tests`: 284/284 PASSED in 6.1s.
+  - `pytest src/broker/tests/test_fyers_provider.py src/broker/tests/test_fyers_live_trading.py`: 29/29 PASSED in 3.2s.
+  - `python tools/benchmark.py impact --run`: PASSED in 100.10s (ruff check + full pytest suite across execution, broker, and app).
+  - `cargo check -p vayren-domain -p vayren-core`: PASSED in 0.95s.
+  - `python tools/validate_language_ownership.py`: PASSED (436 files checked).
+  - `ruff check`: All checks passed.
+  - Standalone `test_vayren_buying_power.py`: PASSED (both allowed & blocked stock paths verified).
+
+**Previous update (strategy-watchlist-todays-change-pct-fix-20261103):** TODAY'S CHANGE % (CHG%) IN STRATEGY WATCHLIST FIX —
 - **Problem Statement & Forensic Discovery:**
   1. *Incorrect Base Price (Intraday Bar-to-Bar vs Previous Close):* In `src/app/services/market_data_service.py:_cached_quote()`, the calculation queried `ORDER BY candle_time DESC LIMIT 2` on the 30-minute intraday `ohlcv` SQLite table. It computed `100.0 * (tail[-1] - tail[-2]) / tail[-2]`, which was the percentage change between the last two 30-minute intraday candles of the same day (e.g. 15:15:00 vs 14:45:00), rather than the return from the official previous trading day's close.
   2. *Live Mark Change Distortion:* In `src/app/services/live_trading_service.py:_universe_quotes()`, when a live mark arrived, it subtracted `base_px = getattr(row, "price", None)` (the last intraday candle close) instead of the previous day's close.

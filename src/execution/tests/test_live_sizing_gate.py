@@ -183,3 +183,113 @@ def test_final_gate_passes_sized_quantity() -> None:
     )
     session._submit(_intent(), _plan(quantity=22.0), 1_700_000_000.0)
     assert broker.placed == ["i1:o1"]
+
+def test_pre_order_buying_power_passes_when_funds_sufficient() -> None:
+    from typing import Any
+
+    class _MarginBroker(_Broker):
+        def order_margin(self, plan: Any) -> float:  # noqa: ARG002
+            return 15_000.0
+
+    broker = _MarginBroker(funds={"available": 50_000.0})
+    session = _session(broker=broker)
+    session._sized_risk["i1"] = SizingVerdict(
+        ready=True,
+        reason=READY,
+        broker_capital=50_000.0,
+        effective_capital=200_000.0,
+        max_risk_per_stock=300.0,
+        entry_price=800.0,
+        stop_price=803.0,
+        risk_per_share=3.0,
+        quantity=100,
+        planned_risk=300.0,
+    )
+    session._submit(_intent(), _plan(quantity=100.0), 1_700_000_000.0)
+    assert broker.placed == ["i1:o1"]
+
+
+def test_pre_order_buying_power_blocks_when_margin_exceeds_funds() -> None:
+    from typing import Any
+
+    class _MarginBroker(_Broker):
+        def order_margin(self, plan: Any) -> float:  # noqa: ARG002
+            return 70_000.0
+
+    broker = _MarginBroker(funds={"available": 50_000.0})
+    session = _session(broker=broker)
+    session._sized_risk["i1"] = SizingVerdict(
+        ready=True,
+        reason=READY,
+        broker_capital=50_000.0,
+        effective_capital=200_000.0,
+        max_risk_per_stock=300.0,
+        entry_price=2500.0,
+        stop_price=2510.0,
+        risk_per_share=10.0,
+        quantity=30,
+        planned_risk=300.0,
+    )
+    session._submit(_intent(), _plan(quantity=30.0), 1_700_000_000.0)
+    assert broker.placed == []
+    kinds = [entry.kind for entry in session._journal.entries]
+    assert "ORDER_BLOCKED" in kinds
+    blocked_entries = [e for e in session._journal.entries if e.kind == "ORDER_BLOCKED"]
+    assert any(
+        "insufficient buying power" in str(e.payload.get("reason", "")).lower()
+        for e in blocked_entries
+    )
+
+
+def test_independent_per_stock_margin_evaluation_without_fixed_leverage() -> None:
+    from typing import Any
+
+    class _MultiStockMarginBroker(_Broker):
+        def order_margin(self, plan: Any) -> float:
+            rates = {"SBIN": 0.20, "HDFCBANK": 0.40}
+            rate = rates.get(plan.symbol, 0.25)
+            price = 1000.0
+            return float(plan.quantity * price * rate)
+
+    broker = _MultiStockMarginBroker(funds={"available": 25_000.0})
+    session = _session(broker=broker)
+
+    # Stock 1: SBIN (100 shares @ 1000, 20% margin = 20,000 <= 25,000) -> PASS
+    session._sized_risk["i_sbin"] = SizingVerdict(
+        ready=True,
+        reason=READY,
+        broker_capital=25_000.0,
+        effective_capital=100_000.0,
+        max_risk_per_stock=150.0,
+        entry_price=1000.0,
+        stop_price=1001.5,
+        risk_per_share=1.5,
+        quantity=100,
+        planned_risk=150.0,
+    )
+    session._submit(
+        _intent(intent_id="i_sbin", symbol="SBIN"),
+        _plan(intent_id="i_sbin", symbol="SBIN", quantity=100.0),
+        1_700_000_000.0,
+    )
+    assert "i_sbin:o1" in broker.placed
+
+    # Stock 2: HDFCBANK (100 shares @ 1000, 40% margin = 40,000 > 25,000) -> BLOCKED
+    session._sized_risk["i_hdfc"] = SizingVerdict(
+        ready=True,
+        reason=READY,
+        broker_capital=25_000.0,
+        effective_capital=100_000.0,
+        max_risk_per_stock=150.0,
+        entry_price=1000.0,
+        stop_price=1001.5,
+        risk_per_share=1.5,
+        quantity=100,
+        planned_risk=150.0,
+    )
+    session._submit(
+        _intent(intent_id="i_hdfc", symbol="HDFCBANK"),
+        _plan(intent_id="i_hdfc", symbol="HDFCBANK", quantity=100.0),
+        1_700_000_000.0,
+    )
+    assert "i_hdfc:o1" not in broker.placed

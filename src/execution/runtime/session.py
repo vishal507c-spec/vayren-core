@@ -1080,6 +1080,49 @@ class LiveSession:
         is_entry = intent.target_position_qty != 0.0
         if live and is_entry and intent.intent_id not in self._sized_risk:
             return ("ORDER_BLOCKED", "risk not validated for live order")
+
+        # ── Buying-Power & Broker-required MIS margin validation ──
+        # Fetch actual broker-required MIS margin for each stock.
+        # Compare required margin with actual available funds independently.
+        # Allow order only when all existing risk checks and broker margin checks pass.
+        # Never assume fixed 5x leverage.
+        if is_entry:
+            margin_fn = getattr(self._broker, "order_margin", None)
+            if callable(margin_fn):
+                try:
+                    required_margin = float(margin_fn(plan))
+                except Exception as exc:
+                    return ("ORDER_BLOCKED", f"broker margin check failed: {exc}")
+
+                funds_fn = getattr(self._broker, "funds", None)
+                avail_funds = None
+                if callable(funds_fn):
+                    try:
+                        f_data = funds_fn() or {}
+                        raw_avail = f_data.get("available")
+                        if raw_avail is None:
+                            raw_avail = (
+                                f_data.get("available_margin")
+                                or f_data.get("available_balance")
+                            )
+                        if raw_avail is not None:
+                            avail_funds = float(raw_avail)
+                    except Exception:
+                        avail_funds = None
+
+                if avail_funds is None or avail_funds <= 0.0:
+                    return (
+                        "ORDER_BLOCKED",
+                        "insufficient buying power: available funds unreadable or zero",
+                    )
+
+                if required_margin > avail_funds:
+                    return (
+                        "ORDER_BLOCKED",
+                        f"insufficient buying power: required margin ₹{required_margin:,.2f} "
+                        f"exceeds available funds ₹{avail_funds:,.2f}",
+                    )
+
         if self._engine.by_intent(intent.intent_id) is not None:
             return ("ORDER_BLOCKED", f"duplicate intent: {intent.intent_id}")
         for open_order in self._engine.open_orders():

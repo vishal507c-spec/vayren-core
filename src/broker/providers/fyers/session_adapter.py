@@ -1066,6 +1066,63 @@ class FyersSessionAdapter:
         tot = total if total is not None else (available + used)
         return {"available": available, "used": used, "total": tot, "equity": tot}
 
+    def order_margin(self, plan: Any) -> float:
+        """Fetch actual broker-required MIS margin for one order from FYERS API v3.
+
+        Calls POST https://api-t1.fyers.in/api/v3/multiorder/margin.
+        Evaluates each stock independently using FYERS' exact broker margin rules.
+        Never assumes fixed 5x leverage.
+        """
+        symbol = self._venue_symbol(plan)
+        side_val, _ = self._venue_side(plan)
+        qty = self._venue_quantity(plan)
+        order_type_val, _, limit_price, stop_price = self._venue_price_and_type(plan)
+        product_type = self._venue_product(plan)
+        ref_price = (
+            limit_price
+            if (limit_price is not None and limit_price > 0)
+            else (
+                stop_price
+                if (stop_price is not None and stop_price > 0)
+                else float(getattr(plan, "price", 0.0) or 0.0)
+            )
+        )
+
+        if self._usable and self._session is not None:
+            payload = {
+                "data": [
+                    {
+                        "symbol": symbol,
+                        "qty": qty,
+                        "type": order_type_val,
+                        "side": side_val,
+                        "productType": product_type,
+                        "limitPrice": float(ref_price or 0.0),
+                    }
+                ]
+            }
+            try:
+                resp = self._post("multiorder/margin", payload, call_class=CallClass.READ)
+                if isinstance(resp, dict):
+                    data = resp.get("data")
+                    if isinstance(data, dict):
+                        margin_total = _safe_amount(data.get("margin_total"))
+                        if margin_total is not None and margin_total > 0:
+                            return margin_total
+                        margins = data.get("margins")
+                        if isinstance(margins, list) and margins:
+                            m_val = _safe_amount(margins[0].get("margin"))
+                            if m_val is not None and m_val > 0:
+                                return m_val
+            except Exception as exc:
+                logger.warning("FYERS multiorder/margin query failed for %s: %s", symbol, exc)
+
+        # Fallback for mock, offline, or test environments:
+        # Evaluate each stock independently; never assume fixed 5x leverage.
+        margin_rate = float(getattr(plan, "margin_rate", 0.25) or 0.25)
+        price = ref_price if ref_price > 0 else 1.0
+        return float(round(qty * price * margin_rate, 2))
+
     def positions(self) -> list[dict[str, Any]]:
         """Net positions (empty when flat; honest failure otherwise)."""
         return self._read_positions()
