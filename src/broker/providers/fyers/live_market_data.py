@@ -809,6 +809,13 @@ class FyersLiveMarketData:
         close_p = self._safe_float(msg.get("prev_close_price") or msg.get("ltp"))
         if open_p > 0 and high_p > 0 and low_p > 0 and close_p > 0:
             quote.update(open=open_p, high=high_p, low=low_p, close=close_p)
+        v_raw = msg.get("v")
+        v_dict: dict[str, Any] = v_raw if isinstance(v_raw, dict) else {}
+        prev_close_p = self._safe_float(
+            msg.get("prev_close_price") or msg.get("prev_close") or v_dict.get("prev_close_price")
+        )
+        if prev_close_p > 0:
+            quote["prev_close"] = prev_close_p
         return (quote,)
 
     def _extract_timestamp(self, msg: dict[str, Any]) -> str:

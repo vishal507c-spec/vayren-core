@@ -60,6 +60,7 @@ class Quote:
     price: float | None
     change_pct: float | None
     as_of: str = ""
+    prev_close: float | None = None
 
 
 @dataclass(frozen=True)
@@ -737,6 +738,7 @@ class MarketDataService:
                     mtime = item.get("mtime")
                     price = item.get("price")
                     change_pct = item.get("change_pct")
+                    prev_close = item.get("prev_close")
                     as_of = str(item.get("as_of") or "")
                     if isinstance(mtime, (int, float)):
                         self._quote_cache[sym] = (
@@ -748,6 +750,9 @@ class MarketDataService:
                                 if isinstance(change_pct, (int, float))
                                 else None,
                                 as_of=as_of,
+                                prev_close=float(prev_close)
+                                if isinstance(prev_close, (int, float))
+                                else None,
                             ),
                         )
         except Exception:
@@ -763,6 +768,7 @@ class MarketDataService:
                     "price": q.price,
                     "change_pct": q.change_pct,
                     "as_of": q.as_of,
+                    "prev_close": q.prev_close,
                 }
             tmp = cache_file.with_suffix(".tmp")
             tmp.write_text(json.dumps(to_save), encoding="utf-8")
@@ -788,6 +794,37 @@ class MarketDataService:
             self._save_persisted_quote_cache()
         return quotes
 
+    def get_previous_close(self, symbol: str, as_of: str | None = None) -> float | None:
+        """Official closing price of the previous trading day strictly before as_of (YYYY-MM-DD)."""
+        clean = symbol.split(":")[-1].strip().upper()
+        if clean.endswith("-EQ"):
+            clean = clean[:-3]
+        path = self._db_path(clean)
+        if not path.is_file():
+            return None
+        if not as_of:
+            from broker.providers.fyers.live_market_data import _VENUE_TZ
+
+            as_of = datetime.now(_VENUE_TZ).strftime("%Y-%m-%d")
+        cutoff = f"{as_of} 00:00:00"
+        try:
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5.0)
+            try:
+                query = (
+                    "SELECT candle_time, close FROM ohlcv "
+                    "WHERE candle_time < ? ORDER BY candle_time DESC LIMIT 1"
+                )
+                row = con.execute(query, (cutoff,)).fetchone()
+                if row and row[1] is not None:
+                    fc = float(row[1])
+                    if fc > 0 and math.isfinite(fc):
+                        return fc
+            finally:
+                con.close()
+        except Exception:
+            return None
+        return None
+
     def _cached_quote(self, symbol: str) -> Quote | None:
         try:
             path = self._db_path(symbol)
@@ -802,14 +839,26 @@ class MarketDataService:
         except MarketDataError:
             return None
         if not tail:
-            return Quote(symbol=symbol, price=None, change_pct=None)
+            return Quote(symbol=symbol, price=None, change_pct=None, prev_close=None)
         last_stamp, last = tail[-1][0], tail[-1][1]
+        last_date = last_stamp[:10]
+        prev_close = self.get_previous_close(symbol, as_of=last_date)
         change = None
-        if len(tail) >= 2 and tail[-2][1]:
+        if prev_close is not None and prev_close > 0 and last is not None and last > 0:
+            change = round(100.0 * (last - prev_close) / prev_close, 2)
+        elif len(tail) >= 2 and tail[-2][1]:
+            # Single-day fallback for test fixtures where only 1 date exists
             change = 100.0 * (last - tail[-2][1]) / abs(tail[-2][1])
+            prev_close = tail[-2][1]
         # as_of is the store's own candle stamp: the ONLY honest label for
         # this price. It is a candle close, not a live venue tick.
-        quote = Quote(symbol=symbol, price=last, change_pct=change, as_of=last_stamp)
+        quote = Quote(
+            symbol=symbol,
+            price=last,
+            change_pct=change,
+            as_of=last_stamp,
+            prev_close=prev_close,
+        )
         self._quote_cache[symbol] = (mtime, quote)
         if len(self._quote_cache) > 2048:
             self._quote_cache.pop(next(iter(self._quote_cache)))

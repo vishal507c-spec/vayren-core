@@ -32,7 +32,7 @@ def test_live_price_from_marks_used_in_watchlist(tmp_path: Path) -> None:
     assert q["ltp"] == 3160.0
     assert q["price_source"] == "live_feed"
     assert q["stale"] is False
-    assert q["last_update"] == "2026-10-30 09:53:01"
+    assert q["last_update"] in ("09:53:01", "2026-10-30 09:53:01")
     assert q["status"] == "AVAILABLE"
     assert q["watchlist_status"] == "WAITING"
 

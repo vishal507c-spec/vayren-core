@@ -140,6 +140,7 @@ class BrokerFeedProvider(MarketDataProvider):
         self._last_dayvol: dict[str, int] = {}
         self._last_close: dict[str, float] = {}
         self._last_tick_time: dict[str, str] = {}
+        self._prev_close: dict[str, float] = {}
         self._last_error = ""
         self._history_face = history_face
         self._backfill_events: list[CandleEvent] = []
@@ -165,6 +166,11 @@ class BrokerFeedProvider(MarketDataProvider):
     def last_tick_time(self) -> dict[str, str]:
         """Latest seen tick timestamp per symbol."""
         return dict(self._last_tick_time)
+
+    @property
+    def prev_close(self) -> dict[str, float]:
+        """Latest authoritative previous trading day close per symbol."""
+        return dict(self._prev_close)
 
     def set_last_emitted(self, symbol: str, timestamp: str) -> None:
         """Seed the emitted watermark from startup historical recovery."""
@@ -273,6 +279,7 @@ class BrokerFeedProvider(MarketDataProvider):
         self._last_dayvol = {}
         self._last_close = {}
         self._last_tick_time = {}
+        self._prev_close = {}
         self._last_error = ""
 
     def disconnect(self) -> None:
@@ -388,6 +395,13 @@ class BrokerFeedProvider(MarketDataProvider):
         self._last_close[symbol] = price
         self._last_tick_time[symbol] = stamp
         self._last_seen[symbol] = self._clock()
+
+        try:
+            pc = float(quote.get("prev_close", 0.0) or quote.get("prev_close_price", 0.0) or 0.0)
+            if pc > 0 and math.isfinite(pc):
+                self._prev_close[symbol] = pc
+        except (TypeError, ValueError):
+            pass
 
         size_s = self._size_s()
         if not size_s:

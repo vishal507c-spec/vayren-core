@@ -345,6 +345,7 @@ class LiveTradingService:
         # the mark instead of looking fresh because the UI read it again.
         self._mark_epochs: dict[str, float] = {}
         self._mark_seen_ticks: dict[str, str] = {}
+        self._prev_closes: dict[str, float] = {}
         self._open_since: dict[str, str] = {}
         self._last_signal: dict[str, str] = {}
         self._last_signal_side: dict[str, str] = {}
@@ -3080,6 +3081,7 @@ class LiveTradingService:
         self._mark_sources.clear()
         self._mark_epochs.clear()
         self._mark_seen_ticks.clear()
+        self._prev_closes.clear()
 
     def _resolve_mark(
         self, symbol: str, clean: str, clean_bare: str
@@ -3107,7 +3109,25 @@ class LiveTradingService:
         age = max(0.0, time.monotonic() - epoch) if epoch else None
         return float(price), str(stamp or ""), age, str(source or "")
 
-    def set_live_price(self, symbol: str, price: float, timestamp: str | None = None) -> None:
+    def _resolve_prev_close(self, symbol: str, clean: str, clean_bare: str) -> float | None:
+        """Authoritative previous trading day close for one symbol."""
+        keys = (
+            symbol,
+            clean,
+            clean_bare,
+            f"NSE:{clean}",
+            f"NSE:{clean_bare}",
+            f"NSE:{clean_bare}-EQ",
+        )
+        return next((self._prev_closes.get(k) for k in keys if self._prev_closes.get(k)), None)
+
+    def set_live_price(
+        self,
+        symbol: str,
+        price: float,
+        timestamp: str | None = None,
+        prev_close: float | None = None,
+    ) -> None:
         """Record an explicit live market price push (never a stored candle)."""
         try:
             px = float(price)
@@ -3119,6 +3139,11 @@ class LiveTradingService:
                     self._mark_times[key] = ts
                     self._mark_sources[key] = "live"
                     self._mark_epochs[key] = epoch
+            if prev_close is not None:
+                pc = float(prev_close)
+                if pc > 0 and math.isfinite(pc):
+                    for key in self._mark_keys(symbol):
+                        self._prev_closes[key] = pc
         except (TypeError, ValueError):
             pass
 
@@ -3182,6 +3207,25 @@ class LiveTradingService:
                     self._marks[key] = price_value
                     self._mark_sources[key] = source
                     self._mark_epochs[key] = epoch
+
+        prev_closes = getattr(provider, "prev_close", None)
+        if isinstance(prev_closes, dict):
+            pc = (
+                prev_closes.get(symbol)
+                or prev_closes.get(clean)
+                or prev_closes.get(clean_bare)
+                or prev_closes.get(f"NSE:{clean}")
+                or prev_closes.get(f"NSE:{clean_bare}")
+                or prev_closes.get(f"NSE:{clean_bare}-EQ")
+            )
+            try:
+                pc_val = float(pc) if pc is not None else 0.0
+            except (TypeError, ValueError):
+                pc_val = 0.0
+            if pc_val > 0 and math.isfinite(pc_val):
+                for key in self._mark_keys(symbol):
+                    self._prev_closes[key] = pc_val
+
         if tick_stamp:
             for key in self._mark_keys(symbol):
                 self._mark_times[key] = tick_stamp
@@ -3271,7 +3315,10 @@ class LiveTradingService:
 
         running = self._status == "RUNNING"
         broker_name = self.broker_name()
-        is_conn = bool(self._broker_manager and self._broker_manager.is_connected(broker_name))
+        is_conn = False
+        if self._broker_manager is not None and hasattr(self._broker_manager, "is_connected"):
+            with contextlib.suppress(Exception):
+                is_conn = bool(self._broker_manager.is_connected(broker_name))
         market_open = is_nse_market_open()
 
         out: list[dict[str, Any]] = []
@@ -3281,6 +3328,7 @@ class LiveTradingService:
             row = quotes.get(clean) or quotes.get(clean_bare)
             price = getattr(row, "price", None) if row is not None else None
             change = getattr(row, "change_pct", None) if row is not None else None
+            prev_close = getattr(row, "prev_close", None) if row is not None else None
 
             # Resolve the latest mark from the active session provider. A mark
             # is a live quote ONLY when a venue tick produced it AND that tick
@@ -3300,12 +3348,22 @@ class LiveTradingService:
                 and mark_age_s is not None
                 and mark_age_s <= _LIVE_MARK_MAX_AGE_S
             )
+
+            # Prioritize live feed prev_close, then quote cache/store prev_close, then reader lookup
+            live_pc = self._resolve_prev_close(symbol, clean, clean_bare)
+            if live_pc is not None and live_pc > 0:
+                prev_close = live_pc
+            elif prev_close is None and reader is not None:
+                with contextlib.suppress(Exception):
+                    prev_close = reader.get_previous_close(clean)
+
             if mark_price is not None and mark_price > 0:
-                live_val = round(float(mark_price), 2)
-                base_px = getattr(row, "price", None)
-                if base_px is not None and base_px > 0:
-                    change = round(100.0 * (live_val - base_px) / base_px, 2)
-                price = live_val
+                price = round(float(mark_price), 2)
+
+            if price is not None and price > 0 and prev_close is not None and prev_close > 0:
+                change = round(100.0 * (price - prev_close) / prev_close, 2)
+            elif prev_close is None or prev_close <= 0:
+                change = None
 
             # Position facts
             pos_side = "FLAT"
@@ -3493,6 +3551,7 @@ class LiveTradingService:
                     "symbol": symbol,
                     "clean_symbol": clean,
                     "ltp": price,
+                    "prev_close": prev_close,
                     "change_pct": change,
                     "status": status,
                     "watchlist_status": watchlist_status,
@@ -3924,7 +3983,10 @@ class LiveTradingService:
                             {
                                 "name": "Market Data Streaming",
                                 "status": "NOT READY",
-                                "reason": f"{store_reason}; broker not connected for streaming",
+                                "reason": (
+                                    f"{store_reason}; no live feed "
+                                    "(broker not connected for streaming)"
+                                ),
                             }
                         )
                     else:

@@ -7,7 +7,26 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-ltp-updates-and-daily-reference-reset-20261102):** LIVE LTP UPDATES & DAILY REFERENCE HIGH/LOW RESET PERMANENT FIX —
+**Latest update (strategy-watchlist-todays-change-pct-fix-20261103):** TODAY'S CHANGE % (CHG%) IN STRATEGY WATCHLIST FIX —
+- **Problem Statement & Forensic Discovery:**
+  1. *Incorrect Base Price (Intraday Bar-to-Bar vs Previous Close):* In `src/app/services/market_data_service.py:_cached_quote()`, the calculation queried `ORDER BY candle_time DESC LIMIT 2` on the 30-minute intraday `ohlcv` SQLite table. It computed `100.0 * (tail[-1] - tail[-2]) / tail[-2]`, which was the percentage change between the last two 30-minute intraday candles of the same day (e.g. 15:15:00 vs 14:45:00), rather than the return from the official previous trading day's close.
+  2. *Live Mark Change Distortion:* In `src/app/services/live_trading_service.py:_universe_quotes()`, when a live mark arrived, it subtracted `base_px = getattr(row, "price", None)` (the last intraday candle close) instead of the previous day's close.
+  3. *Unpropagated Venue Previous Close:* FYERS venue ticks provide `prev_close_price`, but `FyersLiveMarketData` and `BrokerFeedProvider` never extracted or exposed `prev_close`.
+- **Permanent Fix Implemented:**
+  1. *FyersLiveMarketData Ingestion:* In `src/broker/providers/fyers/live_market_data.py:normalize_tick()`, parsed `prev_close_price` / `prev_close` / `v.prev_close_price` and attached `"prev_close"` to the normalized quote.
+  2. *BrokerFeedProvider Tracking:* In `src/execution/market_data/broker_feed.py`, added `self._prev_close` dictionary, tracked incoming previous close per symbol in `_ingest()`, and exposed it via `@property def prev_close(self)`.
+  3. *MarketDataService Authoritative Previous Close Query:* Added `get_previous_close(symbol: str, as_of: str | None = None) -> float | None` executing:
+     `SELECT candle_time, close FROM ohlcv WHERE candle_time < ? ORDER BY candle_time DESC LIMIT 1` (with cutoff at `<as_of> 00:00:00`). This strictly queries the official closing price (15:15:00) of the preceding trading day, seamlessly handling weekends and exchange holidays.
+  4. *LiveTradingService Dynamic Change % Recalculation:* In `src/app/services/live_trading_service.py:_universe_quotes()`, resolved `prev_close` from live feed, stored quote, or reader. Computed `change = round(100.0 * (price - prev_close) / prev_close, 2)` when both `price > 0` and `prev_close > 0`. Missing or zero previous closes safely yield `None`, rendering as `—` with neutral tone in the UI.
+- **Verification Evidence:**
+  - `src/app/tests/test_live_change_pct.py`: 5/5 PASSED (tests positive, negative, zero, None/missing close, FYERS parsing, feed propagation, and Friday-to-Monday weekend retrieval).
+  - `python tools/benchmark.py impact --run`: PASSED in 106.53s (executed `ruff check`, full pytest suite across `src/execution`, `src/broker`, `src/app`).
+  - `cargo check -p vayren-domain -p vayren-shell`: PASSED (0 errors).
+  - `cargo test -p vayren-domain`: 320/320 PASSED.
+  - `python tools/validate_language_ownership.py`: PASSED (436 files checked).
+  - `ruff check` & `ruff format --check`: PASSED on all touched files.
+
+**Previous update (live-ltp-updates-and-daily-reference-reset-20261102):** LIVE LTP UPDATES & DAILY REFERENCE HIGH/LOW RESET PERMANENT FIX —
 - **Issue 1: Live LTP Updates in Strategy Watchlist:**
   1. *Root Cause Identified in Ingestion Pipeline:* In `src/execution/market_data/broker_feed.py:BrokerFeedProvider._ingest()`, `self._last_close[symbol] = price` and `self._last_tick_time[symbol] = stamp` were previously placed after the candle-builder bucket check (`bucket <= last_emitted`). During a 30m candle, once historical catchup or candle building set `last_emitted`, subsequent intra-candle ticks were dropped before updating `_last_close`.
   2. *Pipeline Fix:* Moved mark recording to the top of `_ingest()` so every valid incoming tick immediately updates `self._last_close` and `_last_tick_time`.
