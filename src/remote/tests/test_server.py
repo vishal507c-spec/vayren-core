@@ -393,6 +393,19 @@ def test_recovery_and_desired_state_are_subscribable(live_server: Any) -> None:
         client.close()
 
 
+def test_as_of_survives_section_filter(live_server: Any) -> None:
+    """The as_of timestamp section must survive the subscription filter and default snapshot."""
+    server, gateway = live_server
+    gateway.live = make_live(as_of="2026-11-04T09:15:00+05:30")
+    client, _welcome, snapshot = authed_client(server)
+    try:
+        sections = snapshot["payload"]["snapshot"]
+        assert "as_of" in sections, f"'as_of' missing from snapshot sections: {sorted(sections)}"
+        assert sections["as_of"] == "2026-11-04T09:15:00+05:30"
+    finally:
+        client.close()
+
+
 def test_unknown_channel_still_rejected(live_server: Any) -> None:
     server, _gateway = live_server
     client, _welcome, _snapshot = authed_client(server)

@@ -43,6 +43,7 @@ class OrderPlan:
     stop_price: float | None = None
     time_in_force: str = "DAY"
     bracket: tuple[dict[str, object], ...] = ()  # future: stop/TP legs as data
+    price: float | None = None  # Reference/signal price for margin estimation
 
 
 @dataclass(frozen=True)

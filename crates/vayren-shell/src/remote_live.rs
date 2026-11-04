@@ -51,7 +51,7 @@ pub const PUMP_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Sub-second poll slice to immediately drain and dispatch control commands without waiting.
 pub const PUMP_POLL_SLICE: Duration = Duration::from_millis(20);
 /// Heartbeat deadline when no traffic is observed.
-pub const PUMP_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+pub const PUMP_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Bounded remote-event buffer (oldest dropped first, totals stay truthful).
 pub const REMOTE_EVENT_CAP: usize = 200;
@@ -764,6 +764,14 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
                 );
             }
         }
+    } else if let Some(s) = sections.get("server_time").and_then(|v| v.as_str()) {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            translated.insert(
+                "as_of".to_string(),
+                serde_json::Value::String(trimmed.to_string()),
+            );
+        }
     }
     let stf = sections
         .get("selected_timeframe")
@@ -1295,7 +1303,7 @@ pub fn spawn_remote_pump(
             let mut in_flight: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
             let mut last_ping: Option<std::time::Instant> = None;
-            let mut last_activity = std::time::Instant::now();
+            let mut last_outbound_ping = std::time::Instant::now();
             loop {
                 // Drain queued commands before blocking on the socket: a START
                 // pressed between two frames must not wait for the next one.
@@ -1317,7 +1325,6 @@ pub fn spawn_remote_pump(
                 }
                 match client.next(PUMP_POLL_SLICE) {
                     Ok(ClientEvent::Snapshot { sections, resync }) => {
-                        last_activity = std::time::Instant::now();
                         let _ = tx.send(RemoteUiUpdate::Snapshot { sections, resync });
                         let _ = tx.send(RemoteUiUpdate::Heartbeat {
                             rtt_ms: None,
@@ -1325,7 +1332,6 @@ pub fn spawn_remote_pump(
                         });
                     }
                     Ok(ClientEvent::StateUpdate { sections, .. }) => {
-                        last_activity = std::time::Instant::now();
                         let _ = tx.send(RemoteUiUpdate::StateUpdate { sections });
                         let _ = tx.send(RemoteUiUpdate::Heartbeat {
                             rtt_ms: None,
@@ -1348,7 +1354,6 @@ pub fn spawn_remote_pump(
                         request_id,
                         payload,
                     }) => {
-                        last_activity = std::time::Instant::now();
                         // The gateway's own verdict on a control command:
                         // `ok` false carries the refusal reasons, which is
                         // what clears the pending action honestly.
@@ -1436,9 +1441,9 @@ pub fn spawn_remote_pump(
                     Ok(ClientEvent::Closed) => break,
                     Ok(ClientEvent::Welcome { .. }) => {}
                     Err(ClientError::Timeout) => {
-                        if last_activity.elapsed() >= PUMP_HEARTBEAT_INTERVAL {
+                        if last_outbound_ping.elapsed() >= PUMP_HEARTBEAT_INTERVAL {
                             last_ping = Some(std::time::Instant::now());
-                            last_activity = std::time::Instant::now();
+                            last_outbound_ping = std::time::Instant::now();
                             if client.ping().is_err() {
                                 break;
                             }
@@ -1474,13 +1479,16 @@ pub fn spawn_remote_pump(
                 }
             };
             match RemoteClient::connect(&url, &token, HANDSHAKE_TIMEOUT) {
-                Ok((mut fresh, welcome, _)) => {
+                Ok((mut fresh, welcome, snapshot)) => {
                     drop(token);
                     backoff.reset();
                     if fresh.subscribe(&[], last_seq).is_err() {
                         continue;
                     }
                     client = fresh;
+                    if let ClientEvent::Snapshot { sections, resync } = snapshot {
+                        let _ = tx.send(RemoteUiUpdate::Snapshot { sections, resync });
+                    }
                     let _ = tx.send(RemoteUiUpdate::Role {
                         role: match &welcome {
                             ClientEvent::Welcome { role, .. } => role.clone(),

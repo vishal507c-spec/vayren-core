@@ -493,8 +493,9 @@ class APIGovernor:
             result = func(*args, **kwargs)
             self._record_success(call_class)
             return result
-        except Exception:
-            self._record_failure(call_class)
+        except Exception as exc:
+            if not self.is_validation_error(exc):
+                self._record_failure(call_class)
             self.metrics.record_error(method_name)
             raise
         finally:
@@ -505,6 +506,23 @@ class APIGovernor:
             self.read_circuit.record_success()
         else:
             self.order_circuit.record_success()
+
+    @staticmethod
+    def is_validation_error(exc: Exception) -> bool:
+        """Client-side validation errors (HTTP 400 / bad request / rejected payload).
+
+        These indicate a rejected parameter or malformed payload, NOT a venue
+        infrastructure outage or network disruption. They must never trip the
+        venue circuit.
+        """
+        if getattr(exc, "http_status", None) == 400 or getattr(exc, "status_code", None) == 400:
+            return True
+        code = getattr(exc, "code", None)
+        code_str = str(code or "").upper()
+        if "INVALID_REQUEST" in code_str or "INVALID_SYMBOL" in code_str:
+            return True
+        msg = str(exc)
+        return "HTTP 400" in msg or "400 Bad Request" in msg or "limitPrice does not match" in msg
 
     def _record_failure(self, call_class: CallClass) -> None:
         if call_class is CallClass.READ:

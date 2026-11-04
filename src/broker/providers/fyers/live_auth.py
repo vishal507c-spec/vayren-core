@@ -252,9 +252,12 @@ class _UrllibTransport:
             if exc.code in (401, 403):
                 code = "AUTH_EXPIRED" if exc.code == 401 else "AUTH_INVALID"
             elif exc.code == 400 and any(
-                k in lower_msg for k in ("token", "expired", "invalid", "auth", "session")
+                k in lower_msg
+                for k in ("token", "expired", "auth", "session", "unauthorized", "invalid token")
             ):
                 code = "AUTH_EXPIRED"
+            elif exc.code == 400:
+                code = "INVALID_REQUEST"
             elif exc.code in (408, 504):
                 code = "TIMEOUT"
             elif exc.code >= 500:

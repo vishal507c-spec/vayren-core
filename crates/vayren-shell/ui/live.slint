@@ -442,7 +442,7 @@ component LiveTopCard inherits Rectangle {
     border-color: card-ta.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-line-deep;
     min-width: 110px;
     max-width: 165px;
-    height: 46px;
+    height: 50px;
     clip: true;
     animate background { duration: 120ms; }
     animate border-color { duration: 120ms; }
@@ -459,9 +459,9 @@ component LiveTopCard inherits Rectangle {
         alignment: stretch;
 
         if root.show-icon: Rectangle {
-            width: 24px;
-            height: 24px;
-            border-radius: 12px;
+            width: 26px;
+            height: 26px;
+            border-radius: 13px;
             background: LiveTone.chip(root.tone);
             border-width: 1px;
             border-color: LiveTone.ink(root.tone);
@@ -523,7 +523,7 @@ component LiveBrokerCapitalCard inherits Rectangle {
     border-color: root.tone == 1 ? VayrenPalette.live-teal-deep : (cap-ta.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-line-deep);
     min-width: 150px;
     max-width: 205px;
-    height: 46px;
+    height: 50px;
     clip: true;
     animate background { duration: 120ms; }
     animate border-color { duration: 120ms; }
@@ -1265,7 +1265,7 @@ export component LiveScreen inherits Rectangle {
 
         // ══ 1. TOP STATUS & CONTROL BAR ══════════════════════════════════════
         Rectangle {
-            height: root.is-narrow-bar ? 92px : 56px;
+            height: root.is-narrow-bar ? 96px : 60px;
             min-width: 0px;
             width: 100%;
             background: VayrenPalette.live-topbar;
@@ -1277,7 +1277,9 @@ export component LiveScreen inherits Rectangle {
             if !root.is-narrow-bar: HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
-                spacing: 6px;
+                padding-top: 5px;
+                padding-bottom: 5px;
+                spacing: 8px;
                 alignment: stretch;
 
                 // ── Group 1: Venue & Account Status ──

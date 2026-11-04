@@ -7,7 +7,57 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (fyers-order-ws-thread-leak-and-degradation-fix-20261104):** FYERS ORDER WS RESTART_FLAG FLAP & THREAD LEAK FIX —
+**Latest update (fyers-mis-margin-limitprice-and-circuit-fix-20261104):** FYERS MIS MARGIN API LIMITPRICE & CIRCUIT BREAKER FIX —
+- **Problem Statement & Root Cause:**
+  1. *FYERS API v3 Schema Violation (HTTP 400):* For `POST /api/v3/multiorder/margin`, FYERS API v3 mandates that for MARKET orders (`type: 2`) and STOP_MARKET orders (`type: 3`), `limitPrice` must strictly be `0.0`. `session_adapter.py` sent `ref_price` as `limitPrice` in the JSON payload, causing FYERS API to reject all MARKET margin queries with `HTTP 400 Bad Request: "limitPrice does not match: 0"`.
+  2. *Defective Fallback Margin Estimation:* In `OrderPlan`, no `price` attribute existed, causing `ref_price` to fall back to `0.0`. When `ref_price <= 0`, the fallback calculation used `price = 1.0`, artificially estimating margin as ₹0.25 for all stocks (e.g. ₹0.25 for ₹3,300 stock).
+  3. *Global Circuit Breaker Trip on Client Validation Error:* Because `APIGovernor.call()` treated all exceptions as infrastructure failures, 5 consecutive HTTP 400 validation rejections tripped the `read_circuit` to `OPEN`. Once open, all subsequent margin checks AND all account balance reads (`adapter.funds()`) were blocked locally with `CircuitOpenError`.
+- **Permanent Solution Implemented:**
+  1. *FYERS API Payload Compliance (`src/broker/providers/fyers/session_adapter.py`):*
+     - For MARKET (`type: 2`) and STOP_MARKET (`type: 3`): `limitPrice` is strictly `0.0`.
+     - For LIMIT (`type: 1`) and STOP_LIMIT (`type: 4`): `limitPrice` is positive float.
+     - For STOP_MARKET (`type: 3`) and STOP_LIMIT (`type: 4`): `stopPrice` is positive trigger price.
+     - Reference price is strictly decoupled from the outbound payload and reserved for margin estimation.
+  2. *Accurate Reference Price & Fail-Closed Fallback:*
+     - Added `price: float | None = None` to `OrderPlan` in `src/execution/models/order.py`.
+     - In `OrderPlanner.plan()`, populated `price=reference_price`.
+     - In `session_adapter.py:order_margin()`, resolved `ref_price` from `limit_price`, `stop_price`, `plan.price`, `plan.reference_price`, or live quote `last_price(symbol)`.
+     - Removed `price = 1.0` fallback: if `ref_price <= 0`, raises `BrokerError("unable to determine reference price for margin calculation: {symbol}", code=ErrorCode.INVALID_REQUEST)`. Inaccurate estimates can never approve an order.
+  3. *Validation Error Classification in API Governor (`src/broker/common/api_governance.py` & `src/broker/providers/fyers/live_auth.py`):*
+     - Added `is_validation_error(exc)`: HTTP 400 client-side validation errors / bad requests do not record failure against the venue circuit breaker.
+     - In `live_auth.py`: classified non-token HTTP 400 as `ErrorCode.INVALID_REQUEST` instead of `VENUE`.
+     - Preserved fail-closed per-stock isolation: failing stock is marked `ORDER_BLOCKED` while unrelated endpoints (`funds()`) and other stocks remain unblocked.
+  4. *Comprehensive Test Suite (`src/broker/tests/test_fyers_margin_integration.py`):*
+     - Added 9 unit and integration tests covering all 10 required conditions across all 22 stocks, circuit isolation, order types (MARKET, LIMIT, STOP_MARKET, STOP_LIMIT), BUY/SELL, and per-stock failure isolation.
+- **Verification Evidence:**
+  - `pytest src/broker/tests/test_fyers_margin_integration.py`: 9/9 PASSED.
+  - `pytest src/execution/tests/test_live_sizing_gate.py`: 8/8 PASSED.
+  - `pytest src/execution/tests src/broker/tests`: 309/309 PASSED.
+  - `pytest src/strategy/tests src/risk/tests`: 236/236 PASSED.
+  - `cargo check -p vayren-domain -p vayren-core`: PASSED in 1.71s.
+  - `python tools/validate_language_ownership.py`: PASSED (447 files checked).
+  - `ruff check`: All checks passed.
+  - `pyright`: 0 errors, 0 warnings.
+- **Git & Workspace State:** On `main`, LOCAL ONLY (not deployed to EC2).
+
+**Previous update (remote-heartbeat-snapshot-sync-fix-20261104):** REMOTE CLIENT HEARTBEAT STARVATION & RECONNECT SNAPSHOT RESYNC FIX —
+- **Problem Statement (from User's Screenshot at 09:16:07 IST):**
+  - UI displayed `RUNNING — market data streaming is not ready: candle store 17/22, 5 without data; venue feed connected, live ticks 17/22`.
+  - Footer status bar was frozen on `SNAPSHOT: 08:50:34 IST` (26 minutes stale!) and `RTT: NOT AVAILABLE`.
+  - On EC2 backend, all 22 symbols were loaded and streaming live, but the desktop UI was not reflecting real-time updates.
+- **Forensic Investigation & Root Cause (100% Proven):**
+  1. *Heartbeat Starvation & 90s Disconnect Loop:* In `crates/vayren-shell/src/remote_live.rs`, `last_activity` was updated on every incoming packet (ticks arrive every 1s). The check `if last_activity.elapsed() >= PUMP_HEARTBEAT_INTERVAL` (15s) was therefore never reached. The client never sent WebSocket pings. EC2 server (`VAYREN_REMOTE_IDLE_TIMEOUT_S = 90.0`) saw zero inbound bytes from client and dropped the connection every ~92s (`remote: idle timeout`).
+  2. *Authoritative Snapshot Discard on Reconnect:* In `crates/vayren-shell/src/remote_live.rs`, on every 90s reconnect, `RemoteClient::connect(...)` fetched a fresh authoritative snapshot (`Ok((mut fresh, welcome, _))`), but discarded it (`_`) and only called `subscribe(&[], last_seq)`. Because `subscribe` only replays recent event ring buffer, no full snapshot was ever delivered to the UI after disconnects, leaving the UI stuck on the pre-market 08:50:34 IST snapshot.
+  3. *Missing `as_of` in Gateway Filtering:* In `src/remote/server.py`, `EVENT_CHANNELS` lacked `"as_of"`, causing `_push_snapshot` and `_publish` to strip the timestamp. `state.snapshot_time` was never updated from ongoing snapshots.
+  4. *Differential `state_update` Race:* In `src/remote/server.py`, `_publish` could race before `_push_snapshot` populated `conn.last_sections`.
+- **Permanent Solution Implemented:**
+  1. *Unconditional Outbound Heartbeat:* In `crates/vayren-shell/src/remote_live.rs`, tracked `last_outbound_ping` independently from inbound packets. Sends periodic WebSocket pings every 15s regardless of incoming traffic, preventing EC2 idle timeouts and maintaining continuous RTT metrics.
+  2. *Reconnect Snapshot Forwarding:* In `crates/vayren-shell/src/remote_live.rs`, on reconnect forwarded the authoritative snapshot to `RemoteUiUpdate::Snapshot { sections, resync: true }` to immediately resync the Slint UI. Added fallback to `server_time` in `apply_remote_sections` if `as_of` is omitted.
+  3. *Server Event Channels & Guard:* In `src/remote/server.py`, added `"as_of"` to `EVENT_CHANNELS`, added `if not conn.last_sections and not conn.needs_resync: continue` in `_publish`.
+  4. *EC2 Deployment & Verification:* Updated `server.py` transferred to EC2 and `vayren-remote.service` restarted. Verified EC2 logs: all 22 symbols live, gates reporting `READY`.
+- **Git & Workspace State:** On `main`.
+
+**Previous update (fyers-order-ws-thread-leak-and-degradation-fix-20261104):** FYERS ORDER WS RESTART_FLAG FLAP & THREAD LEAK FIX —
 - **Problem Statement (from User's Screenshot):**
   - UI displayed `START BLOCKED: [1] fyers broker session is degraded (all checks passed) — reconnect in SYSTEM → BROKERS · [2] ORDER STREAM: disconnected`.
   - Forensic investigation on EC2 revealed PID `915365` accumulated **335 zombie threads** and high CPU.

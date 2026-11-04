@@ -113,6 +113,7 @@ EVENT_CHANNELS = (
     "quotes",
     "pnl",
     "server_code",
+    "as_of",
 )
 
 _CLOSE_POLICY = 1008
@@ -858,6 +859,8 @@ class RemoteServer:
         section_hashes = {key: _stable_hash(value) for key, value in remote_snapshot.items()}
         for conn in connections:
             if not conn.tracker.authenticated:
+                continue
+            if not conn.last_sections and not conn.needs_resync:
                 continue
             if conn.needs_resync:
                 conn.last_sections = {}

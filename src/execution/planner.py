@@ -53,4 +53,5 @@ class OrderPlanner:
             order_type=order_type,
             limit_price=limit_price,
             bracket=bracket,
+            price=reference_price,
         )

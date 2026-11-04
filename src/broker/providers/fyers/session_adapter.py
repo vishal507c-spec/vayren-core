@@ -1080,15 +1080,37 @@ class FyersSessionAdapter:
         qty = self._venue_quantity(plan)
         order_type_val, _, limit_price, stop_price = self._venue_price_and_type(plan)
         product_type = self._venue_product(plan)
+
+        # 1. Determine accurate reference price for margin estimation.
+        # Check limit_price, stop_price, plan.price, plan.reference_price, or live quote.
         ref_price = (
             limit_price
             if (limit_price is not None and limit_price > 0)
             else (
                 stop_price
                 if (stop_price is not None and stop_price > 0)
-                else float(getattr(plan, "price", 0.0) or 0.0)
+                else float(
+                    getattr(plan, "price", 0.0)
+                    or getattr(plan, "reference_price", 0.0)
+                    or 0.0
+                )
             )
         )
+        if ref_price <= 0:
+            try:
+                lp = self.last_price(symbol)
+                if lp is not None and lp > 0:
+                    ref_price = float(lp)
+            except Exception:
+                pass
+
+        # 2. FYERS API v3 payload rules for POST /api/v3/multiorder/margin:
+        # - MARKET (type 2) & STOP_MARKET (type 3): limitPrice MUST be 0.0.
+        # - LIMIT (type 1) & STOP_LIMIT (type 4): limitPrice MUST be positive float.
+        # - STOP_MARKET (type 3) & STOP_LIMIT (type 4): stopPrice MUST be positive float.
+        # - MARKET (type 2) & LIMIT (type 1): stopPrice MUST be 0.0.
+        api_limit_price = float(limit_price or 0.0) if order_type_val in (1, 4) else 0.0
+        api_stop_price = float(stop_price or 0.0) if order_type_val in (3, 4) else 0.0
 
         usable = False
         try:
@@ -1106,7 +1128,8 @@ class FyersSessionAdapter:
                         "type": order_type_val,
                         "side": side_val,
                         "productType": product_type,
-                        "limitPrice": float(ref_price or 0.0),
+                        "limitPrice": api_limit_price,
+                        "stopPrice": api_stop_price,
                     }
                 ]
             }
@@ -1128,9 +1151,14 @@ class FyersSessionAdapter:
 
         # Fallback for mock, offline, or test environments:
         # Evaluate each stock independently; never assume fixed 5x leverage.
+        # Fail closed: NEVER default to ₹1.0 or any artificial price.
+        if ref_price <= 0:
+            raise BrokerError(
+                f"unable to determine reference price for margin calculation: {symbol}",
+                code=ErrorCode.INVALID_REQUEST,
+            )
         margin_rate = float(getattr(plan, "margin_rate", 0.25) or 0.25)
-        price = ref_price if ref_price > 0 else 1.0
-        return float(round(qty * price * margin_rate, 2))
+        return float(round(qty * ref_price * margin_rate, 2))
 
     def positions(self) -> list[dict[str, Any]]:
         """Net positions (empty when flat; honest failure otherwise)."""
