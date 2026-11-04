@@ -649,6 +649,8 @@ class FyersSessionAdapter:
                     on_close=self._on_ws_close,
                 )
 
+            if hasattr(self._order_ws, "restart_flag"):
+                self._order_ws.restart_flag = False
             if hasattr(self._order_ws, "connect"):
                 self._order_ws.connect()
             # Subscription happens exactly once, in _on_ws_connect: the

@@ -184,6 +184,7 @@ def test_final_gate_passes_sized_quantity() -> None:
     session._submit(_intent(), _plan(quantity=22.0), 1_700_000_000.0)
     assert broker.placed == ["i1:o1"]
 
+
 def test_pre_order_buying_power_passes_when_funds_sufficient() -> None:
     from typing import Any
 

@@ -7,7 +7,29 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (intraday-mis-buying-power-margin-validation-20261103):** INTRADAY MIS BUYING-POWER & BROKER MARGIN VALIDATION —
+**Latest update (fyers-order-ws-thread-leak-and-degradation-fix-20261104):** FYERS ORDER WS RESTART_FLAG FLAP & THREAD LEAK FIX —
+- **Problem Statement (from User's Screenshot):**
+  - UI displayed `START BLOCKED: [1] fyers broker session is degraded (all checks passed) — reconnect in SYSTEM → BROKERS · [2] ORDER STREAM: disconnected`.
+  - Forensic investigation on EC2 revealed PID `915365` accumulated **335 zombie threads** and high CPU.
+  - Root cause: `fyers_apiv3.FyersOrderSocket` defaulted `restart_flag = True`. On disconnects outside market hours, the vendor SDK entered an unbounded internal reconnect loop (`self.t = Thread(target=ws.run_forever).start()`) without joining previous threads, spawning hundreds of parallel zombie threads fighting for the same token, causing FYERS to drop all order and market data WebSockets.
+- **Permanent Solution Implemented:**
+  - In `src/broker/providers/fyers/session_adapter.py`: explicitly set `self._order_ws.restart_flag = False` immediately upon instantiating `FyersOrderSocket`.
+  - Reconnect lifecycle is now solely governed by VAYREN's bounded flap breaker and cooldown.
+  - Deployed to EC2 and safely restarted `vayren-remote.service`.
+  - Verified: Thread count dropped from 335 to 12. Both `ORDER_WS_CONNECTED` and `MARKET_WS_CONNECTED` are now active, stable, and zero errors logged.
+- **Git & Workspace State:** On `main`.
+
+**Previous update (desktop-packaged-remote-exe-delivered-20261104):** OFFICIAL PRODUCTION DESKTOP EXECUTABLE WITH PACKAGED-REMOTE FEATURE BUILT & VERIFIED —
+- **Problem Statement (from User's Screenshot):**
+  - Prior local launch ran without `packaged-remote` feature, falling back to local offline Zerodha dev mode (`EC2 / REMOTE GATEWAY DISCONNECTED`, `BROKER Zerodha LOGIN REQUIRED`, `START BLOCKED - no market data for DREDGECORP 30m`).
+- **Resolution & Build Execution:**
+  - Invoked `python tools/build_rust.py --package` compiling all view DLLs and `vayren-shell` with `--features packaged-remote`.
+  - Built official production binary: `target/release/vayren-shell.exe` (42,083,840 bytes, timestamp `26/11/04 08:26:06 AM`).
+  - Desktop shortcut synced: `C:\Users\visha\Desktop\VAYREN.lnk` -> `target\release\vayren-shell.exe`.
+  - Remote Gateway smoke probe verified: `target\release\vayren-shell.exe --probe` connected to `wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1` (exit 0).
+- **Git & Workspace State:** Clean, on `main` at `a6042fd`.
+
+**Previous update (intraday-mis-buying-power-margin-validation-20261103):** INTRADAY MIS BUYING-POWER & BROKER MARGIN VALIDATION —
 - **Problem Statement & Root Cause:**
   1. *Hardcoded / Blanket Leverage Assumption:* Previously, position sizing assumed a blanket leverage multiplier (4x / 5x) across all stocks. In reality, under SEBI Peak Margin regulations (VaR + ELM), intraday MIS margin requirements vary significantly per stock (from 20% to 25%, 40%, or 100% for high volatility/T2T stocks).
   2. *Missing Pre-Order Broker Margin Gate:* Neither the standalone monolith (`vayren.py`) nor the modular backend (`vayren-core`) validated the actual broker-required MIS margin for an order against available funds prior to order submission. Sizing based purely on risk budget (`max_risk / risk_per_share`) could size a position whose gross order value required more intraday margin than available cash, causing post-submission broker rejections ("Insufficient funds/margin").

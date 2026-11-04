@@ -268,7 +268,8 @@
         "src/app/services/broker_manager.py",
         "src/app/services/broker_selection_service.py",
         "src/app/services/eligibility.py",
-        "src/app/services/live_trading_service.py"
+        "src/app/services/live_trading_service.py",
+        "src/app/services/market_data_service.py"
       ],
       "to": "src/broker/providers"
     },
@@ -1264,7 +1265,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 6570,
+  "entity_count": 6581,
   "files": [
     {
       "domain": "CORE",
@@ -2804,6 +2805,16 @@
       "owner": "route:app-composition",
       "owner_source": "route",
       "path": "src/app/tests/test_live_broker_capital.py",
+      "retention_state": null
+    },
+    {
+      "domain": "APP_COMPOSITION",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/app",
+      "owner": "route:app-composition",
+      "owner_source": "route",
+      "path": "src/app/tests/test_live_change_pct.py",
       "retention_state": null
     },
     {
@@ -7163,6 +7174,7 @@
         "src/app/tests/test_live_account_confirmation.py",
         "src/app/tests/test_live_actions.py",
         "src/app/tests/test_live_broker_capital.py",
+        "src/app/tests/test_live_change_pct.py",
         "src/app/tests/test_live_dashboard_verification.py",
         "src/app/tests/test_live_ltp_and_reference_reset.py",
         "src/app/tests/test_live_ltp_pipeline.py",
@@ -8215,7 +8227,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 15391,
+  "relationship_count": 15433,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -10220,6 +10232,8 @@
         "app.tests.test_live_broker_capital:test_live_capital_block_login_required",
         "app.tests.test_live_broker_capital:test_live_capital_block_with_connected_fyers_funds",
         "app.tests.test_live_broker_capital:test_live_capital_block_with_zerodha_zero_margin",
+        "app.tests.test_live_change_pct:test_change_pct_positive_negative_zero",
+        "app.tests.test_live_change_pct:test_missing_and_zero_previous_close",
         "app.tests.test_live_dashboard_verification:test_1_never_shows_ready_when_degraded_or_failed",
         "app.tests.test_live_dashboard_verification:test_2_outside_market_hours_status_and_account_preserved",
         "app.tests.test_live_dashboard_verification:test_3_market_open_states_matrix",
@@ -10486,7 +10500,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 66,
+      "line": 67,
       "module": "src/app/services",
       "name": "DiscoveryReport",
       "public": true,
@@ -10535,6 +10549,7 @@
         "app.tests.test_headless_lab_coverage:test_the_probe_reports_the_window_and_the_counts_it_measured",
         "app.tests.test_headless_market_snapshot:test_every_market_snapshot_path_reports_the_strategies",
         "app.tests.test_headless_market_snapshot:test_market_snapshot_carries_the_strategy_names",
+        "app.tests.test_live_change_pct:test_get_previous_close_from_sqlite",
         "app.tests.test_market_data_service:test_base_bars_normalize_to_canonical_shape",
         "app.tests.test_market_data_service:test_date_filtering",
         "app.tests.test_market_data_service:test_discovery_lists_real_symbols_and_skips_invalid",
@@ -10563,7 +10578,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 176,
+      "line": 177,
       "module": "src/app/services",
       "name": "MarketDataService",
       "public": true,
@@ -10596,7 +10611,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 154,
+      "line": 155,
       "module": "src/app/services",
       "name": "_epoch",
       "public": false,
@@ -10613,7 +10628,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 141,
+      "line": 142,
       "module": "src/app/services",
       "name": "_format_stamp",
       "public": false,
@@ -10630,7 +10645,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 108,
+      "line": 109,
       "module": "src/app/services",
       "name": "_parse_stamp",
       "public": false,
@@ -10647,7 +10662,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 158,
+      "line": 159,
       "module": "src/app/services",
       "name": "_valid_ohlcv",
       "public": false,
@@ -10667,7 +10682,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 75,
+      "line": 76,
       "module": "src/app/services",
       "name": "resolve_data_dir",
       "public": true,
@@ -16393,6 +16408,109 @@
       "name": "test_refresh_capital_without_a_broker_says_so",
       "public": true,
       "qualified": "app.tests.test_live_broker_capital:test_refresh_capital_without_a_broker_says_so",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_live_change_pct:test_get_previous_close_from_sqlite"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_live_change_pct._create_mock_ohlcv_db",
+      "file": "src/app/tests/test_live_change_pct.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 27,
+      "module": "src/app",
+      "name": "_create_mock_ohlcv_db",
+      "public": false,
+      "qualified": "app.tests.test_live_change_pct:_create_mock_ohlcv_db",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.market_data.broker_feed:BrokerFeedProvider"
+      ],
+      "dotted": "app.tests.test_live_change_pct.test_broker_feed_records_and_exposes_prev_close",
+      "file": "src/app/tests/test_live_change_pct.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 150,
+      "module": "src/app",
+      "name": "test_broker_feed_records_and_exposes_prev_close",
+      "public": true,
+      "qualified": "app.tests.test_live_change_pct:test_broker_feed_records_and_exposes_prev_close",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService"
+      ],
+      "dotted": "app.tests.test_live_change_pct.test_change_pct_positive_negative_zero",
+      "file": "src/app/tests/test_live_change_pct.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 78,
+      "module": "src/app",
+      "name": "test_change_pct_positive_negative_zero",
+      "public": true,
+      "qualified": "app.tests.test_live_change_pct:test_change_pct_positive_negative_zero",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData"
+      ],
+      "dotted": "app.tests.test_live_change_pct.test_fyers_tick_normalization_extracts_prev_close",
+      "file": "src/app/tests/test_live_change_pct.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 121,
+      "module": "src/app",
+      "name": "test_fyers_tick_normalization_extracts_prev_close",
+      "public": true,
+      "qualified": "app.tests.test_live_change_pct:test_fyers_tick_normalization_extracts_prev_close",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_live_change_pct:_create_mock_ohlcv_db"
+      ],
+      "dotted": "app.tests.test_live_change_pct.test_get_previous_close_from_sqlite",
+      "file": "src/app/tests/test_live_change_pct.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 58,
+      "module": "src/app",
+      "name": "test_get_previous_close_from_sqlite",
+      "public": true,
+      "qualified": "app.tests.test_live_change_pct:test_get_previous_close_from_sqlite",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService"
+      ],
+      "dotted": "app.tests.test_live_change_pct.test_missing_and_zero_previous_close",
+      "file": "src/app/tests/test_live_change_pct.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 104,
+      "module": "src/app",
+      "name": "test_missing_and_zero_previous_close",
+      "public": true,
+      "qualified": "app.tests.test_live_change_pct:test_missing_and_zero_previous_close",
       "tests": []
     },
     {
@@ -25029,7 +25147,7 @@
       "file": "src/broker/interfaces/faces.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 146,
+      "line": 148,
       "module": "src/broker",
       "name": "BrokerPlugin",
       "public": true,
@@ -25047,7 +25165,7 @@
       "file": "src/broker/interfaces/faces.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 226,
+      "line": 228,
       "module": "src/broker",
       "name": "FactoryPlugin",
       "public": true,
@@ -25096,7 +25214,7 @@
       "file": "src/broker/interfaces/faces.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 166,
+      "line": 168,
       "module": "src/broker",
       "name": "PluginLike",
       "public": true,
@@ -25114,7 +25232,7 @@
       "file": "src/broker/interfaces/faces.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 184,
+      "line": 186,
       "module": "src/broker",
       "name": "StaticPlugin",
       "public": true,
@@ -26118,6 +26236,7 @@
     {
       "called_by": [
         "app.tests.test_autonomous_engine_lifecycle:test_8_websocket_disconnect_graceful_degradation",
+        "app.tests.test_live_change_pct:test_fyers_tick_normalization_extracts_prev_close",
         "app.tests.test_system_wide_bug_hunt:test_fyers_tick_latency_calculation",
         "broker.providers.fyers.live_activation:_get_shared_market_data_face",
         "broker.providers.fyers.live_activation:register_fyers_live_instance",
@@ -26693,7 +26812,7 @@
       "file": "src/broker/providers/fyers/session_adapter.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 2245,
+      "line": 2311,
       "module": "src/broker/providers",
       "name": "_safe_amount",
       "public": false,
@@ -68756,6 +68875,7 @@
     },
     {
       "called_by": [
+        "app.tests.test_live_change_pct:test_broker_feed_records_and_exposes_prev_close",
         "app.tests.test_live_ltp_and_reference_reset:test_broker_feed_provider_always_records_ltp_mark",
         "app.tests.test_startup_recovery:test_4_websocket_disconnects_and_reconnects_backfill",
         "execution.tests.test_fyers_candle_alignment:test_duplicate_ticks_handling",
@@ -74131,9 +74251,12 @@
         "execution.tests.test_live_sizing_gate:_session",
         "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
         "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "execution.tests.test_live_sizing_gate:test_independent_per_stock_margin_evaluation_without_fixed_leverage",
         "execution.tests.test_live_sizing_gate:test_live_buy_sized_from_broker_capital",
         "execution.tests.test_live_sizing_gate:test_live_buy_without_broker_funds_is_blocked",
-        "execution.tests.test_live_sizing_gate:test_live_buy_without_stop_is_blocked"
+        "execution.tests.test_live_sizing_gate:test_live_buy_without_stop_is_blocked",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_blocks_when_margin_exceeds_funds",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_passes_when_funds_sufficient"
       ],
       "callers_complete": true,
       "calls": [],
@@ -74168,7 +74291,10 @@
     {
       "called_by": [
         "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
-        "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity"
+        "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "execution.tests.test_live_sizing_gate:test_independent_per_stock_margin_evaluation_without_fixed_leverage",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_blocks_when_margin_exceeds_funds",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_passes_when_funds_sufficient"
       ],
       "callers_complete": true,
       "calls": [
@@ -74188,7 +74314,10 @@
     {
       "called_by": [
         "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
-        "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity"
+        "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "execution.tests.test_live_sizing_gate:test_independent_per_stock_margin_evaluation_without_fixed_leverage",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_blocks_when_margin_exceeds_funds",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_passes_when_funds_sufficient"
       ],
       "callers_complete": true,
       "calls": [
@@ -74209,9 +74338,12 @@
       "called_by": [
         "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
         "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "execution.tests.test_live_sizing_gate:test_independent_per_stock_margin_evaluation_without_fixed_leverage",
         "execution.tests.test_live_sizing_gate:test_live_buy_sized_from_broker_capital",
         "execution.tests.test_live_sizing_gate:test_live_buy_without_broker_funds_is_blocked",
-        "execution.tests.test_live_sizing_gate:test_live_buy_without_stop_is_blocked"
+        "execution.tests.test_live_sizing_gate:test_live_buy_without_stop_is_blocked",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_blocks_when_margin_exceeds_funds",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_passes_when_funds_sufficient"
       ],
       "callers_complete": true,
       "calls": [
@@ -74302,6 +74434,27 @@
       "callers_complete": true,
       "calls": [
         "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_intent",
+        "execution.tests.test_live_sizing_gate:_plan",
+        "execution.tests.test_live_sizing_gate:_session",
+        "risk.sizing:SizingVerdict"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate.test_independent_per_stock_margin_evaluation_without_fixed_leverage",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 245,
+      "module": "src/execution",
+      "name": "test_independent_per_stock_margin_evaluation_without_fixed_leverage",
+      "public": true,
+      "qualified": "execution.tests.test_live_sizing_gate:test_independent_per_stock_margin_evaluation_without_fixed_leverage",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_sizing_gate:_Broker",
         "execution.tests.test_live_sizing_gate:_session",
         "execution.tests.test_live_sizing_gate:_signal"
       ],
@@ -74352,6 +74505,48 @@
       "name": "test_live_buy_without_stop_is_blocked",
       "public": true,
       "qualified": "execution.tests.test_live_sizing_gate:test_live_buy_without_stop_is_blocked",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_intent",
+        "execution.tests.test_live_sizing_gate:_plan",
+        "execution.tests.test_live_sizing_gate:_session",
+        "risk.sizing:SizingVerdict"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate.test_pre_order_buying_power_blocks_when_margin_exceeds_funds",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 213,
+      "module": "src/execution",
+      "name": "test_pre_order_buying_power_blocks_when_margin_exceeds_funds",
+      "public": true,
+      "qualified": "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_blocks_when_margin_exceeds_funds",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_intent",
+        "execution.tests.test_live_sizing_gate:_plan",
+        "execution.tests.test_live_sizing_gate:_session",
+        "risk.sizing:SizingVerdict"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate.test_pre_order_buying_power_passes_when_funds_sufficient",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 188,
+      "module": "src/execution",
+      "name": "test_pre_order_buying_power_passes_when_funds_sufficient",
+      "public": true,
+      "qualified": "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_passes_when_funds_sufficient",
       "tests": []
     },
     {
@@ -85534,6 +85729,9 @@
         "execution.runtime.session:LiveSession",
         "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
         "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "execution.tests.test_live_sizing_gate:test_independent_per_stock_margin_evaluation_without_fixed_leverage",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_blocks_when_margin_exceeds_funds",
+        "execution.tests.test_live_sizing_gate:test_pre_order_buying_power_passes_when_funds_sufficient",
         "risk.sizing:_blocked",
         "risk.sizing:_size_position",
         "risk.sizing:size_position"
@@ -115348,6 +115546,12 @@
       "granularity": "module",
       "module": "src/app",
       "path": "src/app/tests/test_live_broker_capital.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/app",
+      "path": "src/app/tests/test_live_change_pct.py",
       "targets": []
     },
     {

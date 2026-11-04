@@ -1090,23 +1090,24 @@ class LiveSession:
             margin_fn = getattr(self._broker, "order_margin", None)
             if callable(margin_fn):
                 try:
-                    required_margin = float(margin_fn(plan))
+                    margin_val: Any = margin_fn(plan)
+                    required_margin = float(margin_val)
                 except Exception as exc:
                     return ("ORDER_BLOCKED", f"broker margin check failed: {exc}")
 
                 funds_fn = getattr(self._broker, "funds", None)
-                avail_funds = None
+                avail_funds: float | None = None
                 if callable(funds_fn):
                     try:
-                        f_data = funds_fn() or {}
-                        raw_avail = f_data.get("available")
-                        if raw_avail is None:
-                            raw_avail = (
-                                f_data.get("available_margin")
-                                or f_data.get("available_balance")
-                            )
-                        if raw_avail is not None:
-                            avail_funds = float(raw_avail)
+                        f_data: Any = funds_fn() or {}
+                        if isinstance(f_data, dict):
+                            raw_avail: Any = f_data.get("available")
+                            if raw_avail is None:
+                                raw_avail = f_data.get("available_margin") or f_data.get(
+                                    "available_balance"
+                                )
+                            if raw_avail is not None:
+                                avail_funds = float(raw_avail)
                     except Exception:
                         avail_funds = None
 
