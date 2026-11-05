@@ -81,7 +81,7 @@ _LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 1.0
 #: trades) yet far shorter than a session, so a dead socket can never keep
 #: presenting the last price of a previous run as current market data.
 _VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
-_LIVE_MARK_MAX_AGE_S = 60.0
+_LIVE_MARK_MAX_AGE_S = 180.0
 
 #: Recovery phases that mean the operator still has an interrupted run to
 #: resolve. A restart while desired==RUNNING is the normal way to enter one.
@@ -2295,9 +2295,6 @@ class LiveTradingService:
             if not market_open:
                 ws_status = "MARKET CLOSED"
                 md_status = "MARKET CLOSED"
-            elif view.get("status") == "DEGRADED":
-                ws_status = "DEGRADED"
-                md_status = "STALE"
             elif not running:
                 # Broker auth is not a feed: a stopped engine streaming
                 # nothing must never inherit STREAMING from stored candles.
@@ -3881,6 +3878,10 @@ class LiveTradingService:
                 feed_label = f"{feed_label} (session {session_word})"
             reason = f"{store_reason}; {feed_label}"
             if self._config.mode == "LIVE":
+                from broker.providers.fyers.live_market_data import is_nse_market_open
+
+                market_open = is_nse_market_open()
+                is_running = session_word == "RUNNING"
                 unhealthy_transport = any(
                     not d.get("transport", {}).get("healthy", True)
                     for d in (snap.get("market_data") or {}).get("delivery", [])
@@ -3908,17 +3909,13 @@ class LiveTradingService:
                             "reason": f"{store_reason}; {fail_reason}",
                         }
                     )
-                from broker.providers.fyers.live_market_data import is_nse_market_open
-
-                market_open = is_nse_market_open()
-                is_running = session_word == "RUNNING"
-                if (
+                elif (
                     live_feed == "live"
                     and not missing
                     and not nodata
-                    and live_available >= len(quotes)
+                    and live_available > 0
                 ):
-                    # Active verified live feed streaming fresh ticks for every symbol
+                    # Active verified live feed streaming fresh ticks
                     gates.append(
                         {
                             "name": "Market Data Streaming",

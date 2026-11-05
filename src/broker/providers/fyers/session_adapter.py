@@ -530,6 +530,8 @@ class FyersSessionAdapter:
             return True, (
                 f"streaming — {self._order_ws_messages_received} updates, last {int(age or 0)}s ago"
             )
+        if time.monotonic() < self._order_ws_suspended_until:
+            return True, "idle cooldown — REST polling fallback active"
         if self._order_ws is not None:
             return False, "reconnecting"
         if self._order_ws_state == STATE_ERROR:

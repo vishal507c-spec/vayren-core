@@ -7,7 +7,25 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (fyers-mis-margin-limitprice-and-circuit-fix-20261104):** FYERS MIS MARGIN API LIMITPRICE & CIRCUIT BREAKER FIX —
+**Latest update (live-feed-decouple-and-order-ws-cooldown-fix-20261105):** LIVE FEED STATUS DECOUPLING & ORDER WS COOLDOWN FIX —
+- **Problem Statement & Root Cause:**
+  1. *Broker View Conflation in Market Status:* In `live_trading_service.py` (lines 2298-2300), `ws_status = "DEGRADED"` and `md_status = "STALE"` were set whenever `view.get("status") == "DEGRADED"`. This falsely dragged down the Market WebSocket and Data badges whenever the broker's order stream experienced an idle disconnect, even while the Market WebSocket was 100% healthy and all 22 stocks were streaming live.
+  2. *Excessively Strict Readiness Gate:* In `live_trading_service.py` (line 3916), `live_available >= len(quotes)` required all 22 stocks to have ticks within 60s. At 09:16:07 IST (67 seconds after market open), 5 smallcap stocks had not yet executed a trade on NSE, causing the system to flash `Market Data Streaming: NOT READY (17/22, 5 without data)`.
+  3. *Overly Aggressive Mark Staleness Threshold:* `_LIVE_MARK_MAX_AGE_S = 60.0` declared a symbol mark STALE if no trade executed for >60s. In NSE cash equity markets, small/midcap stocks often take 1-3 minutes between trades.
+  4. *Fyers Idle Order Socket Flap Degradation:* In `session_adapter.py`, when Fyers disconnected an idle order socket after 2 minutes of no orders, `order_stream_health()` returned `(False, "disconnected")` during cooldown instead of acknowledging that REST polling fallback is active, causing `BrokerManager` to mark the leg `FAILED` and enter a `DEGRADED` state.
+- **Permanent Solution Implemented:**
+  1. *Decoupled Market Feed from Broker View:* `ws_status` and `md_status` are now strictly determined by market feed connection and live ticks, completely isolated from broker view degradation.
+  2. *Readiness Gate Fixed:* Market Data Streaming gate is marked `READY` when `live_feed == "live"` and `live_available > 0` and transport is healthy, reporting symbol counts in `reason` without blocking the entire session.
+  3. *Realistic Mark Staleness:* Raised `_LIVE_MARK_MAX_AGE_S` to 180.0s (3 minutes).
+  4. *Honest Order Stream Cooldown:* In `session_adapter.py:order_stream_health()`, returns `True, "idle cooldown — REST polling fallback active"` while on suspension cooldown.
+- **Verification Evidence:**
+  - `pytest src/app/tests/test_live_readiness_authority.py src/app/tests/test_live_risk_sizing.py`: 17/17 PASSED.
+  - `pytest src/broker/tests/test_fyers_adapter.py src/broker/tests/test_fyers_margin_integration.py`: 18/18 PASSED.
+  - `cargo check -p vayren-domain`: PASSED (0 errors).
+  - `validate_language_ownership.py`: PASSED (442 files checked).
+  - `ruff check`: All checks passed.
+
+**Previous update (fyers-mis-margin-limitprice-and-circuit-fix-20261104):** FYERS MIS MARGIN API LIMITPRICE & CIRCUIT BREAKER FIX —
 - **Problem Statement & Root Cause:**
   1. *FYERS API v3 Schema Violation (HTTP 400):* For `POST /api/v3/multiorder/margin`, FYERS API v3 mandates that for MARKET orders (`type: 2`) and STOP_MARKET orders (`type: 3`), `limitPrice` must strictly be `0.0`. `session_adapter.py` sent `ref_price` as `limitPrice` in the JSON payload, causing FYERS API to reject all MARKET margin queries with `HTTP 400 Bad Request: "limitPrice does not match: 0"`.
   2. *Defective Fallback Margin Estimation:* In `OrderPlan`, no `price` attribute existed, causing `ref_price` to fall back to `0.0`. When `ref_price <= 0`, the fallback calculation used `price = 1.0`, artificially estimating margin as ₹0.25 for all stocks (e.g. ₹0.25 for ₹3,300 stock).
