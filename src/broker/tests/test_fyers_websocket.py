@@ -607,14 +607,13 @@ def test_order_ws_resubscribe_on_connect_uses_vendor_keys() -> None:
     adapter.disconnect()
 
 
-def test_order_ws_health_never_restarts_a_live_socket() -> None:
-    """health() must not fight the SDK's own reconnect loop.
+def test_order_ws_health_cold_starts_after_error_clears_socket() -> None:
+    """health() cold-starts a fresh socket after an error clears the dead one.
 
-    Regression: health() used to call _start_order_ws() on every ERROR
-    state while the SDK was already reconnecting, and _start_order_ws
-    replaced the socket without closing the previous one. Two reconnect
-    drivers plus leaked sockets produced the observed storm (10 connects
-    in 600ms, "Connection to remote host was lost" on each).
+    ``restart_flag`` is False, so the SDK never reconnects on its own: the
+    error callback must clear ``_order_ws`` and ``health()`` must then
+    start exactly one replacement — never a second driver alongside a
+    live socket, which was the original 10-connects-in-600ms storm.
     """
     created_sockets: list[MockOrderSocket] = []
 
@@ -634,26 +633,99 @@ def test_order_ws_health_never_restarts_a_live_socket() -> None:
     adapter.connect()
     assert len(created_sockets) == 1
 
-    # A transient error arrives; the SDK still owns the reconnect. Two
-    # errors stay below the flap limit, so the socket must survive and no
-    # new one may be created.
+    # A transient error clears the dead object; health() cold-starts one
+    # fresh socket. Two errors stay below the flap limit, so the adapter
+    # must recover instead of abandoning the stream.
     for _ in range(ORDER_WS_FLAP_LIMIT - 1):
         adapter._on_ws_error("Connection to remote host was lost.")
+        assert adapter._order_ws is None, "the dead socket must be cleared"
         adapter.health()
 
-    assert len(created_sockets) == 1, "a transient error must not spawn new sockets"
-    assert adapter.order_ws_state == STATE_ERROR
+    assert len(created_sockets) == 1 + (ORDER_WS_FLAP_LIMIT - 1)
+    assert adapter.order_ws_state == STATE_CONNECTED
 
-    # Health reports RECOVERING while the socket object still exists.
-    healthy, reason = adapter.order_stream_health()
-    assert not healthy
-    assert reason == "reconnecting"
-
-    # The SDK's own reconnect (on_connect callback) heals it.
-    adapter._on_ws_connect()
     healthy, reason = adapter.order_stream_health()
     assert healthy and reason.startswith("connected")
-    assert len(created_sockets) == 1
+    adapter.disconnect()
+
+
+def test_order_ws_close_clears_socket_and_health_cold_starts_fresh() -> None:
+    """Production case: a stable connection drops; health() must recover.
+
+    Regression for the 2026-11-06 EC2 dead-lock: a socket that had been
+    up >120s closed with ``{'s': 'ok', 'code': 200}``. ``_note_ws_flap()``
+    reset the flap counter and returned, leaving the dead object in
+    ``_order_ws``; with ``restart_flag`` False nobody reconnected it and
+    the leg reported ``(False, "reconnecting")`` forever, blocking every
+    order. The close must clear the object so ``health()`` cold-starts.
+    """
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+    assert adapter.order_ws_state == STATE_CONNECTED
+    # Stable connection: past the stability window when the venue drops it.
+    adapter._order_ws_connected_at = time.monotonic() - (ORDER_WS_STABLE_SECONDS + 2)
+
+    adapter._on_ws_close({"code": 200, "message": "Connection Closed", "s": "ok"})
+
+    assert adapter._order_ws is None, "the dead socket must be cleared"
+    assert adapter.order_ws_state == STATE_DISCONNECTED
+    assert adapter._order_ws_flaps == 0, "a stable drop is not a flap"
+    healthy, reason = adapter.order_stream_health()
+    assert not healthy
+    assert reason != "reconnecting", "nobody is reconnecting a cleared socket"
+    assert reason == "disconnected"
+
+    adapter.health()
+    assert len(created) == 2, "health() must cold-start exactly one replacement"
+    assert adapter.order_ws_state == STATE_CONNECTED
+    healthy, reason = adapter.order_stream_health()
+    assert healthy and reason.startswith("connected")
+    adapter.disconnect()
+
+
+def test_order_ws_error_clears_socket_and_verify_cold_starts() -> None:
+    """An error clears the dead object; verify_order_stream() recovers."""
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+
+    adapter._on_ws_error("Connection to remote host was lost.")
+
+    assert adapter._order_ws is None, "the errored socket must be cleared"
+    healthy, reason = adapter.verify_order_stream(timeout_s=0.15)
+    assert healthy, reason
+    assert len(created) == 2, "verify must cold-start exactly one replacement"
+    adapter.disconnect()
+
+
+def test_order_ws_recovered_socket_keeps_restart_flag_false() -> None:
+    """The cold-start replacement must not re-enable the SDK reconnect loop."""
+
+    class _FlaggedOrderSocket(MockOrderSocket):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.restart_flag = True  # vendor default; adapter must clear it
+
+    created: list[_FlaggedOrderSocket] = []
+
+    def factory(**kwargs: Any) -> _FlaggedOrderSocket:
+        sock = _FlaggedOrderSocket(**kwargs)
+        created.append(sock)
+        return sock
+
+    adapter = FyersSessionAdapter(
+        app_id="APP123",
+        access_token="TOKEN456",
+        transport=MockTransport(),
+        order_socket_factory=factory,
+        enable_order_ws=True,
+    )
+    adapter.connect()
+    assert created[0].restart_flag is False
+    adapter._on_ws_close({"code": 200, "s": "ok"})
+    adapter.health()
+    assert len(created) == 2
+    assert created[1].restart_flag is False, "recovery must keep restart_flag=False"
+    adapter.disconnect()
 
 
 def test_order_ws_repeated_errors_do_not_flood_the_log(caplog: Any) -> None:
@@ -735,28 +807,28 @@ def test_order_ws_abandons_a_socket_the_venue_keeps_closing() -> None:
 
     for _ in range(ORDER_WS_FLAP_LIMIT):
         adapter._on_ws_close({"code": 1006})
-        if adapter._order_ws is None:
-            break
-        adapter._on_ws_connect()  # vendor reconnects immediately
+        assert adapter._order_ws is None, "each close must clear the dead socket"
+        adapter.health()  # next cold start; the last one is abandoned instead
 
     assert adapter.order_ws_state == STATE_DISCONNECTED, "the loop must be broken"
     assert adapter._order_ws is None
     healthy, reason = adapter.order_stream_health()
-    assert not healthy
-    assert "not connected" in reason or "disconnected" in reason
+    assert healthy, "cooldown honestly reports REST polling fallback active"
+    assert "cooldown" in reason
     # The REST path still answers after the socket is abandoned.
     assert adapter.open_orders() == []
     assert created, "the socket was started before being abandoned"
 
     # And the cooldown keeps health() from immediately recreating it —
     # that second-order loop was the original 2-second churn.
+    created_after_abandon = len(created)
     for _ in range(20):
         adapter.health()
-    assert len(created) == 1, "no restart during the cooldown"
+    assert len(created) == created_after_abandon, "no restart during the cooldown"
 
     # An explicit reconnect is the operator asking to try again.
     adapter.connect()
-    assert len(created) == 2, "connect() clears the suspension"
+    assert len(created) == created_after_abandon + 1, "connect() clears the suspension"
 
 
 def test_order_ws_counts_one_flap_per_connection() -> None:
@@ -769,7 +841,7 @@ def test_order_ws_counts_one_flap_per_connection() -> None:
     adapter._on_ws_close({"code": 1006})
 
     assert adapter._order_ws_flaps == 1
-    assert adapter._order_ws is not None
+    assert adapter._order_ws is None, "error/close must clear the dead socket"
     adapter.disconnect()
 
 
@@ -779,7 +851,9 @@ def test_order_ws_abandons_alternating_403_errors(caplog: Any) -> None:
 
     A new connection resets the dedup key, so every new error string looked
     unique. The breaker must still stop after ORDER_WS_FLAP_LIMIT short-lived
-    connections, even when no two consecutive errors are identical.
+    connections, even when no two consecutive errors are identical. Each
+    error clears the dead socket and ``health()`` cold-starts the next one
+    until the breaker abandons the stream.
     """
     import logging
 
@@ -788,14 +862,13 @@ def test_order_ws_abandons_alternating_403_errors(caplog: Any) -> None:
     with caplog.at_level(logging.WARNING, logger="broker.providers.fyers.session_adapter"):
         for _ in range(ORDER_WS_FLAP_LIMIT):
             adapter._on_ws_error("Handshake status 403 Forbidden")
-            if adapter._order_ws is None:
-                break
-            adapter._on_ws_connect()
+            assert adapter._order_ws is None, "each error must clear the dead socket"
+            adapter.health()  # next cold start; the last one is abandoned instead
 
     assert adapter._order_ws is None
     assert adapter.order_ws_state == STATE_DISCONNECTED
     assert adapter._order_ws_suspended_until > time.monotonic()
-    assert len(created) == 1, "the breaker must stop the vendor's own reconnect loop"
+    assert len(created) == ORDER_WS_FLAP_LIMIT, "the breaker must stop cold-start retries"
     abandoned = [r for r in caplog.records if "ORDER_WS_ABANDONED" in r.getMessage()]
     assert len(abandoned) == 1
 
@@ -1115,17 +1188,25 @@ def test_verify_order_stream_times_out_and_never_retries() -> None:
     adapter.disconnect()
 
 
-def test_verify_order_stream_rejects_an_immediate_disconnect() -> None:
-    """A socket that drops just before START cannot pass on cached state."""
+def test_verify_order_stream_cold_starts_after_an_immediate_disconnect() -> None:
+    """A socket that drops just before START recovers via one cold start.
+
+    The close clears the dead object (``restart_flag`` is False, so there
+    is no SDK reconnect to wait for); ``verify_order_stream()`` must start
+    exactly one fresh socket and prove it, instead of timing out forever
+    against the dead object.
+    """
     adapter, created = _vendor_adapter(None)
     adapter.connect()
     assert adapter.order_ws_state == STATE_CONNECTED
     adapter._on_ws_close()
     assert adapter.order_ws_state == STATE_DISCONNECTED
+    assert adapter._order_ws is None
 
     healthy, reason = adapter.verify_order_stream(timeout_s=0.15)
-    assert not healthy
-    assert len(created) == 1, "the SDK owns reconnects; no second driver"
+    assert healthy, reason
+    assert "connected" in reason
+    assert len(created) == 2, "exactly one cold-start replacement"
     adapter.disconnect()
 
 
@@ -1243,9 +1324,12 @@ def test_order_ws_counts_consecutive_connect_failures_as_flaps() -> None:
 
     assert adapter._order_ws is None
     assert adapter._order_ws_suspended_until > time.monotonic()
+    # After abandonment the stream honestly reports the cooldown with REST
+    # polling fallback active (pre-existing assertion expected the older
+    # hard-failure wording; cooldown honesty is the current contract).
     healthy, reason = adapter.order_stream_health()
-    assert not healthy
-    assert "rejected" in reason or "unavailable" in reason or "disconnected" in reason
+    assert healthy, "cooldown must report REST polling fallback active"
+    assert "cooldown" in reason
 
 
 def test_live_activation_singleton_reuse(monkeypatch: Any) -> None:

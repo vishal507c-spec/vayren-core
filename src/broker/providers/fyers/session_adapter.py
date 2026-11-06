@@ -497,9 +497,9 @@ class FyersSessionAdapter:
         # If order WS is enabled and degraded, attempt reconnection without failing
         # the verified REST session
         if self._enable_order_ws and self._order_ws is None:
-            # Only a COLD start belongs to us. While a socket exists the
-            # SDK is reconnecting on its own, so calling _start_order_ws
-            # here would race it and multiply the connection attempts.
+            # Only a COLD start belongs to us. ``restart_flag`` is False, so
+            # the SDK never reconnects on its own: close/error callbacks
+            # clear the dead object, and this cold start is the reconnect.
             try:
                 self._start_order_ws()
             except Exception as exc:
@@ -510,8 +510,9 @@ class FyersSessionAdapter:
         """Dedicated health check for the order WebSocket stream.
 
         A socket that exists but is not yet connected is RECOVERING, not
-        broken: the SDK reconnects on its own, so the honest word is
-        "reconnecting" (the manager shows a degraded leg) instead of a hard
+        broken: a cold start is in flight (``restart_flag`` is False, so
+        recovery is our own cold start after the callback cleared the dead
+        object), so the honest word is "reconnecting" instead of a hard
         error that would make the leg look permanently failed.
 
         Connected and silent is reported as connected-but-awaiting, NOT as
@@ -546,10 +547,11 @@ class FyersSessionAdapter:
         CONNECTED and then applies the same delivery/staleness rules as
         :meth:`order_stream_health`.
 
-        Reconnect ownership stays with the vendor SDK: an existing socket is
-        never replaced or restarted here, and a cold start happens exactly
-        once when no socket exists. A failure is returned to the caller (which
-        fails closed) instead of triggering an internal retry loop.
+        Reconnect ownership is ours: ``restart_flag`` is False, so the dead
+        socket is cleared by its close/error callback and a cold start
+        happens exactly once when no socket exists. A failure is returned
+        to the caller (which fails closed) instead of triggering an
+        internal retry loop.
         """
         if not self._enable_order_ws:
             return True, "order socket disabled (REST polling fallback active)"
@@ -597,17 +599,17 @@ class FyersSessionAdapter:
     def _start_order_ws_locked(self) -> None:
         """Initialize and connect FyersOrderSocket.
 
-        Reconnects are OWNED BY THE SDK (its ``On_close`` calls ``connect()``
-        again). This method is only the cold start, so it must never fight
-        that loop: a socket that already exists is left alone, and any
-        socket we replace is closed first. Skipping the close leaked a live
-        socket per attempt, and two competing reconnect drivers produced a
-        storm (10 connects in 600ms, each erroring "Connection to remote
-        host was lost").
+        Reconnects are OWNED BY VAYREN: ``restart_flag`` is False, so the
+        SDK never re-dials. This method is only the cold start, so it must
+        never fight a live socket: a socket that already exists is left
+        alone, and any socket we replace is closed first. Skipping the
+        close leaked a live socket per attempt, and two competing
+        reconnect drivers produced a storm (10 connects in 600ms, each
+        erroring "Connection to remote host was lost").
         """
         if self._order_ws is not None:
-            # The SDK is already (re)connecting on its own; a second driver
-            # is what caused the thrash.
+            # A cold start is already in flight; a second driver is what
+            # caused the thrash.
             return
         if self._order_ws_state == STATE_CONNECTED:
             return
@@ -681,6 +683,24 @@ class FyersSessionAdapter:
         self._order_ws_connected_at = None
         logger.info("ORDER_WS_DISCONNECTED broker=FYERS")
 
+    def _clear_dead_order_ws(self) -> None:
+        """Drop the dead socket object after a venue-initiated close/error.
+
+        ``restart_flag`` is False, so the SDK will not reconnect on its own:
+        keeping the object would pin ``order_stream_health()`` at
+        ``(False, "reconnecting")`` forever and block every cold start
+        (``health()`` / ``verify_order_stream()`` only start when the slot
+        is empty). Detach first so a re-entrant ``on_close`` from
+        ``close_connection()`` finds an empty slot and cannot recurse.
+        Flap counting stays with ``_note_ws_flap()`` — this helper never
+        touches ``_order_ws_connected_at``.
+        """
+        with self._order_ws_guard:
+            ws, self._order_ws = self._order_ws, None
+        if ws is not None:
+            with contextlib.suppress(Exception):
+                _safe_close_order_ws(ws)
+
     def _on_ws_connect(self) -> None:
         self._order_ws_state = STATE_CONNECTED
         self._order_ws_error = ""
@@ -703,6 +723,7 @@ class FyersSessionAdapter:
             self._order_ws_state = STATE_DISCONNECTED
         logger.info("ORDER_WS_CLOSED broker=FYERS args=%s", args)
         self._note_ws_flap()
+        self._clear_dead_order_ws()
 
     def _note_ws_flap(self) -> None:
         """Break the SDK's infinite reconnect loop on a socket that never stays.
@@ -775,6 +796,7 @@ class FyersSessionAdapter:
         # repeated identical strings and let an expired-token 403 loop run
         # for hours (144k log lines).
         self._note_ws_flap()
+        self._clear_dead_order_ws()
         if text != self._order_ws_last_error:
             self._order_ws_last_error = text
             self._order_ws_error_count = 1

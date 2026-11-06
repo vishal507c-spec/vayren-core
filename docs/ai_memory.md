@@ -7,7 +7,31 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (duplicate-candle-recovery-and-obr-c1c4-integrity-fix-20261105):** PERMANENT FIX: DUPLICATE CANDLES & OBR C1C4 RECOVERY INTEGRITY —
+**Latest update (fyers-order-ws-deadlock-clear-on-close-20261106):** FYERS ORDER WS DEAD-LOCK FIX — clear dead socket on close/error so health()/verify cold-start recovers without service restart —
+- **Root cause (EC2 2026-11-06 04:06 UTC):** stable order socket dropped with `{'s':'ok','code':200}`; `_note_ws_flap()` reset flaps (age >=120s) and left `self._order_ws` non-None; `restart_flag=False` meant no SDK reconnect, so `order_stream_health()` pinned at `(False, "reconnecting")` and `_pre_order_checks`/`_live_blockers` blocked all orders. Profile/funds REST were READY (₹100.92), market WS 22/22 live.
+- **Fix (`src/broker/providers/fyers/session_adapter.py`):** new `_clear_dead_order_ws()` (detach-first under `_order_ws_guard`, then `_safe_close_order_ws`, re-entry-safe); called at end of `_on_ws_close()` and `_on_ws_error()` after `_note_ws_flap()`. Next `health()`/`verify_order_stream()` cold-starts exactly one fresh socket. `restart_flag=False` preserved; flap breaker + cooldown semantics unchanged.
+- **Tests (`src/broker/tests/test_fyers_websocket.py`):** 3 new regressions (stable close→health recovery, error→verify recovery, recovered socket keeps `restart_flag=False`); 5 updated to new ownership semantics; 1 pre-existing failure fixed (abandon cooldown wording).
+- **Verification:** `test_fyers_websocket.py` 50/50, full `src/broker/tests` 289/289, related app/execution suites 29/29, `ruff check` clean. Local only — NOT deployed to EC2, no push.
+
+**Previous update (tradingview-tick-flash-watchlist-animation-20261106):** TRADINGVIEW-STYLE TICK FLASH ANIMATION ON WATCHLIST UI —
+- **Feature Overview:**
+  1. Real-time TradingView-style tick flash animation implemented for the Strategy Watchlist table on LTP and CHG% columns.
+  2. When LTP increases compared to previous tick: cell background flashes green (VayrenPalette.flash-pos-bg = #21C58B33) and text flashes bright green (VayrenPalette.pos = #21C58B), smoothly fading back to default over 650ms (ease-out).
+  3. When LTP decreases compared to previous tick: cell background flashes red (VayrenPalette.flash-neg-bg = #F05A6733) and text flashes bright red (VayrenPalette.neg = #F05A67), smoothly fading back to default over 650ms (ease-out).
+  4. CHG% value is colored green for positive values (change_tone == 1 -> #21C58B) and red for negative values (change_tone == 3 -> #F05A67) at all times.
+- **Components & Files Modified:**
+  - crates/vayren-shell/ui/palette.slint: Added canonical color tokens lash-pos-bg (#21C58B33) and lash-neg-bg (#F05A6733).
+  - crates/vayren-shell/ui/live.slint: Added 	ick-trigger: int to LiveWatchlistRow. Added WatchlistTickCell Slint component with 60ms pulse Timer, 40ms attack in-state animation, and 650ms ease-out fade out-state animation. Replaced static Text in table rows with WatchlistTickCell for LTP and CHG%.
+  - crates/vayren-domain/src/live.rs: Added 	ick_trigger: i32 to WatchlistStockRow and WatchlistRowView. In LiveState::apply_snapshot(), compared incoming quote LTP against self.watchlist_rows to generate strictly positive triggers for upticks and strictly negative triggers for downticks (with wrap-around ensuring consecutive same-direction ticks fire Slint changed events). Added 	est_tick_flash_triggers_and_change_pct_coloring.
+  - crates/vayren-shell/src/shell.rs & crates/vayren-live-view/src/lib.rs: Mapped 	ick_trigger from domain view model to Slint struct.
+- **Verification Evidence:**
+  - cargo test -p vayren-domain test_tick_flash_triggers_and_change_pct_coloring: PASSED (1/1).
+  - cargo test -p vayren-domain live: 120/120 PASSED.
+  - cargo test -p vayren-shell live: 34 unit tests + all UI render snapshot tests PASSED.
+  - cargo clippy -p vayren-domain -p vayren-live-view: 0 errors.
+  - python tools/validate_language_ownership.py: PASSED (449 files checked).
+
+**Previous update (duplicate-candle-recovery-and-obr-c1c4-integrity-fix-20261105):** PERMANENT FIX: DUPLICATE CANDLES & OBR C1C4 RECOVERY INTEGRITY —
 - **Problem Statement & Root Cause:**
   1. *Uninitialized `_seen_candle_stamps` in `recover()`:* On session recovery/restart (e.g. at 10:50 and 11:13 IST on 5 Nov 2026), `session.recover(stored)` reloaded the stored candle window into `ctx.bars`, but did NOT initialize `session._seen_candle_stamps`.
   2. *Duplicate Candle Ingestion in `catchup_session_candles()`:* Because `_seen_candle_stamps` was empty, `catchup_session_candles(session_bars)` re-fed today's completed session bars `[09:15, 09:45, 10:15]` a second time.
