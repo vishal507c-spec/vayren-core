@@ -71,7 +71,13 @@ from execution.regime import StatisticalRegimeDetector
 from execution.replay import LiveEventRecorder
 from execution.runtime.inspector import inspect_strategy
 from execution.runtime.lifecycle import LifecycleError, LifecycleState, StrategyLifecycle
-from execution.runtime.strategy_runtime import LiveStrategyDriver, StrategyContext
+from execution.runtime.strategy_runtime import (
+    LiveStrategyDriver,
+    StrategyContext,
+    is_older_or_equal,
+    normalize_stamp,
+    parse_iso_epoch,
+)
 from execution.safety import SafetySnapshot, SlProtectionTracker, build_safety_snapshot
 from market import Bar
 from risk import KillSwitch, RiskEngine, RiskPolicy, RiskRequest
@@ -91,6 +97,15 @@ VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
 _BROKER_CLOSED_STATUSES = frozenset(
     {"FILLED", "TRADED", "COMPLETE", "REJECTED", "REJECT", "CANCELLED", "CANCELED", "EXPIRED"}
 )
+
+
+def _candle_key(symbol: str, timeframe: str, timestamp: str) -> tuple[str, str, str]:
+    """Stable candle identity: (symbol, timeframe, normalized_timestamp)."""
+    return (
+        str(symbol).strip().upper(),
+        str(timeframe or "").strip().lower(),
+        normalize_stamp(str(timestamp)),
+    )
 
 
 def _reconciled_order_state(status: str) -> str:
@@ -282,6 +297,7 @@ class LiveSession:
         # Deduplication and periodic reconciliation tracking
         self._processed_signals: set[tuple[str, int]] = set()
         self._seen_candle_stamps: dict[str, str] = {}
+        self._seen_candle_keys: set[tuple[str, str, str]] = set()
         self._last_reconcile_epoch: float = 0.0
         # Last entry intent per symbol (drives stop-protection tracker keys).
         self._entry_intents: dict[str, str] = {}
@@ -455,8 +471,9 @@ class LiveSession:
         self._lifecycle.transition(LifecycleState.WARMING_UP, reason="warming strategies")
         for context in self._contexts.values():
             context.lifecycle.transition(LifecycleState.WARMING_UP, reason="warming")
-            bars = (warmup_bars or {}).get(context.strategy_id, ())
-            LiveStrategyDriver(context).warmup(bars)
+            if not context.bars:
+                bars = (warmup_bars or {}).get(context.strategy_id, ())
+                LiveStrategyDriver(context).warmup(bars)
             context.lifecycle.transition(LifecycleState.READY, reason="warmed")
             context.lifecycle.transition(LifecycleState.RUNNING, reason="session running")
         self._lifecycle.transition(LifecycleState.READY, reason="strategies ready")
@@ -663,8 +680,11 @@ class LiveSession:
             # only be moved by genuinely new data; it is not a pre-drop based
             # on a previous stale verdict, which would prevent recovery.
             if isinstance(raw, CandleEvent):
+                c_key = _candle_key(raw.symbol, raw.timeframe, raw.timestamp)
                 last_ts = self._seen_candle_stamps.get(raw.symbol)
-                if last_ts is not None and raw.timestamp <= last_ts:
+                if (last_ts is not None and is_older_or_equal(raw.timestamp, last_ts)) or (
+                    c_key in self._seen_candle_keys
+                ):
                     self._journal.record(
                         "CANDLE_DUPLICATE_SKIPPED",
                         symbol=raw.symbol,
@@ -698,8 +718,11 @@ class LiveSession:
                 return
             self._update_market_state(event)
             return
+        c_key = _candle_key(event.symbol, event.timeframe, event.timestamp)
         last_ts = self._seen_candle_stamps.get(event.symbol)
-        if last_ts is not None and event.timestamp <= last_ts:
+        if (last_ts is not None and is_older_or_equal(event.timestamp, last_ts)) or (
+            c_key in self._seen_candle_keys
+        ):
             self._journal.record(
                 "CANDLE_DUPLICATE_SKIPPED",
                 symbol=event.symbol,
@@ -708,6 +731,7 @@ class LiveSession:
             )
             return
         self._seen_candle_stamps[event.symbol] = event.timestamp
+        self._seen_candle_keys.add(c_key)
         regime = self._regime.update(event.close, float(event.volume))
         self._working_memory.regime = regime.value
         for context in self._contexts.values():
@@ -1877,6 +1901,8 @@ class LiveSession:
                 for key, ctx in self._contexts.items()
             },
             "session_date": datetime.now(VENUE_TZ).strftime("%Y-%m-%d"),
+            "seen_candle_stamps": dict(self._seen_candle_stamps),
+            "seen_candle_keys": [list(k) for k in self._seen_candle_keys],
             "orders_today": self._orders_today,
             "last_order_epoch": self._last_order_epoch,
             "engine": self._engine.snapshot(),
@@ -1902,7 +1928,8 @@ class LiveSession:
         if self._lifecycle.state == LifecycleState.RUNNING:
             self._lifecycle.transition(LifecycleState.STOPPING, reason="recover requested")
             self._lifecycle.transition(LifecycleState.STOPPED, reason="recover requested")
-        self._lifecycle.transition(LifecycleState.RECOVERING, reason="recover requested")
+        if self._lifecycle.state != LifecycleState.RECOVERING:
+            self._lifecycle.transition(LifecycleState.RECOVERING, reason="recover requested")
         windows = checkpoint.get("windows", {})
         for key, ctx in self._contexts.items():
             # Fresh operational lifecycle; data comes from the checkpoint.
@@ -1927,6 +1954,27 @@ class LiveSession:
         today_date_str = datetime.now(VENUE_TZ).strftime("%Y-%m-%d")
         cp_date = str(checkpoint.get("session_date") or "")
         is_same_day = cp_date == today_date_str
+
+        # Seed seen candle timestamps and stable keys
+        if is_same_day:
+            raw_stamps = checkpoint.get("seen_candle_stamps", {})
+            if isinstance(raw_stamps, dict):
+                for sym, stamp in raw_stamps.items():
+                    self._seen_candle_stamps[str(sym)] = str(stamp)
+            raw_keys = checkpoint.get("seen_candle_keys", [])
+            if isinstance(raw_keys, list):
+                for item in raw_keys:
+                    if isinstance(item, (list, tuple)) and len(item) == 3:
+                        self._seen_candle_keys.add((str(item[0]), str(item[1]), str(item[2])))
+
+        # Always seed seen_candle_stamps and seen_candle_keys from ctx.bars
+        for ctx in self._contexts.values():
+            for b in ctx.bars:
+                k = _candle_key(b.symbol, b.bar_size, b.timestamp)
+                self._seen_candle_keys.add(k)
+                curr = self._seen_candle_stamps.get(b.symbol)
+                if curr is None or not is_older_or_equal(b.timestamp, curr):
+                    self._seen_candle_stamps[b.symbol] = b.timestamp
 
         if is_same_day:
             self._orders_today = int(checkpoint.get("orders_today", 0))
@@ -2004,10 +2052,39 @@ class LiveSession:
         now_dt = datetime.fromtimestamp(now_ts, VENUE_TZ)
         replayed = 0
 
-        sorted_bars = sorted(bars, key=lambda b: (str(b.timestamp), b.symbol))
+        # Filter pre-market bars before session start (e.g. 08:45)
+        session_start_time = None
+        if self._config.session_start:
+            with suppress(Exception):
+                session_start_time = datetime.strptime(self._config.session_start, "%H:%M").time()
+
+        valid_bars: list[Bar] = []
+        for b in bars:
+            if session_start_time is not None:
+                is_premarket = False
+                with suppress(Exception):
+                    b_dt = datetime.fromisoformat(str(b.timestamp).strip())
+                    is_premarket = b_dt.time() < session_start_time
+                if is_premarket:
+                    self._journal.record(
+                        "CANDLE_PREMARKET_SKIPPED",
+                        symbol=b.symbol,
+                        timestamp=b.timestamp,
+                        session_start=self._config.session_start,
+                    )
+                    continue
+            valid_bars.append(b)
+
+        sorted_bars = sorted(
+            valid_bars,
+            key=lambda b: (parse_iso_epoch(b.timestamp), str(b.timestamp), b.symbol),
+        )
         for idx, bar in enumerate(sorted_bars):
+            c_key = _candle_key(bar.symbol, bar.bar_size, bar.timestamp)
             last_ts = self._seen_candle_stamps.get(bar.symbol)
-            if last_ts is not None and bar.timestamp <= last_ts:
+            if (last_ts is not None and is_older_or_equal(bar.timestamp, last_ts)) or (
+                c_key in self._seen_candle_keys
+            ):
                 self._journal.record(
                     "CANDLE_DUPLICATE_SKIPPED",
                     symbol=bar.symbol,
@@ -2016,6 +2093,7 @@ class LiveSession:
                 )
                 continue
             self._seen_candle_stamps[bar.symbol] = bar.timestamp
+            self._seen_candle_keys.add(c_key)
 
             event = CandleEvent(
                 symbol=bar.symbol,

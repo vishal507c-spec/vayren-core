@@ -2755,12 +2755,20 @@ class LiveTradingService:
                         f"strategy requirements missing: {', '.join(contract.missing)}"
                     )
                 stored = self._stored_checkpoint(symbol)
+                recovering = False
                 if stored and mode == ExecutionMode.LIVE:
                     with contextlib.suppress(Exception):
                         session.recover(stored)
+                        recovering = True
                 today_stamps = {b.timestamp for b in session_bars}
-                warmup_history = tuple(b for b in history if b.timestamp not in today_stamps)
-                warmup = tuple(warmup_history[-_WARMUP_BARS:])
+                today_date_str = datetime.now(_VENUE_TZ).strftime("%Y-%m-%d")
+                warmup_history = tuple(
+                    b
+                    for b in history
+                    if b.timestamp not in today_stamps
+                    and not str(b.timestamp).startswith(today_date_str)
+                )
+                warmup = () if recovering else tuple(warmup_history[-_WARMUP_BARS:])
                 report = session.start((symbol,), self._config.timeframe, {record.id: warmup})
                 if not report.ready:
                     raise LiveConfigError("; ".join(report.reasons))

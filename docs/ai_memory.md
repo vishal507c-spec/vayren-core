@@ -7,7 +7,38 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-feed-decouple-and-order-ws-cooldown-fix-20261105):** LIVE FEED STATUS DECOUPLING & ORDER WS COOLDOWN FIX —
+**Latest update (duplicate-candle-recovery-and-obr-c1c4-integrity-fix-20261105):** PERMANENT FIX: DUPLICATE CANDLES & OBR C1C4 RECOVERY INTEGRITY —
+- **Problem Statement & Root Cause:**
+  1. *Uninitialized `_seen_candle_stamps` in `recover()`:* On session recovery/restart (e.g. at 10:50 and 11:13 IST on 5 Nov 2026), `session.recover(stored)` reloaded the stored candle window into `ctx.bars`, but did NOT initialize `session._seen_candle_stamps`.
+  2. *Duplicate Candle Ingestion in `catchup_session_candles()`:* Because `_seen_candle_stamps` was empty, `catchup_session_candles(session_bars)` re-fed today's completed session bars `[09:15, 09:45, 10:15]` a second time.
+  3. *OBR C1C4 Invalidation Corruption:* Re-feeding historical candles into `on_candle` after Candle 3 (10:15) broke both Reference High and Reference Low, setting `self.ccInvalidated = True` across all 22 stocks and permanently silencing signals for the entire trading day.
+  4. *Redundant Warmup Bars Appending:* `session.start()` appended historical warmup bars to already recovered `context.bars` without deduplication.
+  5. *Premarket Bar Ingestion:* Bars prior to 09:15 (e.g. 08:45) entered warmup/catchup and shifted Candle 1 index.
+- **Permanent Solution Implemented:**
+  1. *Stable Identity & Deduplication (`src/execution/runtime/session.py`):*
+     - Added `_candle_key(symbol, timeframe, timestamp)` tracking normalized `(symbol, timeframe, normalized_timestamp)` in `_seen_candle_keys`.
+     - Seeded `_seen_candle_stamps` and `_seen_candle_keys` from checkpoint data AND from restored `ctx.bars` directly in `recover()`.
+     - Persisted `seen_candle_stamps` and `seen_candle_keys` in `checkpoint()`.
+  2. *LiveStrategyDriver Deduplication & Monotonicity (`src/execution/runtime/strategy_runtime.py`):*
+     - In `warmup()`: Skips duplicate timestamps and any bar `<= ctx.bars[-1].timestamp`.
+     - In `on_candle()`: Rejects duplicate and out-of-order candles safely before updating `ctx.bars` or invoking strategy logic.
+     - In `restore_window()`: Sorts chronologically, deduplicates, and heals corrupted checkpoint windows on load.
+  3. *Clean Session Start & Premarket Filtering (`src/app/services/live_trading_service.py` & `session.py`):*
+     - Filtered premarket bars before `session_start` (09:15) with `CANDLE_PREMARKET_SKIPPED`.
+     - Excluded today's date from historical warmup in `live_trading_service.py`.
+     - Guarded `session.start()` to skip re-warming if `context.bars` is already populated from recovery.
+  4. *Comprehensive Regression Suite (`src/execution/tests/test_duplicate_candle_recovery.py`):*
+     - Added 7 dedicated regression tests validating production sequence deduplication, repeated recovery idempotency, driver guards, OBR C1C4 window integrity, breakout/confirmation signals, genuine double break invalidation, and independent recovery across all 22 stocks.
+- **Verification Evidence:**
+  - `pytest src/execution/tests/test_duplicate_candle_recovery.py -v`: 7/7 PASSED.
+  - `pytest src/execution/tests -q`: 267/267 PASSED.
+  - `pytest src/app/tests/test_startup_recovery.py -q`: 9/9 PASSED.
+  - `pytest src/app/tests/test_live_readiness_authority.py -q`: 14/14 PASSED.
+  - `validate_language_ownership.py`: PASSED (449 files checked).
+  - `ruff check src/execution src/app`: All checks passed.
+  - `cargo check -p vayren-domain`: PASSED (0.56s).
+
+**Previous update (live-feed-decouple-and-order-ws-cooldown-fix-20261105):** LIVE FEED STATUS DECOUPLING & ORDER WS COOLDOWN FIX —
 - **Problem Statement & Root Cause:**
   1. *Broker View Conflation in Market Status:* In `live_trading_service.py` (lines 2298-2300), `ws_status = "DEGRADED"` and `md_status = "STALE"` were set whenever `view.get("status") == "DEGRADED"`. This falsely dragged down the Market WebSocket and Data badges whenever the broker's order stream experienced an idle disconnect, even while the Market WebSocket was 100% healthy and all 22 stocks were streaming live.
   2. *Excessively Strict Readiness Gate:* In `live_trading_service.py` (line 3916), `live_available >= len(quotes)` required all 22 stocks to have ticks within 60s. At 09:16:07 IST (67 seconds after market open), 5 smallcap stocks had not yet executed a trade on NSE, causing the system to flash `Market Data Streaming: NOT READY (17/22, 5 without data)`.
