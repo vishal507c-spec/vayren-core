@@ -54,7 +54,6 @@ from execution.modes import ExecutionMode, LiveArm, LiveModeError, ModeGates, ar
 from execution.native_execution import (
     native_check_live_readiness_basic,
     native_default_quantity,
-    native_narrow_multiplier,
 )
 from execution.native_order_state import TERMINAL_STATES
 from execution.planner import ExecutionPreferences, OrderPlanner
@@ -852,15 +851,17 @@ class LiveSession:
                 sized = self._live_sized_quantity(intent_id, signal, now_epoch, context=context)
                 if sized is None:
                     return
-                quantity = float(sized.quantity)
+                quantity = float(floor(sized.quantity))
             else:
-                quantity = self._default_quantity(signal)
+                quantity = float(floor(self._default_quantity(signal)))
                 resolved_stop = self._resolve_signal_stop(signal, context)
                 if resolved_stop is not None and resolved_stop > 0:
                     self._stop_levels[signal.symbol] = resolved_stop
+            if quantity < 1:
+                return
             target = (ledger_qty + quantity) if effective_side == "BUY" else (ledger_qty - quantity)
         else:
-            quantity = abs(ledger_qty)
+            quantity = float(floor(abs(ledger_qty))) if abs(ledger_qty) >= 1 else abs(ledger_qty)
             target = 0.0
         posture = self._confidence.evaluate(self._confidence_input(signal.symbol))
         preferences = self._confidence.preferences(posture)
@@ -921,7 +922,7 @@ class LiveSession:
         self._emit(RiskApproved(self._request_id, intent.intent_id))
         prefs = ExecutionPreferences(
             prefer_limit=bool(preferences.get("prefer_limit")),
-            size_multiplier=native_narrow_multiplier(preferences.get("size_multiplier", 1.0)),
+            size_multiplier=1.0,
         )
         plan = self._planner.plan(intent, signal.price, prefs)
         # Risk re-validates the FINAL planned quantity (adaptive shrink applied).
@@ -1101,6 +1102,16 @@ class LiveSession:
             return ("ORDER_BLOCKED", "reconciliation blocks live")
         if not plan.symbol:
             return ("ORDER_BLOCKED", "invalid symbol")
+        if plan.quantity < 1:
+            return (
+                "ORDER_BLOCKED",
+                f"quantity < 1 unit ({plan.quantity}); skipping dispatch",
+            )
+        if float(plan.quantity) != int(float(plan.quantity)):
+            return (
+                "ORDER_BLOCKED",
+                f"quantity must be whole integer units, got {plan.quantity}",
+            )
         is_entry = intent.target_position_qty != 0.0
         if live and is_entry and intent.intent_id not in self._sized_risk:
             return ("ORDER_BLOCKED", "risk not validated for live order")

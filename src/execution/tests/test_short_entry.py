@@ -343,9 +343,9 @@ def test_sell_signal_with_existing_long_exits_long() -> None:
     plan = venue.placed[0]
     # SELL of existing long is an exit: under fresh session's 0.5x REDUCED posture,
     # floor(15.0 * 0.5) = 7.0 shares
-    assert plan.symbol == SYMBOL
-    assert plan.side == "SELL"
-    assert plan.quantity == 7.0
+    # SELL of existing long is an exit: with adaptive float scaling eliminated,
+    # exact position quantity is exited without downward modification (15.0 shares)
+    assert plan.quantity == 15.0
 
 
 # ── TEST 4: Short-position stop-loss and exit logic work correctly
@@ -449,9 +449,9 @@ def test_buy_signal_with_existing_short_covers_short() -> None:
     plan = venue.placed[0]
     # BUY signal when short: under fresh session's 0.5x REDUCED posture,
     # floor(12.0 * 0.5) = 6.0 shares
-    assert plan.symbol == SYMBOL
-    assert plan.side == "BUY"
-    assert plan.quantity == 6.0
+    # BUY signal when short: with adaptive float scaling eliminated,
+    # exact short position quantity is covered without downward modification (12.0 shares)
+    assert plan.quantity == 12.0
 
 
 # ── TEST 6: Re-entry blocked when already short

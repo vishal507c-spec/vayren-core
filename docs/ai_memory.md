@@ -7,7 +7,37 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (fyers-order-ws-deadlock-clear-on-close-20261106):** FYERS ORDER WS DEAD-LOCK FIX — clear dead socket on close/error so health()/verify cold-start recovers without service restart —
+**Latest update (eliminate-adaptive-float-scaling-and-enforce-integer-quantity-20261106):** ELIMINATE ADAPTIVE FLOAT SCALING & ENFORCE STRICT INTEGER QUANTITY CONTRACT ?
+- **Problem Statement & Root Cause (EC2 2026-11-06 11:45 IST):**
+  1. OBR C1C4 generated valid SELL signals on 7 stocks (DREDGECORP, RAILTEL, DAMCAPITAL, JSWCEMENT, ZEEL, DCW, SAGILITY).
+  2. For 5 stocks with higher share prices, ?0.61 risk limit (0.15% of ?403.68 effective capital) computed quantity = 0, causing RISK_DENIED: RISK_BUDGET_TOO_SMALL_FOR_ONE_SHARE.
+  3. For DCW and SAGILITY, quantity = 1 share was risk-approved. However, in session.py lines 922-926, adaptive confidence returned size_multiplier = 0.5.
+  4. OrderPlanner.plan() multiplied 1.0 * 0.5 = 0.5, resulting in fractional share order planning.
+  5. In pre-order validation, FYERS equity adapter rejected the order with ORDER_BLOCKED: broker margin check failed: venue needs whole units, got 0.5.
+- **Permanent Fix:**
+  1. *Eliminated Adaptive Float Scaling (src/execution/runtime/session.py & src/execution/planner.py):*
+     - In session.py line 922: Bypassed size_multiplier from adaptive preferences on risk-approved quantities, enforcing size_multiplier = 1.0.
+     - In planner.py line 40: OrderPlanner.plan() passes 1.0 to 
+ative_plan_order and enforces int_qty = int(math.floor(intent.quantity)), completely prohibiting downstream execution logic from multiplying integer quantities by float scaling factors.
+  2. *Enforced Floor Division & Integer Quantity Contract:*
+     - Quantity is strictly calculated via integer floor division: quantity = int(math.floor(max_risk_budget / risk_per_share)).
+     - In session.py: _on_signal floors entry quantities (quantity = float(floor(sized.quantity))). If quantity < 1, cleanly aborts before intent creation or risk request.
+     - In _pre_order_checks: Rejects any order plan where plan.quantity < 1 or loat(plan.quantity) != int(float(plan.quantity)) before dispatching to broker venue.
+     - For quantity >= 1, forwards and submits exact integer units to broker as-is without downward modification.
+- **Verification & Tests:**
+  1. Added dedicated regression suite src/execution/tests/test_integer_quantity_contract.py covering:
+     - OrderPlanner.plan preserving quantities 1, 2, 3 without fractional scaling across all multipliers (0.5x, 0.25x, 0.75x).
+     - Sub-unit planning aborting to 0.0.
+     - Pre-order check rejecting quantity < 1 and fractional units.
+     - End-to-end signal flow forwarding exact integer quantities (1 share for ?0.32 risk, 3 shares for ?0.20 risk, and clean denial for ?1.08 risk).
+  2. Updated 	est_live_pipeline.py and 	est_short_entry.py to reflect verbatim whole-share execution.
+  3. Full execution test suite passed: 100% (273/273 tests).
+  4. Full broker test suite passed: 100% (289/289 tests).
+  5. Code quality: 
+uff check and 
+uff format passed 100% clean. Local only ? NO push or remote deploy.
+
+**Previous update (fyers-order-ws-deadlock-clear-on-close-20261106):** FYERS ORDER WS DEAD-LOCK FIX — clear dead socket on close/error so health()/verify cold-start recovers without service restart —
 - **Root cause (EC2 2026-11-06 04:06 UTC):** stable order socket dropped with `{'s':'ok','code':200}`; `_note_ws_flap()` reset flaps (age >=120s) and left `self._order_ws` non-None; `restart_flag=False` meant no SDK reconnect, so `order_stream_health()` pinned at `(False, "reconnecting")` and `_pre_order_checks`/`_live_blockers` blocked all orders. Profile/funds REST were READY (₹100.92), market WS 22/22 live.
 - **Fix (`src/broker/providers/fyers/session_adapter.py`):** new `_clear_dead_order_ws()` (detach-first under `_order_ws_guard`, then `_safe_close_order_ws`, re-entry-safe); called at end of `_on_ws_close()` and `_on_ws_error()` after `_note_ws_flap()`. Next `health()`/`verify_order_stream()` cold-starts exactly one fresh socket. `restart_flag=False` preserved; flap breaker + cooldown semantics unchanged.
 - **Tests (`src/broker/tests/test_fyers_websocket.py`):** 3 new regressions (stable close→health recovery, error→verify recovery, recovered socket keeps `restart_flag=False`); 5 updated to new ownership semantics; 1 pre-existing failure fixed (abandon cooldown wording).

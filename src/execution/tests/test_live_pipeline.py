@@ -39,9 +39,9 @@ RISK_PER_SHARE = ENTRY - STOP  # 28.50
 MAX_RISK = 600.0  # 100000 × 4 × 0.0015
 QTY = 21  # risk-approved: floor(600 / 28.50)
 PLANNED = 598.50
-# Fresh sessions run the architected REDUCED posture (0.5x shrink-only):
-# the submitted whole-share order is floor(21 × 0.5) = 10.
-ORDER_QTY = 10.0
+# Adaptive float scaling eliminated: risk-approved quantity forwarded verbatim.
+# Submitted whole-share order is QTY = 21.0 (without downward 0.5x float scaling).
+ORDER_QTY = 21.0
 
 
 def _now_iso() -> str:
@@ -299,15 +299,15 @@ def test_partial_then_full_fill_positions_filled_qty_only() -> None:
     session.step(time.time())
     cid = "OBR C1C4:1:1:1:o1"
 
-    venue.emit_fill(cid, 6.0, ENTRY, partial=True)
+    venue.emit_fill(cid, 10.0, ENTRY, partial=True)
     session._process_broker_stream()
     position = session.ledger.position(SYMBOL)
-    assert position.quantity == 6.0  # NOT 10
+    assert position.quantity == 10.0  # NOT full ORDER_QTY
     tracked = session.engine.get(cid)
     assert tracked is not None and tracked.state == OrderState.PARTIALLY_FILLED
-    assert tracked.filled_qty == 6.0
+    assert tracked.filled_qty == 10.0
 
-    venue.emit_fill(cid, 4.0, ENTRY, partial=False)
+    venue.emit_fill(cid, 11.0, ENTRY, partial=False)
     session._process_broker_stream()
     position = session.ledger.position(SYMBOL)
     assert position.quantity == ORDER_QTY
@@ -365,11 +365,11 @@ def test_duplicate_fill_event_folds_once() -> None:
     provider.feed(_candle(1))
     session.step(time.time())
     cid = "OBR C1C4:1:1:1:o1"
-    fill_kwargs = {"client_order_id": cid, "qty": 6.0, "price": ENTRY, "partial": True}
+    fill_kwargs = {"client_order_id": cid, "qty": 11.0, "price": ENTRY, "partial": True}
     venue.emit_fill(**fill_kwargs)  # noqa: ARG002
     venue.emit_fill(**fill_kwargs)  # retransmission
     session._process_broker_stream()
-    assert session.ledger.position(SYMBOL).quantity == 6.0
+    assert session.ledger.position(SYMBOL).quantity == 11.0
     assert "FILL_DUPLICATE_IGNORED" in _kinds(session)
 
 

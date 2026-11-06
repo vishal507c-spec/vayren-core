@@ -7,6 +7,7 @@ concrete orders. Bracket legs are data for future use, not live behavior.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from execution.models.intent import ExecutionIntent
@@ -37,19 +38,22 @@ class OrderPlanner:
         preferences: ExecutionPreferences | None = None,
     ) -> OrderPlan:
         prefs = preferences if preferences is not None else ExecutionPreferences()
-        quantity, order_type, limit_price = native_plan_order(
+        # Completely remove/bypass size_multiplier scaling on risk-approved quantities.
+        # Downstream execution logic must never multiply integer quantities by float scaling.
+        _, order_type, limit_price = native_plan_order(
             intent.quantity,
             intent.preferred_order_type,
             reference_price,
             prefs.prefer_limit,
-            prefs.size_multiplier,
+            1.0,
         )
+        int_qty = int(math.floor(intent.quantity))
         bracket: tuple[dict[str, object], ...] = ()
         return OrderPlan(
             intent_id=intent.intent_id,
             symbol=intent.symbol,
             side=intent.side,
-            quantity=quantity,
+            quantity=float(int_qty) if int_qty >= 1 else 0.0,
             order_type=order_type,
             limit_price=limit_price,
             bracket=bracket,
