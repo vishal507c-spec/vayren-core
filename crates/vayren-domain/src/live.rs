@@ -603,6 +603,7 @@ pub struct WatchlistStockRow {
     pub order: Option<String>,
     pub pnl: Option<f64>,
     pub last_update: String,
+    pub tick_trigger: i32,
 }
 
 // ── the single LIVE presentation state source ──────────────────────────────
@@ -2541,6 +2542,18 @@ impl LiveState {
                         str_of(q, "status")
                     }
                 };
+                let prev_row = self.watchlist_rows.iter().find(|r| r.symbol == name);
+                let tick_trigger = match (ltp, prev_row.and_then(|r| r.ltp)) {
+                    (Some(new_val), Some(old_val)) if new_val > old_val => {
+                        let prev_trig = prev_row.map(|r| r.tick_trigger).unwrap_or(0);
+                        if prev_trig <= 0 { 1 } else { (prev_trig % 100_000) + 1 }
+                    }
+                    (Some(new_val), Some(old_val)) if new_val < old_val => {
+                        let prev_trig = prev_row.map(|r| r.tick_trigger).unwrap_or(0);
+                        if prev_trig >= 0 { -1 } else { -((-prev_trig % 100_000) + 1) }
+                    }
+                    _ => 0,
+                };
                 let ep = q.get("entry_price").and_then(|x| x.as_f64());
                 let sp = q.get("stop_price").and_then(|x| x.as_f64());
                 let rps = q
@@ -2585,6 +2598,7 @@ impl LiveState {
                     order: q.get("order").and_then(|x| x.as_str()).map(str::to_string),
                     pnl: q.get("pnl").and_then(|x| x.as_f64()),
                     last_update: str_of(q, "last_update"),
+                    tick_trigger,
                 });
             }
             self.watchlist_rows = wl_rows;
@@ -3194,6 +3208,7 @@ pub struct WatchlistRowView {
     /// symbol (`—` when the backend reported no verdict for the row).
     pub eligibility: String,
     pub eligibility_tone: i32,
+    pub tick_trigger: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -5268,6 +5283,7 @@ pub fn project(state: &LiveState) -> LiveView {
             selected: is_selected,
             eligibility: elig_label,
             eligibility_tone: elig_tone,
+            tick_trigger: row.tick_trigger,
         });
 
         row_idx += 1;
@@ -6408,6 +6424,7 @@ mod tests {
             order: None,
             pnl: None,
             last_update: String::new(),
+            tick_trigger: 0,
         }
     }
 
@@ -7595,6 +7612,7 @@ mod tests {
                 order: Some("FILLED".into()),
                 pnl: Some(450.0),
                 last_update: "09:42:15".into(),
+                tick_trigger: 0,
             },
             WatchlistStockRow {
                 symbol: "NSE:TATASTEEL".into(),
@@ -7616,6 +7634,7 @@ mod tests {
                 order: None,
                 pnl: None,
                 last_update: "09:42:10".into(),
+                tick_trigger: 0,
             },
             WatchlistStockRow {
                 symbol: "NSE:INFY".into(),
@@ -7637,6 +7656,7 @@ mod tests {
                 order: Some("SUBMITTING".into()),
                 pnl: Some(-50.0),
                 last_update: "09:42:12".into(),
+                tick_trigger: 0,
             },
         ];
 
@@ -8662,6 +8682,7 @@ mod tests {
             order: None,
             pnl: None,
             last_update: "10:00:00".into(),
+            tick_trigger: 0,
         }];
 
         let view = project(&st);
@@ -8752,6 +8773,7 @@ mod tests {
             order: None,
             pnl: None,
             last_update: "".into(),
+                tick_trigger: 0,
         }];
         st.drain_actions();
 
@@ -8800,6 +8822,7 @@ mod tests {
                 order: Some("REJECTED".into()),
                 pnl: None,
                 last_update: "".into(),
+                tick_trigger: 0,
             },
             WatchlistStockRow {
                 symbol: "NSE:TCS-EQ".into(),
@@ -8821,6 +8844,7 @@ mod tests {
                 order: None,
                 pnl: None,
                 last_update: "".into(),
+                tick_trigger: 0,
             },
         ];
 
@@ -8877,6 +8901,7 @@ mod tests {
                 order: None,
                 pnl: None,
                 last_update: "".into(),
+                tick_trigger: 0,
             },
             WatchlistStockRow {
                 symbol: "NSE:TCS-EQ".into(),
@@ -8898,6 +8923,7 @@ mod tests {
                 order: None,
                 pnl: None,
                 last_update: "".into(),
+                tick_trigger: 0,
             },
         ];
 
@@ -8994,5 +9020,121 @@ mod tests {
             view.active_strat.orders_detail,
             "3 submitted · 1 filled · 1 rejected · 1 pending"
         );
+    }
+
+    #[test]
+    fn test_tick_flash_triggers_and_change_pct_coloring() {
+        let mut st = LiveState::default();
+
+        // 1. Initial snapshot with RELIANCE at 2500.0, change +1.50%
+        let snap1 = serde_json::json!({
+            "quotes": [
+                {
+                    "symbol": "NSE:RELIANCE-EQ",
+                    "clean_symbol": "RELIANCE",
+                    "ltp": 2500.0,
+                    "change_pct": 1.5,
+                    "status": "READY"
+                }
+            ]
+        });
+        st.apply_snapshot(&snap1);
+        assert_eq!(st.watchlist_rows.len(), 1);
+        assert_eq!(st.watchlist_rows[0].tick_trigger, 0, "First tick has no baseline, so trigger is 0");
+        let v1 = project(&st);
+        assert_eq!(v1.watchlist[0].ltp, "2500.00");
+        assert_eq!(v1.watchlist[0].change, "+1.50%");
+        assert_eq!(v1.watchlist[0].change_tone, 1, "Positive change must tone green (1)");
+        assert_eq!(v1.watchlist[0].tick_trigger, 0);
+
+        // 2. Up tick: price rises to 2505.0 (+1.70%)
+        let snap2 = serde_json::json!({
+            "quotes": [
+                {
+                    "symbol": "NSE:RELIANCE-EQ",
+                    "clean_symbol": "RELIANCE",
+                    "ltp": 2505.0,
+                    "change_pct": 1.7,
+                    "status": "READY"
+                }
+            ]
+        });
+        st.apply_snapshot(&snap2);
+        assert!(st.watchlist_rows[0].tick_trigger > 0, "Up tick must have positive tick_trigger for green flash");
+        let trig2 = st.watchlist_rows[0].tick_trigger;
+        let v2 = project(&st);
+        assert_eq!(v2.watchlist[0].ltp, "2505.00");
+        assert_eq!(v2.watchlist[0].change, "+1.70%");
+        assert_eq!(v2.watchlist[0].change_tone, 1, "Positive change must tone green (1)");
+        assert_eq!(v2.watchlist[0].tick_trigger, trig2);
+
+        // 3. Consecutive up tick: price rises to 2510.0
+        let snap3 = serde_json::json!({
+            "quotes": [
+                {
+                    "symbol": "NSE:RELIANCE-EQ",
+                    "clean_symbol": "RELIANCE",
+                    "ltp": 2510.0,
+                    "change_pct": 1.9,
+                    "status": "READY"
+                }
+            ]
+        });
+        st.apply_snapshot(&snap3);
+        assert!(st.watchlist_rows[0].tick_trigger > 0);
+        assert_ne!(st.watchlist_rows[0].tick_trigger, trig2, "Consecutive up tick must change value so Slint changed callback fires");
+        let _trig3 = st.watchlist_rows[0].tick_trigger;
+
+        // 4. Down tick: price drops to 2490.0 (-0.20%)
+        let snap4 = serde_json::json!({
+            "quotes": [
+                {
+                    "symbol": "NSE:RELIANCE-EQ",
+                    "clean_symbol": "RELIANCE",
+                    "ltp": 2490.0,
+                    "change_pct": -0.2,
+                    "status": "READY"
+                }
+            ]
+        });
+        st.apply_snapshot(&snap4);
+        assert!(st.watchlist_rows[0].tick_trigger < 0, "Down tick must have negative tick_trigger for red flash");
+        let trig4 = st.watchlist_rows[0].tick_trigger;
+        let v4 = project(&st);
+        assert_eq!(v4.watchlist[0].ltp, "2490.00");
+        assert_eq!(v4.watchlist[0].change, "-0.20%");
+        assert_eq!(v4.watchlist[0].change_tone, 3, "Negative change must tone red (3)");
+        assert_eq!(v4.watchlist[0].tick_trigger, trig4);
+
+        // 5. Consecutive down tick: price drops to 2485.0
+        let snap5 = serde_json::json!({
+            "quotes": [
+                {
+                    "symbol": "NSE:RELIANCE-EQ",
+                    "clean_symbol": "RELIANCE",
+                    "ltp": 2485.0,
+                    "change_pct": -0.4,
+                    "status": "READY"
+                }
+            ]
+        });
+        st.apply_snapshot(&snap5);
+        assert!(st.watchlist_rows[0].tick_trigger < 0);
+        assert_ne!(st.watchlist_rows[0].tick_trigger, trig4, "Consecutive down tick must change value so Slint changed callback fires");
+
+        // 6. Flat tick: price unchanged at 2485.0
+        let snap6 = serde_json::json!({
+            "quotes": [
+                {
+                    "symbol": "NSE:RELIANCE-EQ",
+                    "clean_symbol": "RELIANCE",
+                    "ltp": 2485.0,
+                    "change_pct": -0.4,
+                    "status": "READY"
+                }
+            ]
+        });
+        st.apply_snapshot(&snap6);
+        assert_eq!(st.watchlist_rows[0].tick_trigger, 0, "Unchanged price must produce 0 tick_trigger");
     }
 }

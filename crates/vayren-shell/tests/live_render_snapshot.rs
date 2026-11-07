@@ -712,6 +712,7 @@ fn watchlist_row(symbol: &str) -> vayren_shell::live::WatchlistStockRow {
         order: None,
         pnl: None,
         last_update: "12:14:25".into(),
+        tick_trigger: 0,
     }
 }
 

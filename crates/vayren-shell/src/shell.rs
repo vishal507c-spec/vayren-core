@@ -3660,6 +3660,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     ltp: r.ltp.into(),
                     change: r.change.into(),
                     change_tone: r.change_tone,
+                    tick_trigger: r.tick_trigger,
                     ref_high: r.ref_high.into(),
                     ref_low: r.ref_low.into(),
                     break_low: r.break_low.into(),
@@ -4176,6 +4177,7 @@ pub fn demo_live_state_running() -> LiveState {
                 order: Some("FILLED".into()),
                 pnl: Some(450.0),
                 last_update: "09:42:15".into(),
+                tick_trigger: 0,
             },
             live::WatchlistStockRow {
                 symbol: "NSE:DREDGECORP".into(),
@@ -4197,6 +4199,7 @@ pub fn demo_live_state_running() -> LiveState {
                 order: None,
                 pnl: None,
                 last_update: "09:42:10".into(),
+                tick_trigger: 0,
             },
         ],
         risk_engine: live::CapitalRiskEngine {

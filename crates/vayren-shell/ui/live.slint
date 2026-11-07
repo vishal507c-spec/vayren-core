@@ -206,6 +206,7 @@ export struct LiveWatchlistRow {
     ltp: string,
     change: string,
     change-tone: int,
+    tick-trigger: int,
     ref-high: string,
     ref-low: string,
     break-low: string,
@@ -421,6 +422,81 @@ export global LiveTone {
 }
 
 // ── UI Helper Components ─────────────────────────────────────────────────
+component WatchlistTickCell inherits Rectangle {
+    in property <string> text;
+    in property <color> base-color;
+    in property <int> flash-trigger;
+    in property <length> cell-width;
+    in property <length> font-size: 11px;
+    in property <int> font-weight: 600;
+    in property <TextHorizontalAlignment> text-align: right;
+
+    width: cell-width;
+    height: 100%;
+    border-radius: 3px;
+    clip: true;
+
+    property <int> flash-state: 0;
+
+    changed flash-trigger => {
+        if root.flash-trigger > 0 {
+            root.flash-state = 1;
+            decay-timer.running = true;
+        } else if root.flash-trigger < 0 {
+            root.flash-state = 2;
+            decay-timer.running = true;
+        }
+    }
+
+    decay-timer := Timer {
+        interval: 60ms;
+        running: false;
+        triggered() => {
+            root.flash-state = 0;
+            self.running = false;
+        }
+    }
+
+    states [
+        flashing-up when root.flash-state == 1: {
+            background: VayrenPalette.flash-pos-bg;
+            txt.color: VayrenPalette.pos;
+            in {
+                animate background { duration: 40ms; easing: ease-in; }
+                animate txt.color { duration: 40ms; easing: ease-in; }
+            }
+            out {
+                animate background { duration: 650ms; easing: ease-out; }
+                animate txt.color { duration: 650ms; easing: ease-out; }
+            }
+        }
+        flashing-down when root.flash-state == 2: {
+            background: VayrenPalette.flash-neg-bg;
+            txt.color: VayrenPalette.neg;
+            in {
+                animate background { duration: 40ms; easing: ease-in; }
+                animate txt.color { duration: 40ms; easing: ease-in; }
+            }
+            out {
+                animate background { duration: 650ms; easing: ease-out; }
+                animate txt.color { duration: 650ms; easing: ease-out; }
+            }
+        }
+    ]
+
+    txt := Text {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        horizontal-alignment: root.text-align;
+        vertical-alignment: center;
+        color: root.base-color;
+    }
+}
+
+
 
 component LiveTopCard inherits Rectangle {
     // A status card carries ONE backend fact: the domain label string plus its
@@ -1944,8 +2020,24 @@ export component LiveScreen inherits Rectangle {
                                                 padding-left: 6px; padding-right: 6px; spacing: 4px; alignment: center;
                                                 Rectangle { width: 14px; Rectangle { width: 10px; height: 10px; border-radius: 5px; background: LiveTone.ink(row.status-tone); } }
                                                 Text { width: 84px; text: row.symbol; color: row.selected ? VayrenPalette.live-teal : VayrenPalette.text-bright; font-size: 11.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 65px; text: row.ltp; color: VayrenPalette.text; font-size: 11px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                                Text { width: 54px; text: row.change; color: LiveTone.ink(row.change-tone); font-size: 11px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; }
+                                                WatchlistTickCell {
+                                                    cell-width: 65px;
+                                                    text: row.ltp;
+                                                    base-color: VayrenPalette.text;
+                                                    flash-trigger: row.tick-trigger;
+                                                    font-size: 11px;
+                                                    font-weight: 600;
+                                                    text-align: right;
+                                                }
+                                                WatchlistTickCell {
+                                                    cell-width: 54px;
+                                                    text: row.change;
+                                                    base-color: LiveTone.ink(row.change-tone);
+                                                    flash-trigger: row.tick-trigger;
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                    text-align: right;
+                                                }
                                                 Text { width: 58px; text: row.ref-high; color: VayrenPalette.text; font-size: 10.5px; horizontal-alignment: right; vertical-alignment: center; }
                                                 Text { width: 58px; text: row.ref-low; color: VayrenPalette.text; font-size: 10.5px; horizontal-alignment: right; vertical-alignment: center; }
                                                 Text { width: 68px; text: row.break-low; color: VayrenPalette.text; font-size: 10.5px; horizontal-alignment: right; vertical-alignment: center; }

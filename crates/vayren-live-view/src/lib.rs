@@ -396,6 +396,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
                 ltp: w.ltp.into(),
                 change: w.change.into(),
                 change_tone: w.change_tone,
+                tick_trigger: w.tick_trigger,
                 ref_high: w.ref_high.into(),
                 ref_low: w.ref_low.into(),
                 break_low: w.break_low.into(),
