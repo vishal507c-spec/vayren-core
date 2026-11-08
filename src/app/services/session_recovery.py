@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import math
+import sqlite3
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -163,6 +164,59 @@ def fetch_and_validate_session_candles(
             detail="Session has not started yet or today is not a trading day.",
         )
         return (), report
+
+    expected_stamps = tuple(_format_stamp(s) for s, _ in expected)
+
+    # Fast local cache check: if all expected completed candles already exist locally,
+    # skip remote network round-trip.
+    if data_dir is not None and expected_stamps:
+        try:
+            from data.candle_store import store_path
+
+            db_p = store_path(data_dir, symbol)
+            if db_p.is_file():
+                con = sqlite3.connect(f"file:{db_p}?mode=ro", uri=True, timeout=5.0)
+                try:
+                    placeholders = ",".join("?" for _ in expected_stamps)
+                    query = (
+                        f"SELECT candle_time, open, high, low, close, volume "
+                        f"FROM ohlcv WHERE candle_time IN ({placeholders})"
+                    )
+                    rows = con.execute(query, expected_stamps).fetchall()
+                    local_map = {
+                        r[0]: (float(r[1]), float(r[2]), float(r[3]), float(r[4]), int(r[5]))
+                        for r in rows
+                        if len(r) >= 6
+                    }
+                    if all(st in local_map for st in expected_stamps):
+                        recovered_bars = tuple(
+                            Bar(
+                                symbol=symbol,
+                                open=local_map[st][0],
+                                high=local_map[st][1],
+                                low=local_map[st][2],
+                                close=local_map[st][3],
+                                volume=local_map[st][4],
+                                timestamp=st,
+                                bar_size=timeframe,
+                                source="local_store",
+                            )
+                            for st in expected_stamps
+                        )
+                        report = HistoricalRecoveryReport(
+                            symbol=symbol,
+                            status="SUCCESS",
+                            expected_candles_count=len(expected_stamps),
+                            recovered_candles_count=len(recovered_bars),
+                            bars=recovered_bars,
+                            missing_intervals=(),
+                            detail=f"Recovered {len(recovered_bars)} candles from local",
+                        )
+                        return recovered_bars, report
+                finally:
+                    con.close()
+        except Exception as loc_exc:
+            logger.debug("Local candle pre-check failed for %s: %s", symbol, loc_exc)
 
     if adapter is None or not hasattr(adapter, "history"):
         err = f"Broker adapter has no historical data capability for {symbol}"

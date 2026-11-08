@@ -164,7 +164,7 @@ class StrategyRegistry:
                     or defn.name.lower() == target
                     or d_id_norm == target_norm
                     or d_name_norm == target_norm
-                    or (target_norm in ("obr", "obr-c1c4") and defn.id == "obr-c1c4")
+                    or (target_norm == "obr-c1c4" and defn.id == "obr-c1c4")
                 ):
                     return defn
             raise StrategyRegistryError(f"unknown strategy: {strategy_id}")
@@ -184,7 +184,7 @@ class StrategyRegistry:
                 or d.name.lower() == target
                 or d.id.lower().replace("_", "-").replace(" ", "-") == target_norm
                 or d.name.lower().replace("_", "-").replace(" ", "-") == target_norm
-                or (target_norm in ("obr", "obr-c1c4") and d.id == "obr-c1c4")
+                or (target_norm == "obr-c1c4" and d.id == "obr-c1c4")
                 for d in self._definitions.values()
             )
 
@@ -393,7 +393,9 @@ class StrategyRegistry:
                 except Exception as exc:
                     self._record_load_error(b.name, "builtin load", exc)
 
-        # 2. Sync file records
+        # 2. Sync file records — permanent keep-list (system cleanup
+        # 2026-11-08): ONLY OBR and OBR C1C4 may load. Any other stored
+        # record is skipped so removed strategies can never reappear.
         try:
             records = list_strategy_records(data_dir)
         except Exception as exc:
@@ -402,6 +404,13 @@ class StrategyRegistry:
             self._record_load_error("*", "strategy storage read", exc)
             return
         for rec in records:
+            if rec.name not in KEEP_STRATEGY_NAMES and rec.id not in KEEP_STRATEGY_IDS:
+                logger.info(
+                    "Strategy storage record skipped (not OBR/OBR C1C4): %s (%s)",
+                    rec.name,
+                    rec.id,
+                )
+                continue
             if self.contains(rec.id) or self.contains(rec.name):
                 continue
             try:
@@ -416,6 +425,12 @@ class StrategyRegistry:
 
 
 # ── Canonical OBR C1C4 Authority ──────────────────────────────────────
+
+#: Permanent system keep-list (strategy cleanup 2026-11-08): the system
+#: ships exactly TWO strategies — OBR and OBR C1C4. `sync_storage()` loads
+#: nothing else, and `builtins.py` registers no additional strategies.
+KEEP_STRATEGY_NAMES: tuple[str, ...] = ("OBR", "OBR C1C4")
+KEEP_STRATEGY_IDS: tuple[str, ...] = ("obr", "obr-c1c4")
 
 OBR_C1C4_SYMBOLS: tuple[str, ...] = (
     "NSE:KAYNES",
@@ -533,8 +548,15 @@ def get_authoritative_obr_source() -> str:
 
 
 def create_obr_c1c4_definition() -> StrategyDefinition:
-    """Create the canonical OBR C1C4 StrategyDefinition."""
-    source = get_authoritative_obr_source()
+    """Create the canonical OBR C1C4 StrategyDefinition.
+
+    Uses the embedded source (OBR.py record + the daily-reset fix) so
+    OBR C1C4 stays independent and preserved even if the OBR library
+    file is edited in Strategy Lab.
+    """
+    from strategy.obr_source import OBR_C1C4_SOURCE
+
+    source = OBR_C1C4_SOURCE
     params = StrategyParameters.from_specs(OBR_C1C4_SPECS)
     return StrategyDefinition(
         id="obr-c1c4",
@@ -565,12 +587,14 @@ def get_strategy_registry(data_dir=None) -> StrategyRegistry:
     with _GLOBAL_LOCK:
         if _GLOBAL_REGISTRY is None:
             reg = StrategyRegistry()
-            source = get_authoritative_obr_source()
+            from strategy.obr_source import OBR_C1C4_SOURCE
+
+            source = OBR_C1C4_SOURCE
 
             def _obr_factory(params: StrategyParameters) -> StrategyLogic:
                 from strategy.language.compiler import compile_strategy
 
-                code = source or get_authoritative_obr_source()
+                code = source or OBR_C1C4_SOURCE
                 compiled = compile_strategy(code)
                 return compiled.create_logic(params, owner_id="OBR C1C4")
 

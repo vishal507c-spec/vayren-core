@@ -640,7 +640,7 @@ class LiveTradingService:
         names: list[str] = []
         known: set[str] = set()
 
-        # 1. Registered strategies (central authority, e.g. "OBR C1C4", "EMA Crossover")
+        # 1. Registered strategies (central authority: "OBR", "OBR C1C4" only)
         try:
             from strategy.registry import get_strategy_registry
 

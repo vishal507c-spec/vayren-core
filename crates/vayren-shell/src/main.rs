@@ -1473,14 +1473,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     });
                                     if action == "start" {
                                         if ok {
-                                            state.session = live::SessionStatus::Running;
-                                            if state.start_epoch_secs.is_none() {
-                                                state.start_epoch_secs = Some(
-                                                    std::time::SystemTime::now()
-                                                        .duration_since(std::time::UNIX_EPOCH)
-                                                        .map(|d| d.as_secs_f64())
-                                                        .unwrap_or(0.0),
-                                                );
+                                            let s_status = payload.get("session_status").and_then(|s| s.as_str()).unwrap_or("");
+                                            if s_status == "STARTING" {
+                                                state.session = live::SessionStatus::Starting;
+                                                state.pending_action = Some("start".into());
+                                                state.pending_since = Some(std::time::Instant::now());
+                                                state.action_note = Some("start in progress — initializing live engine".into());
+                                            } else {
+                                                state.session = live::SessionStatus::Running;
+                                                if state.start_epoch_secs.is_none() {
+                                                    state.start_epoch_secs = Some(
+                                                        std::time::SystemTime::now()
+                                                            .duration_since(std::time::UNIX_EPOCH)
+                                                            .map(|d| d.as_secs_f64())
+                                                            .unwrap_or(0.0),
+                                                    );
+                                                }
+                                                state.action_note = None;
                                             }
                                         } else {
                                             state.session = live::SessionStatus::Stopped;
@@ -1518,6 +1527,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // A pending action whose backend never answered must not pin
                 // the button in STARTING… for the life of the process.
                 if live_state.borrow_mut().expire_pending_action() {
+                    next_live_poll = Instant::now();
                     shell::apply_live(&ui, &live_state.borrow());
                 }
 
@@ -3013,6 +3023,10 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                     &command_tx,
                 );
                 if live_state.borrow_mut().expire_pending_action() {
+                    let _ = command_tx.send(vayren_shell::remote_live::RemoteCommand {
+                        action: "refresh".to_string(),
+                        params: serde_json::json!({}),
+                    });
                     shell::apply_live(&ui, &live_state.borrow());
                 }
                 let mut dirty = false;
@@ -3172,14 +3186,23 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             });
                             if action == "start" {
                                 if ok {
-                                    state.session = live::SessionStatus::Running;
-                                    if state.start_epoch_secs.is_none() {
-                                        state.start_epoch_secs = Some(
-                                            std::time::SystemTime::now()
-                                                .duration_since(std::time::UNIX_EPOCH)
-                                                .map(|d| d.as_secs_f64())
-                                                .unwrap_or(0.0),
-                                        );
+                                    let s_status = payload.get("session_status").and_then(|s| s.as_str()).unwrap_or("");
+                                    if s_status == "STARTING" {
+                                        state.session = live::SessionStatus::Starting;
+                                        state.pending_action = Some("start".into());
+                                        state.pending_since = Some(std::time::Instant::now());
+                                        state.action_note = Some("start in progress — initializing live engine".into());
+                                    } else {
+                                        state.session = live::SessionStatus::Running;
+                                        if state.start_epoch_secs.is_none() {
+                                            state.start_epoch_secs = Some(
+                                                std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .map(|d| d.as_secs_f64())
+                                                    .unwrap_or(0.0),
+                                            );
+                                        }
+                                        state.action_note = None;
                                     }
                                 } else {
                                     state.session = live::SessionStatus::Stopped;

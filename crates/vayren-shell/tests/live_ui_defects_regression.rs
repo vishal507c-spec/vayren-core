@@ -80,19 +80,23 @@ fn test_orders_table_columns_aligned() {
 }
 
 #[test]
-fn test_inspector_renders_selected_stock_data_and_pipeline() {
+fn test_selected_instrument_panel_is_permanently_removed() {
+    // System cleanup: the SELECTED INSTRUMENT inspector card (levels,
+    // pipeline chips, risk banner) was removed from the LIVE screen.
+    // The model (`LiveSelectedStock` / `selected-stock` / watchlist row
+    // selection) stays — only the card and its rendering are gone.
     let src = include_str!("../ui/live.slint");
     assert!(
-        src.contains("SELECTED INSTRUMENT"),
-        "Inspector must contain SELECTED INSTRUMENT card"
+        !src.contains("SELECTED INSTRUMENT"),
+        "SELECTED INSTRUMENT panel must not exist on the LIVE screen"
     );
     assert!(
-        src.contains("root.selected-stock.symbol"),
-        "Inspector must bind selected-stock symbol"
+        !src.contains("root.selected-stock.symbol"),
+        "Inspector must not render selected-stock"
     );
     assert!(
-        src.contains("root.selected-stock.pipeline"),
-        "Inspector must render selected-stock execution pipeline"
+        !src.contains("LivePipelineRow"),
+        "Pipeline row rendering must be removed with the panel"
     );
 }
 
@@ -148,26 +152,26 @@ fn test_inspector_scrolls_and_short_boards_keep_the_footer() {
 }
 
 #[test]
-fn test_broker_label_consistent_between_top_card_and_inspector() {
+fn test_broker_label_consistent_in_top_card_and_duplicate_card_removed() {
     let src = include_str!("../ui/live.slint");
 
-    // Both Top Card (wide & narrow) and Inspector must use NOT CONFIGURED fallback when broker-label is empty
+    // Top Card (wide & narrow) uses NOT CONFIGURED fallback when broker-label is empty
     assert!(
         src.contains("value-text: root.bar.broker-label != \"\" ? root.bar.broker-label : \"NOT CONFIGURED\";"),
         "TopCard must use NOT CONFIGURED fallback for empty broker-label"
     );
+
+    // Duplicate BROKER ACCOUNT card (bottom-right inspector) is removed.
     assert!(
-        src.contains("text: root.bar.broker-label != \"\" ? root.bar.broker-label : \"NOT CONFIGURED\";"),
-        "Inspector must use NOT CONFIGURED fallback for empty broker-label (consistent with TopCard)"
+        !src.contains("BROKER ACCOUNT"),
+        "Duplicate BROKER ACCOUNT card must not exist on the LIVE screen"
+    );
+    assert!(
+        !src.contains("color: root.bar.broker-label != \"\" && root.bar.broker-label != \"NOT CONFIGURED\" ? VayrenPalette.text-bright : VayrenPalette.muted;"),
+        "Inspector broker label color must be removed with the duplicate card"
     );
 
-    // Inspector broker label color must render muted when NOT CONFIGURED
-    assert!(
-        src.contains("color: root.bar.broker-label != \"\" && root.bar.broker-label != \"NOT CONFIGURED\" ? VayrenPalette.text-bright : VayrenPalette.muted;"),
-        "Inspector broker label must render muted when broker is NOT CONFIGURED or empty"
-    );
-
-    // Neither Top Card nor Inspector may use FYERS as a fallback
+    // Neither Top Card may use FYERS as a fallback
     assert!(
         !src.contains("root.bar.broker-label != \"\" ? root.bar.broker-label : \"FYERS\""),
         "LiveScreen must NEVER use FYERS as fallback for empty broker-label"
@@ -179,19 +183,19 @@ fn test_broker_label_consistent_between_top_card_and_inspector() {
 }
 
 #[test]
-fn test_broker_status_consistent_between_top_card_and_inspector() {
+fn test_broker_status_consistent_in_top_card_and_duplicate_card_removed() {
     let src = include_str!("../ui/live.slint");
 
-    // Both Top Card and Inspector must use DISCONNECTED fallback when conn-label is empty
+    // Top Card (wide & narrow) uses DISCONNECTED fallback when conn-label is empty
     assert!(
-        src.contains(
-            "sub-text: root.bar.conn-label != \"\" ? root.bar.conn-label : \"DISCONNECTED\";"
-        ),
+        src.contains("root.bar.conn-label != \"\" ? root.bar.conn-label : \"DISCONNECTED\""),
         "TopCard must use DISCONNECTED fallback for empty conn-label"
     );
     assert!(
-        src.contains("text: root.bar.conn-label != \"\" ? root.bar.conn-label : \"DISCONNECTED\";"),
-        "Inspector must use DISCONNECTED fallback for empty conn-label"
+        !src.contains(
+            "text: root.bar.conn-label != \"\" ? root.bar.conn-label : \"DISCONNECTED\";"
+        ),
+        "Duplicate BROKER ACCOUNT card (DISCONNECTED text) must be removed"
     );
 }
 
@@ -240,17 +244,24 @@ fn test_defect_2_reconciliation_footer_no_fake_fallbacks() {
 }
 
 #[test]
-fn test_defect_3_broker_capital_status_color() {
+fn test_defect_3_broker_capital_uses_top_panel_only() {
+    // The duplicate BROKER ACCOUNT card (with its own 'Unavailable'
+    // fallback and tone mapping) was removed; capital renders only in
+    // the top LiveBrokerCapitalCard.
     let src = include_str!("../ui/live.slint");
     assert!(
-        src.contains(
+        !src.contains(
             "text: root.bar.capital-value != \"\" ? root.bar.capital-value : \"Unavailable\";"
         ),
-        "Inspector must render 'Unavailable' when broker capital value is missing"
+        "Duplicate BROKER ACCOUNT capital row must be removed"
     );
     assert!(
-        src.contains("color: root.bar.capital-tone == 1 ? VayrenPalette.live-teal : (root.bar.capital-tone == 3 ? VayrenPalette.neg : (root.bar.capital-tone == 2 ? VayrenPalette.amber : VayrenPalette.muted));"),
-        "Inspector capital must map tone dynamically to semantic palette colors"
+        !src.contains("color: root.bar.capital-tone == 1 ? VayrenPalette.live-teal : (root.bar.capital-tone == 3 ? VayrenPalette.neg : (root.bar.capital-tone == 2 ? VayrenPalette.amber : VayrenPalette.muted));"),
+        "Duplicate BROKER ACCOUNT capital tone mapping must be removed"
+    );
+    assert!(
+        src.contains("value-text: root.bar.capital-value;"),
+        "Top broker capital card must bind capital-value"
     );
 }
 
@@ -273,19 +284,25 @@ fn test_defect_4_watchlist_search_filter_empty_state() {
 
 #[test]
 fn test_defect_5_broker_configuration_action_wired() {
+    // Configuration stays reachable through the top broker panel
+    // (wide + narrow cards are clickable and carry a CONFIGURE hint);
+    // the duplicate card's CONFIGURE BROKER button is gone with the card.
     let src = include_str!("../ui/live.slint");
     assert!(
-        src.contains("label: \"CONFIGURE BROKER\";"),
-        "Inspector must have a visible CONFIGURE BROKER button"
+        !src.contains("label: \"CONFIGURE BROKER\";"),
+        "Duplicate BROKER ACCOUNT card button must be removed"
     );
-    // clicked => { root.configure-broker(); } must be wired across wide top card, narrow top card, and inspector
     let matches: Vec<_> = src
         .match_indices("clicked => { root.configure-broker(); }")
         .collect();
     assert!(
-        matches.len() >= 3,
-        "configure-broker must be wired in wide TopCard, narrow TopCard, and Inspector button (found {})",
+        matches.len() >= 2,
+        "configure-broker must be wired in wide and narrow TopCards (found {})",
         matches.len()
+    );
+    assert!(
+        src.contains("\" · CONFIGURE\""),
+        "Top broker card must hint that clicking configures the broker"
     );
 }
 
@@ -413,10 +430,14 @@ fn test_defect_12_stale_arm_halt_wording_eliminated() {
 }
 
 #[test]
-fn test_defect_finding_8_risk_banner_color_binds_to_risk_validated() {
+fn test_defect_finding_8_risk_banner_removed_with_inspector() {
+    // The risk-banner color binding lived in the removed SELECTED
+    // INSTRUMENT panel; the banner no longer renders on the LIVE screen.
     let src = include_str!("../ui/live.slint");
     assert!(
-        src.contains("color: root.selected-stock.risk-validated ? VayrenPalette.pos : VayrenPalette.neg;"),
-        "Risk banner text color must bind dynamically to risk-validated (pos for valid, neg for blocked/not ready)"
+        !src.contains(
+            "color: root.selected-stock.risk-validated ? VayrenPalette.pos : VayrenPalette.neg;"
+        ),
+        "Risk banner must be removed with the SELECTED INSTRUMENT panel"
     );
 }

@@ -63,7 +63,7 @@ def _store(tmp_path: Path, symbols: tuple[str, ...], bars: int = 400) -> None:
 
 @pytest.fixture()
 def store(tmp_path: Path) -> Path:
-    # No strategy file: the built-in SMA Crossover is the strategy of record
+    # No strategy file: the built-in OBR C1C4 is the strategy of record
     # for these tests, exactly as the backtest suite uses it.
     _store(tmp_path, ("AAA", "BBB", "CCC"))
     return tmp_path
@@ -71,7 +71,7 @@ def store(tmp_path: Path) -> Path:
 
 def _run(tmp_path: Path, **kwargs):
     return run_backtest(
-        "SMA Crossover",
+        "OBR C1C4",
         ["AAA", "BBB", "CCC"],
         "15m",
         None,

@@ -90,7 +90,8 @@ def test_central_strategy_registry_lifecycle():
 
         reg = get_strategy_registry(data_dir=tmp_path)
         assert reg.contains("obr-c1c4")
-        assert reg.contains("MomentumScalp")
+        # Permanent cleanup contract: only OBR/OBR C1C4 load from storage.
+        assert not reg.contains("MomentumScalp")
 
         # Test create_or_update via registry
         new_code = generate_strategy_template("DynamicVol")

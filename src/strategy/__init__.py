@@ -110,6 +110,8 @@ from strategy.provider_mapping import (
     ProviderResolution,
 )
 from strategy.registry import (
+    KEEP_STRATEGY_IDS,
+    KEEP_STRATEGY_NAMES,
     OBR_C1C4_METADATA,
     OBR_C1C4_SYMBOLS,
     StrategyRegistry,
@@ -133,6 +135,8 @@ __all__ = [
     "reset_strategy_registry",
     "OBR_C1C4_SYMBOLS",
     "OBR_C1C4_METADATA",
+    "KEEP_STRATEGY_NAMES",
+    "KEEP_STRATEGY_IDS",
     "create_obr_c1c4_definition",
     "StrategyDefinition",
     "BacktestForm",

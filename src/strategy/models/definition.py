@@ -38,7 +38,7 @@ class StrategyDefinition:
 
     Attributes:
         id: Stable unique identifier (kebab-case, e.g. ``"sma-crossover"``).
-        name: Display name (e.g. ``"SMA Crossover"``).
+        name: Display name (e.g. ``"OBR C1C4"``).
         version: Strategy version string (e.g. ``"1.0"``).
         kind: Registered logic kind (e.g. ``"sma_crossover"``).
         params: Strategy parameters handed to the logic at run time.

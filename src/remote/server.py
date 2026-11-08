@@ -60,6 +60,7 @@ MUTATING_ACTIONS = (
     "mode",
     "start",
     "stop",
+    "refresh",
     "select_symbol",
     "select_broker",
     "tick",
@@ -703,6 +704,8 @@ class RemoteServer:
     ) -> dict[str, Any] | None:
         """Map a remote command onto the existing headless action shape."""
         args = dict(params) if isinstance(params, dict) else {}
+        if action == "refresh":
+            return {"action": "refresh", "request_id": request_id}
         if action == "start":
             if bool(args.get("confirmed", False)) is not True:
                 return None
@@ -780,9 +783,11 @@ class RemoteServer:
         if not isinstance(fresh, dict):
             return {"ok": False, "action": action, "detail": "backend gave no snapshot"}
         blockers = list(fresh.get("start_blockers", []) or [])
-        running = str(fresh.get("session_status", "") or "").upper() == "RUNNING"
+        status = str(fresh.get("session_status", "") or "").upper()
+        running = status == "RUNNING"
+        starting = status == "STARTING"
         if action == "start":
-            ok = running
+            ok = running or starting or bool(fresh.get("action_ok", False))
         elif action == "refresh_capital":
             # `action_ok` is False when the backend refused the read (see
             # headless `_live_unavailable`); its `action_note` carries the

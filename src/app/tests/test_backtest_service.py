@@ -56,7 +56,7 @@ def store(tmp_path: Path) -> Path:
 
 def test_builtin_strategy_runs_on_real_bars(store: Path, tmp_path: Path) -> None:
     results = run_backtest(
-        "SMA Crossover",
+        "OBR C1C4",
         ["TREND"],
         "15m",
         None,
@@ -77,18 +77,17 @@ def test_builtin_strategy_runs_on_real_bars(store: Path, tmp_path: Path) -> None
     assert first["exit_time"] >= first["entry_time"]
 
 
-def test_rsi_and_ema_builtins_run(store: Path, tmp_path: Path) -> None:
-    for name in ("RSI Strategy", "EMA Crossover"):
-        results = run_backtest(
-            name, ["TREND"], "15m", None, None, 1000000.0, "buy", store, tmp_path
-        )
-        assert results["metrics"]["total_trades"] >= 0
-        assert results["ranking"][0]["symbol"] == "TREND"
+def test_obr_c1c4_runs_again_on_real_bars(store: Path, tmp_path: Path) -> None:
+    results = run_backtest(
+        "OBR C1C4", ["TREND"], "15m", None, None, 1000000.0, "buy", store, tmp_path
+    )
+    assert results["metrics"]["total_trades"] >= 0
+    assert results["ranking"][0]["symbol"] == "TREND"
 
 
 def test_sell_mode_shorts(store: Path, tmp_path: Path) -> None:
     results = run_backtest(
-        "SMA Crossover", ["TREND"], "15m", None, None, 1000000.0, "sell", store, tmp_path
+        "OBR C1C4", ["TREND"], "15m", None, None, 1000000.0, "sell", store, tmp_path
     )
     assert all(t["side"] == "SHORT" for t in results["trades"])
 
@@ -105,7 +104,7 @@ def test_insufficient_data_fails_closed(tmp_path: Path) -> None:
     con.close()
     with pytest.raises(BacktestError, match="Insufficient data"):
         run_backtest(
-            "SMA Crossover",
+            "OBR C1C4",
             ["TINY"],
             "15m",
             None,
@@ -121,12 +120,12 @@ def test_unknown_strategy_and_bad_inputs_fail_actionably(store: Path, tmp_path: 
     with pytest.raises(BacktestError, match="Unknown strategy"):
         run_backtest("Nope", ["TREND"], "15m", None, None, 1000000.0, "buy", store, tmp_path)
     with pytest.raises(BacktestError, match="No universe"):
-        run_backtest("SMA Crossover", [], "15m", None, None, 1000000.0, "buy", store, tmp_path)
+        run_backtest("OBR C1C4", [], "15m", None, None, 1000000.0, "buy", store, tmp_path)
     with pytest.raises(BacktestError, match="capital must be positive"):
-        run_backtest("SMA Crossover", ["TREND"], "15m", None, None, 0.0, "buy", store, tmp_path)
+        run_backtest("OBR C1C4", ["TREND"], "15m", None, None, 0.0, "buy", store, tmp_path)
     with pytest.raises(BacktestError, match="after end date"):
         run_backtest(
-            "SMA Crossover",
+            "OBR C1C4",
             ["TREND"],
             "15m",
             "2026-02-01",
@@ -139,19 +138,22 @@ def test_unknown_strategy_and_bad_inputs_fail_actionably(store: Path, tmp_path: 
 
 
 def test_describe_strategy_reports_params(tmp_path: Path) -> None:
-    detail = describe_strategy("EMA Crossover", tmp_path)
-    assert detail["kind"] == "built-in"
+    detail = describe_strategy("OBR C1C4", tmp_path)
+    assert detail["kind"] == "obr_c1c4"
     assert {p["key"] for p in detail["params"]} == {
-        "fast_period",
-        "slow_period",
-        "min_volume",
+        "refIndex",
+        "buySlippagePct",
+        "sellSlippagePct",
+        "slSlippagePct",
+        "commissionPct",
+        "extendBars",
     }
-    assert "EmaCrossover" in detail["code"]
+    assert "OBREngine" in detail["code"]
 
 
 def _run(store: Path, tmp_path: Path, **overrides):
     args = {
-        "strategy_name": "SMA Crossover",
+        "strategy_name": "OBR C1C4",
         "symbols": ["TREND"],
         "timeframe": "15m",
         "start": None,
@@ -199,7 +201,7 @@ def test_lab_run_applies_full_command_config(store: Path, tmp_path: Path) -> Non
     assert "TREND" in symbols
     first, last = repository.date_range("TREND")
     command = {
-        "strategy": "SMA Crossover",
+        "strategy": "OBR C1C4",
         "symbols": ["TREND"],
         "timeframe": "15m",
         "start": first,
@@ -232,7 +234,7 @@ def test_lab_run_defaults_capital_to_ten_thousand(store: Path, tmp_path: Path) -
     repository = MarketDataService(store)
     first, last = repository.date_range("TREND")
     command = {
-        "strategy": "SMA Crossover",
+        "strategy": "OBR C1C4",
         "symbols": ["TREND"],
         "timeframe": "15m",
         "start": first,

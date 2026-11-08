@@ -97,6 +97,16 @@ def _strategy_status(live: dict[str, Any]) -> dict[str, Any]:
         if bool(recon.get("blocks_live")):
             return {"status": "BLOCKED", "reason": "reconciliation blocks live"}
         return {"status": "RUNNING", "reason": ""}
+    if status == "STARTING":
+        return {
+            "status": "STARTING",
+            "reason": str(live.get("status_reason", "") or "initializing live engine and sessions"),
+        }
+    if status == "STOPPING":
+        return {
+            "status": "STOPPING",
+            "reason": str(live.get("status_reason", "") or "stopping live engine"),
+        }
     if status == "ERROR":
         return {
             "status": "ERROR",

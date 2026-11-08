@@ -125,9 +125,13 @@ def _bar_to_dict(bar) -> dict:
     """One backend Bar as bridge JSON (mirrors Rust MarketBar fields)."""
 
     def _get(name: str):
-        if isinstance(bar, dict) and name in bar:
-            return bar[name]
-        return getattr(bar, name)
+        if isinstance(bar, dict):
+            if name in bar:
+                return bar[name]
+            if name == "timestamp":
+                return bar.get("time") or bar.get("date") or bar.get("candle_time") or ""
+            return bar.get(name)
+        return getattr(bar, name, None)
 
     return {
         "time": _get("timestamp"),
@@ -548,6 +552,22 @@ def _live_action(
                             service.clear_live_confirmation()
                         note = f"mode set to {service.config.mode} — see Live Readiness"
         elif name == "start":
+            current_status = getattr(service, "status", "")
+            if current_status == "RUNNING":
+                # Idempotent START: already running, return success snapshot
+                _LIVE_ACTION_ERRORS.pop("start", None)
+                snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+                snapshot["action_ok"] = True
+                snapshot["action_note"] = "strategy already running"
+                return snapshot
+            if current_status == "STARTING":
+                # Idempotent START: start already in progress, return success snapshot
+                _LIVE_ACTION_ERRORS.pop("start", None)
+                snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+                snapshot["action_ok"] = True
+                snapshot["action_note"] = "strategy start in progress"
+                return snapshot
+
             confirmed = bool(action.get("confirmed")) or bool(
                 getattr(service, "is_live_confirmed", lambda: False)()
             )
@@ -556,10 +576,30 @@ def _live_action(
                 if hasattr(service, "clear_live_confirmation"):
                     service.clear_live_confirmation()
                 _LIVE_ACTION_ERRORS.pop("start", None)
-                note = "strategy started"
+                if getattr(service, "status", "") == "STARTING":
+                    note = "strategy start in progress"
+                else:
+                    note = "strategy started"
+            elif any("already running" in r or "start in progress" in r for r in reasons):
+                # Service transitioned to running/starting during call: treat as idempotent success
+                _LIVE_ACTION_ERRORS.pop("start", None)
+                if getattr(service, "status", "") == "RUNNING":
+                    note = "strategy already running"
+                else:
+                    note = "strategy start in progress"
             else:
                 _LIVE_ACTION_ERRORS["start"] = "; ".join(reasons)
                 note = f"START blocked: {'; '.join(reasons)}"
+        elif name == "refresh":
+            # Re-read the selected strategy's saved universe from disk so
+            # changes saved in Strategy Lab appear immediately on refresh.
+            if hasattr(service, "_universes") and service.config.strategy_name:
+                service._config.symbols = service._universes.symbols_for(
+                    service.config.strategy_name
+                )
+            snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+            snapshot["action_note"] = "stocks refreshed from Strategy Lab"
+            return snapshot
         elif name == "stop":
             service.stop()
             _LIVE_ACTION_ERRORS.pop("start", None)

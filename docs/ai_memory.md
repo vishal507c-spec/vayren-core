@@ -7,7 +7,13 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (eliminate-adaptive-float-scaling-and-enforce-integer-quantity-20261106):** ELIMINATE ADAPTIVE FLOAT SCALING & ENFORCE STRICT INTEGER QUANTITY CONTRACT ?
+**Latest update (strategy-cleanup-only-obr-c1c4-20261108):** STRATEGY CLEANUP — system ships exactly TWO strategies: OBR + OBR C1C4 —
+- **Removed permanently:** SMA/EMA Crossover + RSI built-ins (`builtins.py` empty, `strategies/sma.py|ema.py|rsi.py|indicators.py` deleted), sync allow-list (`KEEP_STRATEGY_NAMES/IDS`) so foreign storage records can never reload, stale `D:\VAYREN_STRATEGIES\OBR.py.bak`, 10 non-OBR executions + all non-OBR `strategy_versions/` dirs (142 OBR executions + cf7d7645 versions preserved), `shell.rs` fallback list + `live_preview.slint` hardcodes → OBR/OBR C1C4 only.
+- **Preserved:** OBR (storage record `OBR.py`, id cf7d7645) + OBR C1C4 (embedded `obr_source`, SHORT, 30m, 22 symbols, LIVE-selectable). C1C4 now always uses embedded source (OBR.py file + daily-reset fix superset) instead of preferring the library file.
+- **Verified:** fresh registry load with production storage = exactly `obr-c1c4, obr`; removed names unresolvable; strategy/app/execution pytest green except 1 pre-existing HEAD failure (`test_05_sizing_gates...`) + 1 order-flaky pass-alone; ruff/validators clean. Backup: `C:\Users\visha\Desktop\vayren-backup-20261108-strategy` + EC2 `/home/ubuntu/vayren-backup-strategy-20261108` (EC2 storage already OBR-only).
+- **Pending:** NOT pushed/deployed (no explicit push command); EC2 still runs old code until pull+restart. MSVC linker libs vanished from this machine after server restart — `vayren-shell` cargo build blocked until VS/SDK Libs restored (domain/core check unaffected).
+
+**Previous update (eliminate-adaptive-float-scaling-and-enforce-integer-quantity-20261106):** ELIMINATE ADAPTIVE FLOAT SCALING & ENFORCE STRICT INTEGER QUANTITY CONTRACT ?
 - **Problem Statement & Root Cause (EC2 2026-11-06 11:45 IST):**
   1. OBR C1C4 generated valid SELL signals on 7 stocks (DREDGECORP, RAILTEL, DAMCAPITAL, JSWCEMENT, ZEEL, DCW, SAGILITY).
   2. For 5 stocks with higher share prices, ?0.61 risk limit (0.15% of ?403.68 effective capital) computed quantity = 0, causing RISK_DENIED: RISK_BUDGET_TOO_SMALL_FOR_ONE_SHARE.

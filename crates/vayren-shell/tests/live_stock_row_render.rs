@@ -1,8 +1,10 @@
-//! LIVE screen LIVE TRADE STOCKS row — rendered through the real `AppWindow`.
+//! LIVE screen stock universe model — rendered through the real `AppWindow`.
 //!
-//! Asserts the model the Live stock row binds to (exchange, chip count, symbols,
-//! refresh action queueing), then rasterizes the real Live screen and saves PPMs
-//! to verify the UI layout offscreen.
+//! The duplicate LIVE TRADE STOCKS chip strip was removed; the watchlist
+//! is the single visible stock list. This test asserts the preserved model
+//! (exchange, 22-symbol universe, refresh action queueing), then
+//! rasterizes the real Live screen and saves PPMs to verify the layout
+//! offscreen.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -91,7 +93,7 @@ fn live_stock_row_renders_twenty_two_chips_and_exchange() {
     // Backend snapshot arrives with OBR C1C4, 22 saved stocks, and connected broker capital
     live_state.borrow_mut().apply_snapshot(&serde_json::json!({
         "strategy": {"id": "OBR C1C4"},
-        "available_strategies": ["OBR C1C4", "EMA Crossover"],
+        "available_strategies": ["OBR C1C4", "OBR"],
         "available_symbols": symbols,
         "selected_symbols": symbols,
         "capital": {
@@ -158,8 +160,8 @@ fn live_stock_row_renders_twenty_two_chips_and_exchange() {
 
     // Switch to empty strategy: verify empty state renders
     live_state.borrow_mut().apply_snapshot(&serde_json::json!({
-        "strategy": {"id": "EMA Crossover"},
-        "available_strategies": ["OBR C1C4", "EMA Crossover"],
+        "strategy": {"id": "OBR"},
+        "available_strategies": ["OBR C1C4", "OBR"],
         "available_symbols": [],
         "selected_symbols": [],
     }));

@@ -81,9 +81,11 @@ def test_1_central_strategy_selection_canonical_ids(dirs: tuple[str, str]) -> No
 
     available = live.available_strategies()
     assert len(available) > 0
-    # Display names (e.g. 'OBR C1C4', 'EMA Crossover', 'OBR'), matching Strategy Lab
+    # Display names from the central registry, matching Strategy Lab
     assert "OBR C1C4" in available
-    assert "EMA Crossover" in available
+    assert "EMA Crossover" not in available
+    assert "SMA Crossover" not in available
+    assert "RSI Strategy" not in available
     for strat_name in available:
         assert reg.contains(strat_name) or strat_name == "OBR"
 

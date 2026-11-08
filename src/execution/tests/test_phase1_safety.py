@@ -58,29 +58,31 @@ def _sma_logic():
 
 
 class _LiveSma:
-    """Test-only live-declared wrapper. Real strategy code is never modified."""
+    """Test-only live-declared stub strategy (cleanup 2026-11-08: the
+    SMA/EMA/RSI strategies it wrapped were permanently removed; this
+    local stub preserves the wrapper's contract — SUPPORTS_LIVE plus a
+    guaranteed stop loss on every signal)."""
 
     SUPPORTS_LIVE = True
 
-    def __init__(self):
-        from strategy.strategies.sma import SmaCrossover
-
-        self._inner = SmaCrossover(StrategyParameters({"fast_period": 2, "slow_period": 3}))
-
     def warmup(self):
-        return self._inner.warmup()
+        return 0
 
     def on_bar(self, view):
         from dataclasses import replace
 
-        sig = self._inner.on_bar(view)
-        sl = getattr(sig, "stop_loss", None) if sig is not None else None
-        if sig is not None and (sl is None or sl <= 0):
-            price = getattr(sig, "price", 100.0)
-            side = getattr(sig, "side", "BUY")
-            stop = price * 0.95 if side == "BUY" else price * 1.05
-            return replace(sig, stop_loss=stop)
-        return sig
+        from strategy.models.signal import Signal, SignalKind
+
+        bar = view.bar
+        price = float(bar.close)
+        sig = Signal(
+            index=view.index,
+            timestamp=str(bar.timestamp),
+            kind=SignalKind.BUY,
+            price=price,
+        )
+        stop = price * 0.95
+        return replace(sig, stop_loss=stop)
 
 
 def _live_logic():

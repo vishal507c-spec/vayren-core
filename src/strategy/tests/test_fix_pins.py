@@ -7,7 +7,6 @@ All fixtures are synthetic; no bus, no SQL, no network.
 from __future__ import annotations
 
 import sys
-from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -36,9 +35,11 @@ from strategy.models.state import StrategyState  # noqa: E402
 from strategy.registry import StrategyRegistry, StrategyRegistryError  # noqa: E402
 from strategy.runtime import BarView, StrategyRuntime  # noqa: E402
 from strategy.strategies.base import PythonStrategy  # noqa: E402
-from strategy.strategies.ema import EmaCrossover  # noqa: E402
-from strategy.strategies.indicators import calc_rsi, calc_sma  # noqa: E402
-from strategy.strategies.sma import SmaCrossover  # noqa: E402
+
+_DUMMY_SPECS = (
+    ParameterSpec(key="fast_period", label="Fast Period", default=9, minimum=1, maximum=100),
+    ParameterSpec(key="slow_period", label="Slow Period", default=21, minimum=1, maximum=200),
+)
 
 
 def _bars(closes: list[float], start_minute: int = 0):
@@ -231,7 +232,7 @@ def _dummy_factory(params: StrategyParameters):
 
 def _registry() -> StrategyRegistry:
     reg = StrategyRegistry()
-    reg.register_kind("dummy", _dummy_factory, SmaCrossover.param_specs())
+    reg.register_kind("dummy", _dummy_factory, _DUMMY_SPECS)
     return reg
 
 
@@ -241,7 +242,7 @@ def test_registry_duplicate_kind_and_guards() -> None:
         reg.register_kind("dummy", _dummy_factory, ())
     assert reg.has_kind("dummy")
     assert "dummy" in reg.kinds
-    reg.update_kind("dummy", _dummy_factory, SmaCrossover.param_specs())
+    reg.update_kind("dummy", _dummy_factory, _DUMMY_SPECS)
     with pytest.raises(StrategyRegistryError):
         reg.update_kind("nope", _dummy_factory, ())
     reg.unregister_kind("dummy")
@@ -257,7 +258,7 @@ def test_registry_allocation_and_duplicate_ids() -> None:
         name="A",
         version="1.0",
         kind="dummy",
-        params=StrategyParameters.from_specs(SmaCrossover.param_specs()),
+        params=StrategyParameters.from_specs(_DUMMY_SPECS),
     )
     reg.register_definition(definition)
     with pytest.raises(ValueError):
@@ -291,30 +292,9 @@ def test_parameters_immutable_and_specs_validated() -> None:
         ParameterSpec(key="k", label="x", default=1, minimum=0, maximum=2, decimals=-1)
 
 
-# ── indicators / sma / ema ─────────────────────────────────────────────
-
-
-def test_indicator_period_guards() -> None:
-    with pytest.raises(ValueError):
-        calc_sma(deque([1.0]), 0)
-    with pytest.raises(ValueError):
-        calc_rsi(deque([1.0, 2.0]), -3)
-    assert "not Wilder" in (calc_rsi.__doc__ or "")
-
-
-def test_crossover_fast_slow_validated() -> None:
-    bars = _bars([10.0, 11.0])
-    with pytest.raises(ValueError):
-        SmaCrossover({"fast_period": 30, "slow_period": 10}).on_bar_logic(_view(bars, 1))
-    with pytest.raises(ValueError):
-        EmaCrossover({"fast_period": 26, "slow_period": 12}).on_bar_logic(_view(bars, 1))
-
-
-def test_ema_stays_silent_until_warmed() -> None:
-    strat = EmaCrossover({"fast_period": 2, "slow_period": 5})
-    bars = _bars([10.0] * 10)
-    runtime = StrategyRuntime(strat, StrategyParameters({}))
-    assert runtime.run(bars) == ()
+# ── indicators / sma / ema (permanently removed 2026-11-08) ──────────
+# Those strategies and their indicator helpers were deleted in the
+# OBR/OBR C1C4-only cleanup; their pins are removed with them.
 
 
 # ── models: definition / form / state / discovery ───────────────────────

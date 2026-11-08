@@ -1857,6 +1857,10 @@ impl LiveState {
                 };
                 if update_session {
                     self.session = ns;
+                    if ns == SessionStatus::Starting && self.pending_action.as_deref() == Some("start") {
+                        self.pending_since = Some(std::time::Instant::now());
+                        self.action_note = Some("START in progress — initializing live engine".into());
+                    }
                     if matches!(
                         ns,
                         SessionStatus::Running | SessionStatus::Halted | SessionStatus::Error
@@ -2616,10 +2620,17 @@ impl LiveState {
             };
         }
         if self.session == SessionStatus::Running {
-            // The backend confirmed RUNNING, so a lingering local request
-            // note ("start requested — awaiting backend") would be a lie.
+            // The backend confirmed RUNNING, so any lingering request note,
+            // progress note, or premature timeout note must be cleared.
             if let Some(note) = &self.action_note {
-                if note.starts_with("start requested") || note.starts_with("arm requested") {
+                if note.starts_with("start requested")
+                    || note.starts_with("arm requested")
+                    || note.starts_with("START in progress")
+                    || note.starts_with("START timed out")
+                    || note.contains("timed out after")
+                    || note.contains("synchronizing")
+                    || note.contains("verifying")
+                {
                     self.action_note = None;
                 }
             }
