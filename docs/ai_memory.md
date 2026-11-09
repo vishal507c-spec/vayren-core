@@ -7,7 +7,12 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (strategy-cleanup-only-obr-c1c4-20261108):** STRATEGY CLEANUP — system ships exactly TWO strategies: OBR + OBR C1C4 —
+**Latest update (remove-live-readiness-card-20261109):** LIVE READINESS CARD REMOVED FROM LIVE INSPECTOR —
+- **UI-only change (`crates/vayren-shell/ui/live.slint`):** deleted the whole `LIVE READINESS` card (verdict badge, SESSION/SIZE row, blocker list, gate rows, empty state) and the now-unused `LiveGateRow` component. Inspector now shows only ACTIVE STRATEGY and ORDER & SESSION.
+- **Preserved:** backend gates/blockers are untouched; the top banner still renders `start-verdict`/`start-reason`, and `LiveConfirmModal` still reads `venue-blockers` for fail-closed confirmation.
+- **Note:** an external `git reset` at 14:34 IST reverted the first edit; re-applied after the reset. `cargo check -p vayren-shell` passes (only pre-existing binding-loop warnings). Local only — NOT pushed/deployed.
+
+**Previous update (strategy-cleanup-only-obr-c1c4-20261108):** STRATEGY CLEANUP — system ships exactly TWO strategies: OBR + OBR C1C4 —
 - **Removed permanently:** SMA/EMA Crossover + RSI built-ins (`builtins.py` empty, `strategies/sma.py|ema.py|rsi.py|indicators.py` deleted), sync allow-list (`KEEP_STRATEGY_NAMES/IDS`) so foreign storage records can never reload, stale `D:\VAYREN_STRATEGIES\OBR.py.bak`, 10 non-OBR executions + all non-OBR `strategy_versions/` dirs (142 OBR executions + cf7d7645 versions preserved), `shell.rs` fallback list + `live_preview.slint` hardcodes → OBR/OBR C1C4 only.
 - **Preserved:** OBR (storage record `OBR.py`, id cf7d7645) + OBR C1C4 (embedded `obr_source`, SHORT, 30m, 22 symbols, LIVE-selectable). C1C4 now always uses embedded source (OBR.py file + daily-reset fix superset) instead of preferring the library file.
 - **Verified:** fresh registry load with production storage = exactly `obr-c1c4, obr`; removed names unresolvable; strategy/app/execution pytest green except 1 pre-existing HEAD failure (`test_05_sizing_gates...`) + 1 order-flaky pass-alone; ruff/validators clean. Backup: `C:\Users\visha\Desktop\vayren-backup-20261108-strategy` + EC2 `/home/ubuntu/vayren-backup-strategy-20261108` (EC2 storage already OBR-only).

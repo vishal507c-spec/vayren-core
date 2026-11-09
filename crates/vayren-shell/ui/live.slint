@@ -1,13 +1,13 @@
 // VAYREN LIVE — Native Slint execution workstation (no chart: this surface
 // is a terminal blotter, not a charting page — freed space goes to the
-// blotter, events, watchlist and readiness panels).
+// blotter, events and watchlist panels).
 //
 // Single integrated workspace layout:
 // - Top Status / Control Bar: Broker, Market Data, Strategy, Risk, Recon cards + Mode + START/STOP
 // - Main Area (3 Columns):
 //   1. Left/Center: Tabbed Blotter (Positions, Orders, Fills, Daily P&L), Live Events
 //   2. Middle: Watchlist with search and LTP/Chg%/Status
-//   3. Right: Account & Risk, Active Strategy, Live Readiness Checklist
+//   3. Right: Account & Risk, Active Strategy, Order & Session
 
 import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton, VBanner, VEmptyState, VStatusDot } from "components.slint";
@@ -748,74 +748,6 @@ component LiveTabHeader inherits Rectangle {
         }
     }
 }
-
-// One real readiness gate: name + the domain's own verdict + the backend's
-// own reason. There is no `is-ready` input — readiness is never assumed, only
-// reported. A NOT READY / BLOCKED gate carries the semantic left edge and the
-// NOT READY verdict, so it can never be mistaken for a satisfied one.
-component LiveGateRow inherits Rectangle {
-    in property <string> name;
-    in property <string> status;
-    in property <int> tone: 0;
-    in property <string> reason;
-    in property <bool> show-reason: true;
-
-    background: VayrenPalette.live-panel-deep;
-    border-radius: 4px;
-    border-width: 1px;
-    // The border carries the gate's own tone: NOT READY red, WARNING amber —
-    // a warning gate in a faint border read as "off", washing the one
-    // verdict between READY and NOT READY.
-    border-color: root.tone == 3 ? VayrenPalette.neg
-        : root.tone == 2 ? VayrenPalette.amber
-        : root.tone == 1 ? VayrenPalette.live-line-soft
-        : VayrenPalette.live-line-faint;
-
-    VerticalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        padding-top: 5px;
-        padding-bottom: 5px;
-        spacing: 3px;
-
-        HorizontalLayout {
-            height: 18px;
-            spacing: 6px;
-            alignment: center;
-
-            VStatusDot {
-                tone: root.tone;
-            }
-
-            Text {
-                horizontal-stretch: 1;
-                text: root.name;
-                color: VayrenPalette.text;
-                font-size: 11px;
-                font-weight: 700;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            VBadge {
-                text: root.status;
-                tone: root.tone;
-                vertical-alignment: center;
-            }
-        }
-
-        if root.show-reason && root.reason != "": Text {
-            text: root.reason;
-            color: root.tone == 3 ? VayrenPalette.neg : (root.tone == 2 ? VayrenPalette.amber : VayrenPalette.muted);
-            font-size: 10px;
-            font-weight: 500;
-            overflow: elide;
-        }
-    }
-}
-
-
-
 
 component LiveConfirmModal inherits Rectangle {
     in property <string> broker-name;
@@ -2380,8 +2312,7 @@ export component LiveScreen inherits Rectangle {
                     // The cards keep their natural height and the column
                     // scrolls inside its own dock. Without this the viewport
                     // collapses to the dock height, the cards squash to their
-                    // min-heights and the tail (readiness / broker actions)
-                    // paints over the footer strip.
+                    // min-heights and the tail paints over the footer strip.
                     viewport-height: Math.max(self.height, inspector-body.preferred-height);
 
                     inspector-body := VerticalLayout {
@@ -2606,103 +2537,6 @@ export component LiveScreen inherits Rectangle {
                             }
                         }
 
-
-                        // LIVE READINESS — why the start gate is open or
-                        // closed. The verdict, the blockers and every gate row
-                        // are the backend's own facts; nothing here is
-                        // assumed. The ARM ceremony is the operator's, and it
-                        // is only offered while the backend says it may be.
-                        Rectangle {
-                            min-height: 150px;
-                            background: VayrenPalette.live-panel;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: root.blockers.length > 0 ? VayrenPalette.neg : VayrenPalette.live-line;
-
-                            VerticalLayout {
-                                padding: 10px;
-                                spacing: 6px;
-
-                                HorizontalLayout {
-                                    height: 24px;
-                                    spacing: 8px;
-                                    alignment: stretch;
-
-                                    Text {
-                                        text: "LIVE READINESS";
-                                        color: VayrenPalette.text-bright;
-                                        font-size: 11px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                                    VBadge {
-                                        text: root.start-verdict;
-                                        tone: (root.setup.session-label == "● RUNNING" || root.setup.can-stop) ? 1 : ((root.setup.pending-start || root.setup.pending-stop) ? 2 : (root.blockers.length > 0 ? 3 : 2));
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                HorizontalLayout {
-                                    height: 20px;
-                                    spacing: 8px;
-                                    alignment: stretch;
-
-                                    Text {
-                                        width: 96px;
-                                        text: "SESSION";
-                                        color: VayrenPalette.muted;
-                                        font-size: 10.5px;
-                                        font-weight: 600;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Text {
-                                        text: root.setup.session-label != "" ? root.setup.session-label : "—";
-                                        color: LiveTone.ink(root.setup.session-tone);
-                                        font-size: 10.5px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                                    Text {
-                                        text: "SIZE " + (root.setup.quantity != "" ? root.setup.quantity : "—");
-                                        color: VayrenPalette.text;
-                                        font-size: 10.5px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                if root.blockers.length > 0: VerticalLayout {
-                                    spacing: 3px;
-                                    for b in root.blockers: Text {
-                                        text: "✕ " + b;
-                                        color: VayrenPalette.neg;
-                                        font-size: 10.5px;
-                                        font-weight: 600;
-                                        overflow: elide;
-                                    }
-                                }
-
-                                if root.gates.length == 0: VEmptyState {
-                                    height: 56px;
-                                    title: "No gates reported";
-                                    detail: "The backend has not published readiness gates yet.";
-                                }
-
-                                for g in root.gates: LiveGateRow {
-                                    name: g.name;
-                                    status: g.status;
-                                    tone: g.tone;
-                                    reason: g.reason;
-                                }
-                            }
-                        }
 
                     }
                 }
