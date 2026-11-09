@@ -15,6 +15,7 @@ import datetime
 import sys
 import time
 from pathlib import Path
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT / "src") not in sys.path:
@@ -112,7 +113,7 @@ class _StubBroker:
 def test_pre_order_checks_rejects_quantities_less_than_one() -> None:
     session = LiveSession(
         SessionConfig(mode=ExecutionMode.LIVE, journal_path=None, memory_path=None),
-        _MockProvider(),
+        cast(Any, _MockProvider()),
         RiskPolicy(),
         request_id="test-qty-sub",
     )
@@ -143,7 +144,7 @@ def test_pre_order_checks_rejects_quantities_less_than_one() -> None:
 def test_pre_order_checks_rejects_fractional_units() -> None:
     session = LiveSession(
         SessionConfig(mode=ExecutionMode.LIVE, journal_path=None, memory_path=None),
-        _MockProvider(),
+        cast(Any, _MockProvider()),
         RiskPolicy(),
         request_id="test-qty-frac",
     )
@@ -257,7 +258,7 @@ def _setup_session(
 ) -> LiveSession:
     session = LiveSession(
         SessionConfig(mode=ExecutionMode.LIVE, journal_path=None, memory_path=None),
-        provider,
+        cast(Any, provider),
         RiskPolicy(),
         request_id="test-integer-contract",
     )

@@ -13,7 +13,7 @@ Validates:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from broker.capabilities import CapabilitySet, Caps, Domain
 from broker.faces import FactoryPlugin
@@ -182,7 +182,7 @@ def _register_fake_broker() -> None:
 def _create_obr_logic() -> Any:
     compiled = compile_strategy(OBR_C1C4_SOURCE)
     params = StrategyParameters(compiled.param_defaults)
-    logic = compiled.create_logic(params)
+    logic = cast(Any, compiled.create_logic(params))
     logic.SUPPORTS_LIVE = True
     return logic
 
@@ -282,7 +282,7 @@ def test_session_recovery_seeds_seen_timestamps_and_skips_duplicates() -> None:
             session_start="09:15",
             session_end="15:30",
         ),
-        _DummyProvider(),
+        cast(Any, _DummyProvider()),
         RiskPolicy(),
     )
 
@@ -385,7 +385,7 @@ def test_session_recovery_seeds_seen_timestamps_and_skips_duplicates() -> None:
     ]
 
     # Verify OBR C1C4 engine state
-    engine = ctx.logic.engine
+    engine = cast(Any, ctx.logic).engine
     assert engine.candleCount == 3  # C4 is index 3 of today
     assert engine.refSet is True
     assert engine.refHigh == 108.0
@@ -405,7 +405,7 @@ def test_recovery_idempotence_multiple_runs() -> None:
             session_start="09:15",
             session_end="15:30",
         ),
-        _DummyProvider(),
+        cast(Any, _DummyProvider()),
         RiskPolicy(),
     )
     compiled = compile_strategy(OBR_C1C4_SOURCE)
@@ -474,7 +474,7 @@ def test_obrengine_c1c4_breakout_and_confirmation_signal() -> None:
 
     driver.restore_window((c0, c1, c2, c3))
     assert len(ctx.bars) == 4
-    eng = ctx.logic.engine
+    eng = cast(Any, ctx.logic).engine
     assert eng.refSet is True
     assert eng.refHigh == 108.0
     assert eng.refLow == 103.0
@@ -515,9 +515,10 @@ def test_obrengine_c1c4_genuine_double_break_still_invalidates() -> None:
     # C4: Breaks Ref High (110 > 108), refLow not broken
     c4 = _make_bar("NSE:DAMCAPITAL", "2026-11-05 10:45:00", 107, 110, 104, 109)
     driver.on_candle(_make_candle_event(c4, seq=4))
-    assert ctx.logic.engine.firstBreakDone is True
-    assert ctx.logic.engine.ccBuySet is True
-    assert ctx.logic.engine.ccInvalidated is False
+    ctx_logic: Any = ctx.logic
+    assert ctx_logic.engine.firstBreakDone is True
+    assert ctx_logic.engine.ccBuySet is True
+    assert ctx_logic.engine.ccInvalidated is False
 
     # C5: Crashes and breaches Ref Low (101 <= 103) without touching entry (high 107 < 110)
     c5 = _make_bar("NSE:DAMCAPITAL", "2026-11-05 11:15:00", 105, 107, 101, 102)
@@ -525,8 +526,8 @@ def test_obrengine_c1c4_genuine_double_break_still_invalidates() -> None:
 
     assert sig5 is None
     # Genuine double-break rule MUST invalidate!
-    assert ctx.logic.engine.ccInvalidated is True
-    assert ctx.logic.engine.ccBuySet is False
+    assert ctx_logic.engine.ccInvalidated is True
+    assert ctx_logic.engine.ccBuySet is False
 
 
 def test_all_22_stocks_isolated_recovery() -> None:
@@ -541,7 +542,7 @@ def test_all_22_stocks_isolated_recovery() -> None:
                 session_start="09:15",
                 session_end="15:30",
             ),
-            _DummyProvider(),
+            cast(Any, _DummyProvider()),
             RiskPolicy(),
         )
 
@@ -617,5 +618,6 @@ def test_all_22_stocks_isolated_recovery() -> None:
             "2026-11-05 09:45:00",
             "2026-11-05 10:15:00",
         ]
-        assert ctx.logic.engine.ccInvalidated is False
-        assert ctx.logic.engine.refSet is True
+        ctx_logic: Any = ctx.logic
+        assert ctx_logic.engine.ccInvalidated is False
+        assert ctx_logic.engine.refSet is True

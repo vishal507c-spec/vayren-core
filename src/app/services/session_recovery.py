@@ -189,7 +189,7 @@ def fetch_and_validate_session_candles(
                         if len(r) >= 6
                     }
                     if all(st in local_map for st in expected_stamps):
-                        recovered_bars = tuple(
+                        cached_bars: tuple[Bar, ...] = tuple(
                             Bar(
                                 symbol=symbol,
                                 open=local_map[st][0],
@@ -207,12 +207,12 @@ def fetch_and_validate_session_candles(
                             symbol=symbol,
                             status="SUCCESS",
                             expected_candles_count=len(expected_stamps),
-                            recovered_candles_count=len(recovered_bars),
-                            bars=recovered_bars,
+                            recovered_candles_count=len(cached_bars),
+                            bars=cached_bars,
                             missing_intervals=(),
-                            detail=f"Recovered {len(recovered_bars)} candles from local",
+                            detail=f"Recovered {len(cached_bars)} candles from local",
                         )
-                        return recovered_bars, report
+                        return cached_bars, report
                 finally:
                     con.close()
         except Exception as loc_exc:
