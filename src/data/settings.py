@@ -93,11 +93,37 @@ NSE_HOLIDAYS: frozenset[str] = frozenset(
         "2026-08-15",
         "2026-09-16",
         "2026-10-02",
-        "2026-11-09",
-        "2026-11-14",
+        "2026-11-10",
+        "2026-11-24",
         "2026-12-25",
     }
 )
+
+
+# NSE special trading sessions (Muhurat trading, disaster recovery drills, etc.)
+# Date -> tuple of session dicts with start, end (HH:MM IST) and session name.
+NSE_SPECIAL_SESSIONS: dict[str, tuple[dict[str, str], ...]] = {
+    # 2024
+    "2024-03-02": (
+        {"start": "09:15", "end": "10:00", "name": "Disaster Recovery Session 1"},
+        {"start": "11:30", "end": "12:30", "name": "Disaster Recovery Session 2"},
+    ),
+    "2024-05-18": (
+        {"start": "09:15", "end": "10:00", "name": "Disaster Recovery Session 1"},
+        {"start": "11:30", "end": "12:30", "name": "Disaster Recovery Session 2"},
+    ),
+    "2024-11-01": (
+        {"start": "18:00", "end": "19:15", "name": "Diwali Laxmi Pujan (Muhurat Trading)"},
+    ),
+    # 2025
+    "2025-10-21": (
+        {"start": "18:15", "end": "19:15", "name": "Diwali Laxmi Pujan (Muhurat Trading)"},
+    ),
+    # 2026
+    "2026-11-08": (
+        {"start": "18:00", "end": "19:15", "name": "Diwali Laxmi Pujan (Muhurat Trading)"},
+    ),
+}
 
 
 @dataclass(frozen=True)

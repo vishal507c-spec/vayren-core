@@ -2293,8 +2293,22 @@ class LiveTradingService:
         )
         if is_conn:
             if not market_open:
-                ws_status = "MARKET CLOSED"
-                md_status = "MARKET CLOSED"
+                sess_key = str(market_session.get("session", "CLOSED")).upper()
+                if sess_key == "HOLIDAY":
+                    ws_status = "HOLIDAY"
+                    md_status = "HOLIDAY"
+                elif sess_key in ("PRE_OPEN", "PRE_MARKET"):
+                    ws_status = "PRE-MARKET"
+                    md_status = "PRE-MARKET"
+                elif sess_key == "UNKNOWN":
+                    ws_status = "UNKNOWN"
+                    md_status = "UNKNOWN"
+                else:
+                    ws_status = "MARKET CLOSED"
+                    md_status = "MARKET CLOSED"
+            elif view.get("status") == "DEGRADED":
+                ws_status = "DEGRADED"
+                md_status = "DEGRADED" if running else "STOPPED"
             elif not running:
                 # Broker auth is not a feed: a stopped engine streaming
                 # nothing must never inherit STREAMING from stored candles.
@@ -2374,6 +2388,8 @@ class LiveTradingService:
                 "last_tick_time": md_last_tick or str(view.get("last_tick_time") or ""),
                 "reconnect_count": 0,
                 "last_error": "",
+                "market_session": str(market_session.get("session", "CLOSED")),
+                "session_desc": str(market_session.get("description", "")),
             },
             "market_data": {
                 "status": md_status,
@@ -2386,6 +2402,8 @@ class LiveTradingService:
                 "price_source": market_price_source,
                 "health": md_session_health,
                 "delivery": md_delivery,
+                "market_session": str(market_session.get("session", "CLOSED")),
+                "session_desc": str(market_session.get("description", "")),
             },
             "risk_engine": {
                 "raw_capital": self._risk_engine.raw_capital,

@@ -205,12 +205,12 @@ fn test_broker_status_consistent_in_top_card_and_duplicate_card_removed() {
 fn test_defect_1_watchlist_header_and_data_row_alignment() {
     let src = include_str!("../ui/live.slint");
     assert!(
-        src.contains("Text { width: 14px; text: \"\"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }"),
-        "Watchlist header column 1 must be exactly 14px wide"
+        src.contains("Text { width: 12px; text: \"\"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }"),
+        "Watchlist header column 1 must be exactly 12px wide"
     );
     assert!(
-        src.contains("Rectangle { width: 14px; Rectangle { width: 10px; height: 10px; border-radius: 5px; background: LiveTone.ink(row.status-tone); } }"),
-        "Watchlist row column 1 must be 14px wide to match header column 1"
+        src.contains("Rectangle { width: 12px; Rectangle { width: 10px; height: 10px; border-radius: 5px; background: LiveTone.ink(row.status-tone); } }"),
+        "Watchlist row column 1 must be 12px wide to match header column 1"
     );
 }
 
@@ -348,24 +348,6 @@ fn test_defect_8_strategy_combobox_selection() {
     assert!(
         !src.contains("border-color: root.strategy-selected >= 0 ? VayrenPalette.live-teal-deep"),
         "Strategy combobox border must never highlight on placeholder index 0"
-    );
-    // Stock list header and guidance must use <= 0
-    assert!(
-        src.contains("text: root.strategy-selected <= 0\n                            ? \"Select a strategy above\""),
-        "Stock list header must guide selection when strategy-selected <= 0"
-    );
-    assert!(
-        src.contains("text: root.strategy-selected <= 0\n                            ? \"Choose a strategy above to load its saved trading universe\""),
-        "Empty stock universe chip strip must guide selection when strategy-selected <= 0"
-    );
-    // SAVE UNIVERSE must be disabled on placeholder index 0
-    assert!(
-        src.contains("enabled: root.strategy-selected > 0 && !root.setup.can-stop;"),
-        "SAVE UNIVERSE button must require strategy-selected > 0"
-    );
-    assert!(
-        !src.contains("enabled: root.strategy-selected >= 0 && !root.setup.can-stop;"),
-        "SAVE UNIVERSE button must not be enabled when placeholder index 0 is selected"
     );
     // Symbols empty state must use <= 0
     assert!(

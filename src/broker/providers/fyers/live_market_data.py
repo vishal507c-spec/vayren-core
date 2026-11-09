@@ -24,7 +24,12 @@ from broker.vocab import BrokerError, ErrorCode
 
 logger = logging.getLogger(__name__)
 
-_VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
+try:
+    from zoneinfo import ZoneInfo
+
+    _VENUE_TZ = ZoneInfo("Asia/Kolkata")
+except Exception:
+    _VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
 _SESSION_PRE_OPEN_MINUTE = 9 * 60  # 09:00 IST
 _SESSION_START_MINUTE = 9 * 60 + 15  # 09:15 IST
 _SESSION_END_MINUTE = 15 * 60 + 30  # 15:30 IST
@@ -34,16 +39,114 @@ def get_nse_market_session(epoch: float | None = None) -> dict[str, Any]:
     """Authoritative market session state and schedule for NSE Cash.
 
     Returns a dict with:
-      - session: 'OPEN' | 'CLOSED' | 'PRE_OPEN' | 'HOLIDAY'
-      - is_open: bool (True only during regular trading hours 09:15-15:30 IST)
+      - session: 'OPEN' | 'CLOSED' | 'PRE_OPEN' | 'PRE_MARKET' | 'HOLIDAY' | 'UNKNOWN'
+      - is_open: bool (True only during regular or special trading sessions)
       - description: human-readable status
       - current_time_ist: 'HH:MM:SS'
       - next_session: description of next session transition
     """
-    t = epoch if epoch is not None else time.time()
-    dt = datetime.fromtimestamp(t, _VENUE_TZ)
-    time_str = dt.strftime("%H:%M:%S")
+    import math
 
+    if epoch is not None:
+        try:
+            t = float(epoch)
+            if math.isnan(t) or t < 0:
+                return {
+                    "session": "UNKNOWN",
+                    "is_open": False,
+                    "description": "Market Status Unknown (Invalid Clock)",
+                    "current_time_ist": "",
+                    "next_session": "Unknown",
+                }
+        except Exception:
+            return {
+                "session": "UNKNOWN",
+                "is_open": False,
+                "description": "Market Status Unknown (Clock Error)",
+                "current_time_ist": "",
+                "next_session": "Unknown",
+            }
+    else:
+        t = time.time()
+
+    try:
+        dt = datetime.fromtimestamp(t, _VENUE_TZ)
+    except Exception:
+        return {
+            "session": "UNKNOWN",
+            "is_open": False,
+            "description": "Market Status Unknown (Timezone Conversion Error)",
+            "current_time_ist": "",
+            "next_session": "Unknown",
+        }
+
+    time_str = dt.strftime("%H:%M:%S")
+    date_str = dt.strftime("%Y-%m-%d")
+    minute_of_day = dt.hour * 60 + dt.minute
+
+    # Load holidays and special sessions from configuration
+    _holidays: frozenset[str] = frozenset()
+    _special_sessions: dict[str, Any] = {}
+    try:
+        import importlib
+
+        _settings = importlib.import_module("data.settings")
+        _holidays = getattr(_settings, "NSE_HOLIDAYS", frozenset())
+        _special_sessions = getattr(_settings, "NSE_SPECIAL_SESSIONS", {})
+    except Exception:
+        pass
+
+    # 1. Special trading sessions (e.g. Muhurat trading on Diwali)
+    if date_str in _special_sessions:
+        sessions = _special_sessions[date_str]
+        for spec in sessions:
+            try:
+                s_h, s_m = map(int, spec["start"].split(":"))
+                e_h, e_m = map(int, spec["end"].split(":"))
+                s_min = s_h * 60 + s_m
+                e_min = e_h * 60 + e_m
+                name = spec.get("name", "Special Session")
+
+                if s_min <= minute_of_day < e_min:
+                    return {
+                        "session": "OPEN",
+                        "is_open": True,
+                        "description": f"Market Open ({name}: {spec['start']}–{spec['end']} IST)",
+                        "current_time_ist": time_str,
+                        "next_session": f"{spec['end']} IST (Special Session Close)",
+                    }
+                if max(0, s_min - 15) <= minute_of_day < s_min:
+                    return {
+                        "session": "PRE_OPEN",
+                        "is_open": False,
+                        "description": f"Pre-Open Session ({name}: opens {spec['start']} IST)",
+                        "current_time_ist": time_str,
+                        "next_session": f"{spec['start']} IST (Market Open)",
+                    }
+                if minute_of_day < s_min:
+                    is_weekend = dt.weekday() >= 5
+                    is_hol = date_str in _holidays
+                    ctx = "Weekend" if is_weekend else ("Holiday" if is_hol else "Pre-market")
+                    sess_type = "CLOSED" if is_weekend else ("HOLIDAY" if is_hol else "PRE_MARKET")
+                    return {
+                        "session": sess_type,
+                        "is_open": False,
+                        "description": f"Market Closed ({ctx}; {name} opens {spec['start']} IST)",
+                        "current_time_ist": time_str,
+                        "next_session": f"{spec['start']} IST ({name})",
+                    }
+            except Exception:
+                continue
+
+        return {
+            "session": "CLOSED",
+            "is_open": False,
+            "description": "Market Closed (Special session ended)",
+            "current_time_ist": time_str,
+            "next_session": "Next Trading Day 09:15 IST",
+        }
+
+    # 2. Weekends
     if dt.weekday() >= 5:  # Saturday or Sunday
         day_name = "Saturday" if dt.weekday() == 5 else "Sunday"
         return {
@@ -54,24 +157,17 @@ def get_nse_market_session(epoch: float | None = None) -> dict[str, Any]:
             "next_session": "Monday 09:15 IST",
         }
 
-    date_str = dt.strftime("%Y-%m-%d")
-    try:
-        import importlib
+    # 3. Exchange Holidays
+    if date_str in _holidays:
+        return {
+            "session": "HOLIDAY",
+            "is_open": False,
+            "description": f"Market Closed (Exchange Holiday: {date_str})",
+            "current_time_ist": time_str,
+            "next_session": "Next Trading Day 09:15 IST",
+        }
 
-        _settings = importlib.import_module("data.settings")
-        _holidays = getattr(_settings, "NSE_HOLIDAYS", frozenset())
-        if date_str in _holidays:
-            return {
-                "session": "HOLIDAY",
-                "is_open": False,
-                "description": f"Market Closed (Exchange Holiday: {date_str})",
-                "current_time_ist": time_str,
-                "next_session": "Next Trading Day 09:15 IST",
-            }
-    except Exception:
-        pass
-
-    minute_of_day = dt.hour * 60 + dt.minute
+    # 4. Regular weekday trading hours
     if minute_of_day < _SESSION_PRE_OPEN_MINUTE:
         return {
             "session": "CLOSED",
@@ -106,8 +202,12 @@ def get_nse_market_session(epoch: float | None = None) -> dict[str, Any]:
 
 
 def is_nse_market_open(epoch: float | None = None) -> bool:
-    """True if epoch (default now) is within regular NSE hours (09:15-15:30 IST)."""
-    return get_nse_market_session(epoch)["is_open"]
+    """True if epoch (default now) is within regular or special NSE trading hours."""
+    try:
+        session = get_nse_market_session(epoch)
+        return bool(session.get("is_open", False))
+    except Exception:
+        return False
 
 
 #: A stream that WAS delivering and then goes quiet this long is stale.

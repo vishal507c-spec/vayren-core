@@ -1339,13 +1339,24 @@ export component LiveScreen inherits Rectangle {
                     show-icon: true;
                     label: "MARKET WS";
                     value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
-                    tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" ? 1 : (root.ws.status == "MARKET CLOSED" ? 0 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" || root.ws.status == "DEGRADED" ? 2 : 3)));
+                    tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" || root.ws.status == "MARKET OPEN" ? 1 : (root.ws.status == "MARKET CLOSED" || root.ws.status == "HOLIDAY" ? 0 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" || root.ws.status == "DEGRADED" || root.ws.status == "PRE-MARKET" || root.ws.status == "UNKNOWN" ? 2 : 3)));
                     sub-text: root.ws.last-error != "" ? root.ws.last-error
-                        : (root.ws.status == "MARKET CLOSED" ? "Market Closed (15:30 IST)"
+                        : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" || root.ws.status == "MARKET OPEN" ?
+                            (root.ws.last-tick != "" && root.ws.last-tick != "—" ? ("Last: " + root.ws.last-tick)
+                            : (root.ws.latency != "" && root.ws.latency != "—" ? ("RTT: " + root.ws.latency)
+                            : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Market Stream")))
+                        : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub
                         : (root.ws.last-tick != "" && root.ws.last-tick != "—" ? ("Last: " + root.ws.last-tick)
-                        : (root.ws.latency != "" && root.ws.latency != "—" ? ("RTT: " + root.ws.latency)
-                        : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Market Stream"))));
-                    sub-tone: root.ws.last-error != "" ? 3 : (root.ws.status == "MARKET CLOSED" ? 0 : (root.ws.tone != 0 ? root.ws.tone : 0));
+                        : (root.ws.status == "MARKET CLOSED" ? "Market Closed"
+                        : (root.ws.status == "HOLIDAY" ? "Exchange Holiday"
+                        : (root.ws.status == "PRE-MARKET" ? "Pre-Market (Opens 09:15 IST)"
+                        : (root.ws.status == "UNKNOWN" ? "Market Status Unknown"
+                        : "Market Stream")))))));
+                    sub-tone: root.ws.last-error != "" ? 3
+                        : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" || root.ws.status == "MARKET OPEN" ? (root.ws.tone != 0 ? root.ws.tone : 1)
+                        : (root.ws.status == "PRE-MARKET" || root.ws.status == "UNKNOWN" ? 2
+                        : (root.ws.status == "MARKET CLOSED" || root.ws.status == "HOLIDAY" ? 0
+                        : (root.ws.tone != 0 ? root.ws.tone : 0))));
                 }
 
                 Rectangle { horizontal-stretch: 1; min-width: 6px; background: transparent; }
@@ -1491,14 +1502,25 @@ export component LiveScreen inherits Rectangle {
                         icon-char: "MD";
                         show-icon: true;
                         label: "MARKET WS";
-                        value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
-                        tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" ? 1 : (root.ws.status == "MARKET CLOSED" ? 0 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" || root.ws.status == "DEGRADED" ? 2 : 3)));
-                        sub-text: root.ws.last-error != "" ? root.ws.last-error
-                            : (root.ws.status == "MARKET CLOSED" ? "Market Closed (15:30 IST)"
-                            : (root.ws.last-tick != "" && root.ws.last-tick != "—" ? ("Last: " + root.ws.last-tick)
+                    value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
+                    tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" || root.ws.status == "MARKET OPEN" ? 1 : (root.ws.status == "MARKET CLOSED" || root.ws.status == "HOLIDAY" ? 0 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" || root.ws.status == "DEGRADED" || root.ws.status == "PRE-MARKET" || root.ws.status == "UNKNOWN" ? 2 : 3)));
+                    sub-text: root.ws.last-error != "" ? root.ws.last-error
+                        : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" || root.ws.status == "MARKET OPEN" ?
+                            (root.ws.last-tick != "" && root.ws.last-tick != "—" ? ("Last: " + root.ws.last-tick)
                             : (root.ws.latency != "" && root.ws.latency != "—" ? ("RTT: " + root.ws.latency)
-                            : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Market Stream"))));
-                        sub-tone: root.ws.last-error != "" ? 3 : (root.ws.status == "MARKET CLOSED" ? 0 : (root.ws.tone != 0 ? root.ws.tone : 0));
+                            : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Market Stream")))
+                        : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub
+                        : (root.ws.last-tick != "" && root.ws.last-tick != "—" ? ("Last: " + root.ws.last-tick)
+                        : (root.ws.status == "MARKET CLOSED" ? "Market Closed"
+                        : (root.ws.status == "HOLIDAY" ? "Exchange Holiday"
+                        : (root.ws.status == "PRE-MARKET" ? "Pre-Market (Opens 09:15 IST)"
+                        : (root.ws.status == "UNKNOWN" ? "Market Status Unknown"
+                        : "Market Stream")))))));
+                    sub-tone: root.ws.last-error != "" ? 3
+                        : (root.ws.status == "CONNECTED" || root.ws.status == "LIVE" || root.ws.status == "MARKET OPEN" ? (root.ws.tone != 0 ? root.ws.tone : 1)
+                        : (root.ws.status == "PRE-MARKET" || root.ws.status == "UNKNOWN" ? 2
+                        : (root.ws.status == "MARKET CLOSED" || root.ws.status == "HOLIDAY" ? 0
+                        : (root.ws.tone != 0 ? root.ws.tone : 0))));
                     }
 
                     Rectangle { horizontal-stretch: 1; background: transparent; }

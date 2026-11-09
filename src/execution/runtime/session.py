@@ -1084,6 +1084,13 @@ class LiveSession:
         if live and self._armed != LiveArm.ARMED:
             return ("ORDER_BLOCKED_UNARMED", "live not armed")
         if live:
+            from broker.providers.fyers.live_market_data import is_nse_market_open
+
+            clock_epoch_fn = getattr(self._broker, "now_epoch", None)
+            if callable(clock_epoch_fn):
+                now_ts = float(clock_epoch_fn())
+                if not is_nse_market_open(now_ts):
+                    return ("ORDER_BLOCKED", "NSE market is not open or session is unverified")
             healthy, health_reason = self._broker.health()
             if not healthy:
                 return ("ORDER_BLOCKED_UNHEALTHY", f"broker unhealthy: {health_reason}")
@@ -1179,21 +1186,6 @@ class LiveSession:
 
     def _submit(self, intent: ExecutionIntent, plan: OrderPlan, now_epoch: float) -> None:
         assert self._broker is not None
-        blocked = self._pre_order_checks(intent, plan)
-        if blocked is not None:
-            kind, reason = blocked
-            self._journal.record(kind, intent_id=intent.intent_id, reason=reason)
-            return
-        client_order_id = f"{intent.intent_id}:o1"
-        order = BrokerOrder(
-            client_order_id=client_order_id,
-            intent_id=intent.intent_id,
-            symbol=plan.symbol,
-            side=plan.side,
-            quantity=plan.quantity,
-            order_type=plan.order_type,
-            limit_price=plan.limit_price,
-        )
         if plan.quantity <= 0:
             self._journal.record(
                 "ORDER_SKIPPED", intent_id=intent.intent_id, reason="zero quantity"
@@ -1217,6 +1209,21 @@ class LiveSession:
                 quantity=float(whole_shares),
             )
             plan = replace(plan, quantity=float(whole_shares))
+        blocked = self._pre_order_checks(intent, plan)
+        if blocked is not None:
+            kind, reason = blocked
+            self._journal.record(kind, intent_id=intent.intent_id, reason=reason)
+            return
+        client_order_id = f"{intent.intent_id}:o1"
+        order = BrokerOrder(
+            client_order_id=client_order_id,
+            intent_id=intent.intent_id,
+            symbol=plan.symbol,
+            side=plan.side,
+            quantity=plan.quantity,
+            order_type=plan.order_type,
+            limit_price=plan.limit_price,
+        )
         # FINAL Phase-3 gate: re-validate the planned quantity against the
         # sizing verdict's ceiling immediately before the LIVE order path.
         # Catches planner-adjusted or manually inflated quantities that

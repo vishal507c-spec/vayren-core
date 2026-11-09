@@ -4140,6 +4140,7 @@ pub fn demo_live_state_running() -> LiveState {
             last_tick_time: "09:42:15".into(),
             reconnect_count: 0,
             last_error: String::new(),
+            session_desc: String::new(),
         },
         market_data: live::MarketDataFacts {
             status: "STREAMING".into(),

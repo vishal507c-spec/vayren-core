@@ -447,6 +447,7 @@ pub struct WebSocketFacts {
     pub last_tick_time: String,
     pub reconnect_count: usize,
     pub last_error: String,
+    pub session_desc: String,
 }
 
 /// Market data streaming metrics model.
@@ -758,6 +759,7 @@ impl Default for LiveState {
                 last_tick_time: "12:14:25".into(),
                 reconnect_count: 0,
                 last_error: String::new(),
+                session_desc: String::new(),
             },
             market_data: MarketDataFacts {
                 status: "STREAMING".into(),
@@ -2435,6 +2437,14 @@ impl LiveState {
         }
         // WebSocket status ingest
         if let Some(w) = v.get("websocket") {
+            let session_desc = str_of(w, "session_desc");
+            let session_desc = if session_desc.is_empty() {
+                v.get("market_session")
+                    .map(|ms| str_of(ms, "description"))
+                    .unwrap_or_default()
+            } else {
+                session_desc
+            };
             self.websocket = WebSocketFacts {
                 status: str_of(w, "status"),
                 latency_ms: w.get("latency_ms").and_then(|x| x.as_f64()),
@@ -2450,6 +2460,7 @@ impl LiveState {
                     .and_then(|x| x.as_u64())
                     .unwrap_or(0) as usize,
                 last_error: str_of(w, "last_error"),
+                session_desc,
             };
         }
 
@@ -4281,7 +4292,10 @@ pub fn project(state: &LiveState) -> LiveView {
         None => {
             if state.session == SessionStatus::Running
                 && (state.websocket.status == "MARKET CLOSED"
-                    || state.market_data.status == "MARKET CLOSED")
+                    || state.market_data.status == "MARKET CLOSED"
+                    || state.websocket.status == "HOLIDAY"
+                    || state.websocket.status == "PRE-MARKET"
+                    || state.websocket.status == "UNKNOWN")
             {
                 (
                     "● ENGINE RUNNING · Awaiting market open (09:15 IST) — data pipeline & broker ready"
@@ -4751,8 +4765,11 @@ pub fn project(state: &LiveState) -> LiveView {
     // ── WebSocket facts view ──
     let ws_status_upper = state.websocket.status.trim().to_uppercase();
     let (ws_status, ws_tone) = match ws_status_upper.as_str() {
-        "CONNECTED" | "LIVE" => (ws_status_upper.clone(), 1),
+        "CONNECTED" | "LIVE" | "MARKET OPEN" => (ws_status_upper.clone(), 1),
         "MARKET CLOSED" => ("MARKET CLOSED".to_string(), 0),
+        "HOLIDAY" => ("HOLIDAY".to_string(), 0),
+        "PRE-MARKET" | "PRE_MARKET" | "PRE_OPEN" => ("PRE-MARKET".to_string(), 2),
+        "UNKNOWN" => ("UNKNOWN".to_string(), 2),
         "CONNECTING" => ("CONNECTING".to_string(), 2),
         "RECONNECTING" => ("RECONNECTING".to_string(), 2),
         "DEGRADED" | "STALE" => (ws_status_upper.clone(), 2),
@@ -4761,6 +4778,26 @@ pub fn project(state: &LiveState) -> LiveView {
         "" => ("DISCONNECTED".to_string(), 3),
         other => (other.to_string(), 0),
     };
+    let ws_sub = match ws_status.as_str() {
+        "MARKET CLOSED" | "HOLIDAY" | "PRE-MARKET" | "UNKNOWN" => {
+            if !state.websocket.session_desc.is_empty() {
+                state.websocket.session_desc.clone()
+            } else if state.websocket.subscribed_symbols > 0 {
+                format!("{} symbols", state.websocket.subscribed_symbols)
+            } else {
+                "—".into()
+            }
+        }
+        _ => {
+            if state.websocket.subscribed_symbols > 0 {
+                format!("{} symbols", state.websocket.subscribed_symbols)
+            } else if !state.websocket.session_desc.is_empty() {
+                state.websocket.session_desc.clone()
+            } else {
+                "—".into()
+            }
+        }
+    };
     let ws = WebSocketView {
         status: ws_status,
         tone: ws_tone,
@@ -4768,11 +4805,7 @@ pub fn project(state: &LiveState) -> LiveView {
             .websocket
             .latency_ms
             .map_or("—".into(), |ms| format!("{:.0} ms", ms)),
-        sub: if state.websocket.subscribed_symbols > 0 {
-            format!("{} symbols", state.websocket.subscribed_symbols)
-        } else {
-            "—".into()
-        },
+        sub: ws_sub,
         last_tick: if state.websocket.last_tick_time.is_empty() {
             "—".into()
         } else {
@@ -4792,9 +4825,10 @@ pub fn project(state: &LiveState) -> LiveView {
     };
     let md = MarketDataView {
         tone: match md_status.as_str() {
-            "STREAMING" | "LIVE" => 1,
-            "MARKET CLOSED" => 0,
-            "STALE" | "CONNECTING" | "DEGRADED" | "NOT REPORTED" => 2,
+            "STREAMING" | "LIVE" | "MARKET OPEN" => 1,
+            "MARKET CLOSED" | "HOLIDAY" => 0,
+            "PRE-MARKET" | "PRE_MARKET" | "PRE_OPEN" | "UNKNOWN" | "WAITING" | "STALE"
+            | "CONNECTING" | "DEGRADED" | "NOT REPORTED" => 2,
             "NO DATA" | "STOPPED" | "ERROR" | "FAILED" | "DISCONNECTED" => 3,
             _ => 2,
         },
