@@ -1086,9 +1086,9 @@ class LiveSession:
         if live:
             from broker.providers.fyers.live_market_data import is_nse_market_open
 
-            clock_epoch_fn = getattr(self._broker, "now_epoch", None)
+            clock_epoch_fn: Any = getattr(self._broker, "now_epoch", None)
             if callable(clock_epoch_fn):
-                now_ts = float(clock_epoch_fn())
+                now_ts = float(cast(Any, clock_epoch_fn()))
                 if not is_nse_market_open(now_ts):
                     return ("ORDER_BLOCKED", "NSE market is not open or session is unverified")
             healthy, health_reason = self._broker.health()

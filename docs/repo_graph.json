@@ -35817,7 +35817,7 @@
       "file": "src/broker/tests/test_nse_market_session_regression.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 39,
+      "line": 40,
       "module": "src/broker",
       "name": "TestNseMarketSessionRegression",
       "public": true,

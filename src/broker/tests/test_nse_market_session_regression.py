@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import datetime
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
@@ -217,8 +218,8 @@ class TestNseMarketSessionRegression:
         service._timer.is_running = True
         mock_sess_stale = MagicMock()
         mock_sess_stale.market_data_feed = "none"
-        service._session = mock_sess_stale
-        service._universe_quotes = MagicMock(return_value=[])
+        cast(Any, service)._session = mock_sess_stale
+        cast(Any, service)._universe_quotes = MagicMock(return_value=[])
 
         snap_stale = service.snapshot()
         assert snap_stale["websocket"]["status"] == "CONNECTED"
@@ -226,11 +227,11 @@ class TestNseMarketSessionRegression:
 
         # C: Fresh live ticks during market hours
         quotes = [{"symbol": "NSE:SBIN-EQ", "price_source": "live_feed", "close": 820.0}]
-        service._universe_quotes = MagicMock(return_value=quotes)
+        cast(Any, service)._universe_quotes = MagicMock(return_value=quotes)
         service._feed_kind = "live"
         mock_sess_live = MagicMock()
         mock_sess_live.market_data_feed = "live"
-        service._session = mock_sess_live
+        cast(Any, service)._session = mock_sess_live
         service._mark_times = {"NSE:SBIN-EQ": "11:06:23"}
 
         snap_fresh = service.snapshot()
@@ -239,7 +240,7 @@ class TestNseMarketSessionRegression:
         assert "Regular Trading Session" in snap_fresh["websocket"]["session_desc"]
 
     # Scenario 9: Frontend refresh and backend restart
-    def test_scenario_9_frontend_refresh_and_backend_restart(self, tmp_path: Path):
+    def test_scenario_9_frontend_refresh_and_backend_restart(self, tmp_path: Path) -> None:
         # Simulated sequence of requests as frontend connects, disconnects, reloads
         service1 = LiveTradingService(data_dir=tmp_path)
         service1._broker_view = MagicMock(
@@ -258,12 +259,12 @@ class TestNseMarketSessionRegression:
         service1._timer = MagicMock()
         service1._timer.is_running = True
         service1._feed_kind = "live"
-        service1._universe_quotes = MagicMock(
+        cast(Any, service1)._universe_quotes = MagicMock(
             return_value=[{"symbol": "NSE:RELIANCE-EQ", "price_source": "live_feed"}]
         )
         mock_session1 = MagicMock()
         mock_session1.market_data_feed = "live"
-        service1._session = mock_session1
+        cast(Any, service1)._session = mock_session1
 
         snap1 = service1.snapshot()
         assert snap1["websocket"]["status"] == "LIVE"
@@ -287,12 +288,12 @@ class TestNseMarketSessionRegression:
         service2._timer = MagicMock()
         service2._timer.is_running = True
         service2._feed_kind = "live"
-        service2._universe_quotes = MagicMock(
+        cast(Any, service2)._universe_quotes = MagicMock(
             return_value=[{"symbol": "NSE:RELIANCE-EQ", "price_source": "live_feed"}]
         )
         mock_session2 = MagicMock()
         mock_session2.market_data_feed = "live"
-        service2._session = mock_session2
+        cast(Any, service2)._session = mock_session2
 
         snap2 = service2.snapshot()
         assert snap2["websocket"]["status"] == "LIVE"
@@ -300,7 +301,7 @@ class TestNseMarketSessionRegression:
         assert snap2["websocket"]["session_desc"] == snap1["websocket"]["session_desc"]
 
     # Safety Gate verification: Order execution blocked when market closed or unverified
-    def test_safety_gate_pre_order_check(self):
+    def test_safety_gate_pre_order_check(self) -> None:
         # Set up a mock session with LIVE mode and ARMED state
         mock_broker = MagicMock()
         mock_broker.health.return_value = (True, "healthy")
@@ -325,7 +326,7 @@ class TestNseMarketSessionRegression:
             strategy_id="strat-1",
             strategy_version="v1",
             signal_id="sig-1",
-            timestamp=datetime.datetime.now(IST),
+            timestamp=datetime.datetime.now(IST).isoformat(),
             event_seq=1,
             symbol="NSE:SBIN-EQ",
             side="BUY",
