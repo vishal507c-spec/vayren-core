@@ -3917,12 +3917,7 @@ class LiveTradingService:
                             "reason": f"{store_reason}; {fail_reason}",
                         }
                     )
-                elif (
-                    live_feed == "live"
-                    and not missing
-                    and not nodata
-                    and live_available > 0
-                ):
+                elif live_feed == "live" and not missing and not nodata and live_available > 0:
                     # Active verified live feed streaming fresh ticks
                     gates.append(
                         {

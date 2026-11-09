@@ -65,7 +65,10 @@ class _DummyTransport:
         self.post_count = 0
 
     def post_json(
-        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None  # noqa: ARG002
+        self,
+        url: str,  # noqa: ARG002
+        payload: dict[str, Any],  # noqa: ARG002
+        headers: dict[str, str] | None = None,  # noqa: ARG002
     ) -> dict[str, Any]:
         self.post_count += 1
         self.last_payload = payload
@@ -77,7 +80,9 @@ class _DummyTransport:
         return {"s": "ok", "code": 200, "data": {"margin_total": 50.0}}
 
     def get_json(
-        self, url: str, headers: dict[str, str] | None = None  # noqa: ARG002
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,  # noqa: ARG002
     ) -> dict[str, Any]:
         if "funds" in url:
             return {
@@ -91,12 +96,18 @@ class _DummyTransport:
         return {"s": "ok", "code": 200, "data": []}
 
     def put_json(
-        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None  # noqa: ARG002
+        self,
+        url: str,  # noqa: ARG002
+        payload: dict[str, Any],  # noqa: ARG002
+        headers: dict[str, str] | None = None,  # noqa: ARG002
     ) -> dict[str, Any]:
         return {}
 
     def delete_json(
-        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None  # noqa: ARG002
+        self,
+        url: str,  # noqa: ARG002
+        payload: dict[str, Any],  # noqa: ARG002
+        headers: dict[str, str] | None = None,  # noqa: ARG002
     ) -> dict[str, Any]:
         return {}
 
@@ -323,6 +334,7 @@ def test_valid_margin_response_permits_normal_risk_checks_to_continue() -> None:
 
 def test_margin_failure_blocks_only_affected_stock_per_stock_isolation() -> None:
     """7 & 10. Margin failure on Stock A blocks only Stock A; Stock B passes independently."""
+
     class _Provider:
         capabilities = ("candles",)
 

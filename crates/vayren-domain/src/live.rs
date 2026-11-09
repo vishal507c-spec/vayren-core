@@ -1857,9 +1857,12 @@ impl LiveState {
                 };
                 if update_session {
                     self.session = ns;
-                    if ns == SessionStatus::Starting && self.pending_action.as_deref() == Some("start") {
+                    if ns == SessionStatus::Starting
+                        && self.pending_action.as_deref() == Some("start")
+                    {
                         self.pending_since = Some(std::time::Instant::now());
-                        self.action_note = Some("START in progress — initializing live engine".into());
+                        self.action_note =
+                            Some("START in progress — initializing live engine".into());
                     }
                     if matches!(
                         ns,
@@ -2550,11 +2553,19 @@ impl LiveState {
                 let tick_trigger = match (ltp, prev_row.and_then(|r| r.ltp)) {
                     (Some(new_val), Some(old_val)) if new_val > old_val => {
                         let prev_trig = prev_row.map(|r| r.tick_trigger).unwrap_or(0);
-                        if prev_trig <= 0 { 1 } else { (prev_trig % 100_000) + 1 }
+                        if prev_trig <= 0 {
+                            1
+                        } else {
+                            (prev_trig % 100_000) + 1
+                        }
                     }
                     (Some(new_val), Some(old_val)) if new_val < old_val => {
                         let prev_trig = prev_row.map(|r| r.tick_trigger).unwrap_or(0);
-                        if prev_trig >= 0 { -1 } else { -((-prev_trig % 100_000) + 1) }
+                        if prev_trig >= 0 {
+                            -1
+                        } else {
+                            -((-prev_trig % 100_000) + 1)
+                        }
                     }
                     _ => 0,
                 };
@@ -8784,7 +8795,7 @@ mod tests {
             order: None,
             pnl: None,
             last_update: "".into(),
-                tick_trigger: 0,
+            tick_trigger: 0,
         }];
         st.drain_actions();
 
@@ -9051,11 +9062,17 @@ mod tests {
         });
         st.apply_snapshot(&snap1);
         assert_eq!(st.watchlist_rows.len(), 1);
-        assert_eq!(st.watchlist_rows[0].tick_trigger, 0, "First tick has no baseline, so trigger is 0");
+        assert_eq!(
+            st.watchlist_rows[0].tick_trigger, 0,
+            "First tick has no baseline, so trigger is 0"
+        );
         let v1 = project(&st);
         assert_eq!(v1.watchlist[0].ltp, "2500.00");
         assert_eq!(v1.watchlist[0].change, "+1.50%");
-        assert_eq!(v1.watchlist[0].change_tone, 1, "Positive change must tone green (1)");
+        assert_eq!(
+            v1.watchlist[0].change_tone, 1,
+            "Positive change must tone green (1)"
+        );
         assert_eq!(v1.watchlist[0].tick_trigger, 0);
 
         // 2. Up tick: price rises to 2505.0 (+1.70%)
@@ -9071,12 +9088,18 @@ mod tests {
             ]
         });
         st.apply_snapshot(&snap2);
-        assert!(st.watchlist_rows[0].tick_trigger > 0, "Up tick must have positive tick_trigger for green flash");
+        assert!(
+            st.watchlist_rows[0].tick_trigger > 0,
+            "Up tick must have positive tick_trigger for green flash"
+        );
         let trig2 = st.watchlist_rows[0].tick_trigger;
         let v2 = project(&st);
         assert_eq!(v2.watchlist[0].ltp, "2505.00");
         assert_eq!(v2.watchlist[0].change, "+1.70%");
-        assert_eq!(v2.watchlist[0].change_tone, 1, "Positive change must tone green (1)");
+        assert_eq!(
+            v2.watchlist[0].change_tone, 1,
+            "Positive change must tone green (1)"
+        );
         assert_eq!(v2.watchlist[0].tick_trigger, trig2);
 
         // 3. Consecutive up tick: price rises to 2510.0
@@ -9093,7 +9116,10 @@ mod tests {
         });
         st.apply_snapshot(&snap3);
         assert!(st.watchlist_rows[0].tick_trigger > 0);
-        assert_ne!(st.watchlist_rows[0].tick_trigger, trig2, "Consecutive up tick must change value so Slint changed callback fires");
+        assert_ne!(
+            st.watchlist_rows[0].tick_trigger, trig2,
+            "Consecutive up tick must change value so Slint changed callback fires"
+        );
         let _trig3 = st.watchlist_rows[0].tick_trigger;
 
         // 4. Down tick: price drops to 2490.0 (-0.20%)
@@ -9109,12 +9135,18 @@ mod tests {
             ]
         });
         st.apply_snapshot(&snap4);
-        assert!(st.watchlist_rows[0].tick_trigger < 0, "Down tick must have negative tick_trigger for red flash");
+        assert!(
+            st.watchlist_rows[0].tick_trigger < 0,
+            "Down tick must have negative tick_trigger for red flash"
+        );
         let trig4 = st.watchlist_rows[0].tick_trigger;
         let v4 = project(&st);
         assert_eq!(v4.watchlist[0].ltp, "2490.00");
         assert_eq!(v4.watchlist[0].change, "-0.20%");
-        assert_eq!(v4.watchlist[0].change_tone, 3, "Negative change must tone red (3)");
+        assert_eq!(
+            v4.watchlist[0].change_tone, 3,
+            "Negative change must tone red (3)"
+        );
         assert_eq!(v4.watchlist[0].tick_trigger, trig4);
 
         // 5. Consecutive down tick: price drops to 2485.0
@@ -9131,7 +9163,10 @@ mod tests {
         });
         st.apply_snapshot(&snap5);
         assert!(st.watchlist_rows[0].tick_trigger < 0);
-        assert_ne!(st.watchlist_rows[0].tick_trigger, trig4, "Consecutive down tick must change value so Slint changed callback fires");
+        assert_ne!(
+            st.watchlist_rows[0].tick_trigger, trig4,
+            "Consecutive down tick must change value so Slint changed callback fires"
+        );
 
         // 6. Flat tick: price unchanged at 2485.0
         let snap6 = serde_json::json!({
@@ -9146,6 +9181,9 @@ mod tests {
             ]
         });
         st.apply_snapshot(&snap6);
-        assert_eq!(st.watchlist_rows[0].tick_trigger, 0, "Unchanged price must produce 0 tick_trigger");
+        assert_eq!(
+            st.watchlist_rows[0].tick_trigger, 0,
+            "Unchanged price must produce 0 tick_trigger"
+        );
     }
 }

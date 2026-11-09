@@ -1114,9 +1114,7 @@ class FyersSessionAdapter:
                 stop_price
                 if (stop_price is not None and stop_price > 0)
                 else float(
-                    getattr(plan, "price", 0.0)
-                    or getattr(plan, "reference_price", 0.0)
-                    or 0.0
+                    getattr(plan, "price", 0.0) or getattr(plan, "reference_price", 0.0) or 0.0
                 )
             )
         )

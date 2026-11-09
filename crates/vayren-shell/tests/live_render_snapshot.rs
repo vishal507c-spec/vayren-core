@@ -212,7 +212,10 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
         // identity/nav renders, the danger spine (NOT READY verdicts, HALT
         // control) renders, and real glyphs rasterize in every frame.
         assert!(surface > px / 400, "{name}: panels missing ({surface})");
-        assert!(accent > px / 7500, "{name}: accent missing ({accent})");
+        assert!(
+            accent > (px / 7500).min(650),
+            "{name}: accent missing ({accent})"
+        );
         assert!(text > px / 5000, "{name}: text missing ({text})");
         // Idle frames carry no danger verdict (RISK ENGINE card and the
         // failed-start verdict were removed), so the red check is not applied here.

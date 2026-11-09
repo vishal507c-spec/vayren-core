@@ -3186,12 +3186,17 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             });
                             if action == "start" {
                                 if ok {
-                                    let s_status = payload.get("session_status").and_then(|s| s.as_str()).unwrap_or("");
+                                    let s_status = payload
+                                        .get("session_status")
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("");
                                     if s_status == "STARTING" {
                                         state.session = live::SessionStatus::Starting;
                                         state.pending_action = Some("start".into());
                                         state.pending_since = Some(std::time::Instant::now());
-                                        state.action_note = Some("start in progress — initializing live engine".into());
+                                        state.action_note = Some(
+                                            "start in progress — initializing live engine".into(),
+                                        );
                                     } else {
                                         state.session = live::SessionStatus::Running;
                                         if state.start_epoch_secs.is_none() {
