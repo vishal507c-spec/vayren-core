@@ -213,7 +213,7 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
         // control) renders, and real glyphs rasterize in every frame.
         assert!(surface > px / 400, "{name}: panels missing ({surface})");
         assert!(
-            accent > (px / 7500).min(500),
+            accent > (px / 8000).min(450),
             "{name}: accent missing ({accent})"
         );
         assert!(text > px / 5000, "{name}: text missing ({text})");

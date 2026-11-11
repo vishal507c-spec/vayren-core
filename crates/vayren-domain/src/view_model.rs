@@ -56,18 +56,24 @@ impl HealthState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Environment {
     Live,
+    /// Missing / unknown: fails closed, never live-ready, never the LIVE badge.
+    Unknown,
 }
 
 impl Environment {
     pub fn label(self) -> &'static str {
-        "LIVE"
+        match self {
+            Environment::Live => "LIVE",
+            Environment::Unknown => "UNKNOWN",
+        }
     }
 }
 
-/// Environment badge kind: 0 = not configured, 2 = live.
+/// Environment badge kind: 0 = unknown / not configured, 2 = live.
 pub fn env_kind(environment: Environment) -> i32 {
     match environment {
         Environment::Live => 2,
+        Environment::Unknown => 0,
     }
 }
 
@@ -116,7 +122,7 @@ impl Default for BrokerPanel {
         Self {
             broker_id: String::new(),
             display_name: "NOT CONFIGURED".to_string(),
-            environment: Environment::Live,
+            environment: Environment::Unknown,
             capabilities: Vec::new(),
             health: HealthState::Unknown,
             live_gates_ready: false,
@@ -155,8 +161,8 @@ impl BrokerPanel {
     /// Build from the legacy host's bridge JSON (the `system_snapshot_dict`
     /// schema: single selected broker, flat facts). Defensive: missing or
     /// mistyped keys degrade to honest absence — never invented state.
-    /// Unknown environment strings fall back to the PAPER default (the app
-    /// invariant); unknown health strings stay UNKNOWN.
+    /// Unknown environment strings stay UNKNOWN (fail closed); only an
+    /// explicit `"live"` maps to `Live`. Unknown health strings stay UNKNOWN.
     pub fn from_json(v: &serde_json::Value) -> Self {
         let str_of = |key: &str| -> String {
             match v.get(key) {
@@ -167,7 +173,9 @@ impl BrokerPanel {
         };
         let environment = match str_of("environment").as_str() {
             "live" => Environment::Live,
-            _ => Environment::Live,
+            // Unknown/missing never becomes LIVE — it stays UNKNOWN so the
+            // badge (0) and `live_ready()` stay fail-closed.
+            _ => Environment::Unknown,
         };
         let health = match str_of("health").as_str() {
             "DISCONNECTED" => HealthState::Disconnected,
@@ -698,6 +706,28 @@ mod tests {
         assert!(panel(Environment::Live, HealthState::Connected, true).live_ready());
         // live environment but gates failing -> not ready
         assert!(!panel(Environment::Live, HealthState::Connected, false).live_ready());
+        // unknown/missing environment is never live-ready, even with gates green
+        assert!(!panel(Environment::Unknown, HealthState::Connected, true).live_ready());
+    }
+
+    #[test]
+    fn unknown_environment_never_silently_becomes_live() {
+        let parsed = BrokerPanel::from_json(&serde_json::json!({
+            "environment": "paper",
+            "health": "CONNECTED",
+            "live_ready": true,
+        }));
+        assert_eq!(parsed.environment, Environment::Unknown);
+        assert_eq!(parsed.environment.label(), "UNKNOWN");
+        assert_eq!(env_kind(parsed.environment), 0);
+        assert!(
+            !parsed.live_ready(),
+            "unknown environment is never live-ready"
+        );
+
+        let missing = BrokerPanel::from_json(&serde_json::json!({}));
+        assert_eq!(missing.environment, Environment::Unknown);
+        assert_eq!(env_kind(missing.environment), 0);
     }
 
     #[test]

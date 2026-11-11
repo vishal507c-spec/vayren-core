@@ -11,7 +11,10 @@ mode, capital/risk validation, broker health, or reconciliation.
 from __future__ import annotations
 
 import contextlib
-from typing import Any
+import threading
+import time
+from collections.abc import Callable
+from typing import Any, cast
 
 
 class BackendGateway:
@@ -83,6 +86,15 @@ class HeadlessGateway(BackendGateway):
         self._strategy_dir = str(strategy_dir)
         self._broker_manager: Any | None = None
         self._manager_started = False
+        # Short-TTL snapshot coalescing: the poll loop, fresh connections
+        # and lifecycle workers all read the same snapshot within
+        # milliseconds of each other. Rebuilding the full service snapshot
+        # (sessions × orders × reconciliation) per reader multiplied
+        # backend work per poll. Reads within 250ms reuse one build;
+        # every apply_command invalidates the cache.
+        self._snapshot_cache: dict[str, Any] | None = None
+        self._snapshot_cached_at: float = 0.0
+        self._snapshot_lock = threading.Lock()
 
     def _ensure_manager(self) -> Any | None:
         """The SYSTEM broker manager — shared singleton, not a second instance.
@@ -103,6 +115,11 @@ class HeadlessGateway(BackendGateway):
             self._broker_manager = None
         return self._broker_manager
 
+    def _invalidate_snapshot_cache(self) -> None:
+        with self._snapshot_lock:
+            self._snapshot_cache = None
+            self._snapshot_cached_at = 0.0
+
     def get_snapshot(self) -> dict[str, Any]:
         """Fresh live-service snapshot (same source as the native UI).
 
@@ -110,7 +127,15 @@ class HeadlessGateway(BackendGateway):
         not only after broker commands — so the remote SYSTEM panel and
         LIVE always read the same EC2-owned session state and can never
         render opposite verdicts from different sections.
+
+        Coalesced: calls within 250ms share one backend build. The returned
+        dict is the cached build (callers project, never mutate).
         """
+        now = time.monotonic()
+        with self._snapshot_lock:
+            cached = self._snapshot_cache
+            if cached is not None and (now - self._snapshot_cached_at) < 0.25:
+                return cached
         from app.headless import _trading_service_snapshot
 
         live = _trading_service_snapshot(self._data_dir, self._strategy_dir, self._ensure_manager())
@@ -120,6 +145,10 @@ class HeadlessGateway(BackendGateway):
                 active = str((manager.snapshot() or {}).get("active_broker", "") or "")
                 if active:
                     live["broker_session"] = manager.get_session_snapshot(active)
+        if isinstance(live, dict):
+            with self._snapshot_lock:
+                self._snapshot_cache = live
+                self._snapshot_cached_at = time.monotonic()
         return live
 
     def apply_command(self, action: dict[str, Any]) -> dict[str, Any]:
@@ -128,9 +157,16 @@ class HeadlessGateway(BackendGateway):
 
         act = dict(action)
         name = str(act.get("action", "") or "").strip().lower()
+        self._invalidate_snapshot_cache()
         # Broker session commands go straight to the authoritative manager
         # (same path the local SYSTEM screen uses) — never a parallel flow.
-        if name in ("connect_broker", "disconnect_broker", "revoke_session", "broker_status"):
+        if name in (
+            "connect_broker",
+            "disconnect_broker",
+            "revoke_session",
+            "broker_status",
+            "save_broker_credentials",
+        ):
             return self._apply_broker_command(act)
         return _live_action(
             self._data_dir,
@@ -144,11 +180,18 @@ class HeadlessGateway(BackendGateway):
         from app.headless import _trading_service_snapshot
 
         name = str(action.get("action", "") or "").strip().lower()
-        broker_id = str(action.get("broker_id") or action.get("broker") or "fyers").strip()
+        broker_id = str(action.get("broker_id") or action.get("broker") or "").strip()
         request_id = str(action.get("request_id", "") or "")
         manager = self._ensure_manager()
         if manager is None:
             return {"error": "broker backend unavailable", "session_status": "STOPPED"}
+        if not broker_id:
+            return {
+                "error": f"{name} requires a broker id",
+                "session_status": "STOPPED",
+                "action_note": f"{name} requires a broker id",
+                "action_ok": False,
+            }
         if name == "connect_broker":
             credentials = action.get("credentials")
             creds = dict(credentials) if isinstance(credentials, dict) else {}
@@ -181,6 +224,34 @@ class HeadlessGateway(BackendGateway):
                 svc = _headless._live_service(self._data_dir, self._strategy_dir, manager)
                 if svc is not None:
                     svc.note_armed(False)
+            snapshot = _trading_service_snapshot(self._data_dir, self._strategy_dir, manager)
+            snapshot["broker_session"] = manager.get_session_snapshot(broker_id)
+            snapshot["action_note"] = message
+            snapshot["action_ok"] = ok
+            return snapshot
+        if name == "save_broker_credentials":
+            # Save-only: vault write via configure, no authentication.
+            credentials = action.get("credentials")
+            creds_raw = dict(credentials) if isinstance(credentials, dict) else {}
+            creds = {
+                str(k).strip(): str(v).strip()
+                for k, v in creds_raw.items()
+                if str(k).strip() and "•" not in str(v) and str(v).strip()
+            }
+            if not creds:
+                snapshot = _trading_service_snapshot(self._data_dir, self._strategy_dir, manager)
+                snapshot["broker_session"] = manager.get_session_snapshot(broker_id)
+                snapshot["action_note"] = "nothing to save — no credential values provided"
+                snapshot["action_ok"] = False
+                return snapshot
+            save_fn = cast(
+                "Callable[[str, dict[str, str]], tuple[bool, str]] | None",
+                getattr(manager, "save_credentials", None),
+            )
+            if callable(save_fn):
+                ok, message = save_fn(broker_id, creds)
+            else:
+                ok, message = manager.configure(broker_id, creds)
             snapshot = _trading_service_snapshot(self._data_dir, self._strategy_dir, manager)
             snapshot["broker_session"] = manager.get_session_snapshot(broker_id)
             snapshot["action_note"] = message

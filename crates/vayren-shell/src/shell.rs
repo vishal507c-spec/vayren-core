@@ -103,10 +103,11 @@ pub fn initial_screen(argv: &[String]) -> ShellScreen {
     ShellScreen::Lab
 }
 
-/// Environment badge kind: 2 = live.
+/// Environment badge kind: 0 = unknown / not configured, 2 = live.
 pub fn env_kind(environment: Environment) -> i32 {
     match environment {
         Environment::Live => 2,
+        Environment::Unknown => 0,
     }
 }
 
@@ -332,12 +333,17 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
         AppWindow::set_broker_field_v4,
         AppWindow::set_broker_field_v5,
     ];
-    for (i, f) in workspace.fields.iter().enumerate() {
-        if let Some(setter) = setters.get(i) {
-            if f.saved {
-                setter(ui, SAVED_SENTINEL.into());
-            }
-        }
+    // Full rebuild of every slot: saved fields get the sentinel, ALL other
+    // fields are cleared — otherwise a broker switch keeps the previous
+    // broker's typed/sentinel values and the next submit leaks them across.
+    for (i, setter) in setters.iter().enumerate() {
+        let value = workspace
+            .fields
+            .get(i)
+            .filter(|f| f.saved)
+            .map(|_| SAVED_SENTINEL)
+            .unwrap_or("");
+        setter(ui, value.into());
     }
 }
 
@@ -3384,7 +3390,6 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         can_stop: view.setup.can_stop,
         needs_live_confirm: view.setup.needs_live_confirm,
         confirmed_live: view.setup.confirmed_live,
-        confirm_dialog_open: view.setup.confirm_dialog_open,
         symbol_total: view.setup.symbol_total.into(),
         stock_universe: Rc::new(slint::VecModel::from(
             view.setup
@@ -3397,6 +3402,10 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         universe_exchange: view.setup.universe_exchange.into(),
         pending_start: view.setup.pending_start,
         pending_stop: view.setup.pending_stop,
+        lifecycle_stage: view.setup.lifecycle_stage.into(),
+        lifecycle_detail: view.setup.lifecycle_detail.into(),
+        lifecycle_done: view.setup.lifecycle_done,
+        lifecycle_total: view.setup.lifecycle_total,
     });
     let mut combo_names: Vec<String> = Vec::with_capacity(view.setup.strategy_names.len() + 1);
     combo_names.push("— Select Strategy —".to_string());
@@ -3881,15 +3890,26 @@ where
     }
     wire_unit!(on_live_start_requested, LiveState::start);
     wire_unit!(on_live_stop_requested, LiveState::stop);
-    wire_unit!(on_live_confirm_requested, LiveState::confirm_live);
-    wire_unit!(
-        on_live_confirm_open_requested,
-        LiveState::open_confirm_dialog
-    );
-    wire_unit!(
-        on_live_confirm_cancel_requested,
-        LiveState::close_confirm_dialog
-    );
+    {
+        // Persistent LIVE ARMED toggle: one control, two intents. Arming is
+        // explicit operator consent; disarming immediately blocks new order
+        // dispatch (sessions are disarmed) without cancelling working orders.
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        let cb = on_action.clone();
+        ui.on_live_arm_toggle_requested(move || {
+            {
+                let mut live = strong.borrow_mut();
+                if live.live_confirmed {
+                    live.disarm_live();
+                } else {
+                    live.confirm_live();
+                }
+                (cb.borrow_mut())(&mut live);
+            }
+            refresh_live(&handle, &strong);
+        });
+    }
     wire_unit!(on_live_inspector_toggled, LiveState::toggle_inspector);
     {
         // CLEAR EVENTS is UI-hygiene only: it drops the rendered event
@@ -4368,6 +4388,57 @@ mod tests {
             blockers.row_data(0).unwrap(),
             "LIVE broker is not configured"
         );
+
+        // ── CONNECTION: stale-credential fields are fully rebuilt on switch ──
+        let saved = BrokerWorkspace::from_json(&serde_json::json!({
+            "selected_id": "fyers",
+            "panel_id": "fyers",
+            "status_raw": "LOGIN_REQUIRED",
+            "configured": true,
+            "can_login": true,
+            "credential_fields": [
+                {"key": "api_key", "label": "API Key", "saved": true},
+                {"key": "secret", "label": "Secret", "saved": false},
+            ],
+        }));
+        apply_connection(&ui, &saved);
+        assert_eq!(ui.get_broker_field_v0(), SAVED_CREDENTIAL_SENTINEL);
+        assert_eq!(ui.get_broker_field_v1(), "");
+
+        let other = BrokerWorkspace::from_json(&serde_json::json!({
+            "selected_id": "zerodha",
+            "panel_id": "zerodha",
+            "status_raw": "LOGIN_REQUIRED",
+            "configured": true,
+            "can_login": true,
+            "credential_fields": [
+                {"key": "app_id", "label": "App ID", "saved": false},
+                {"key": "secret", "label": "Secret", "saved": false},
+            ],
+        }));
+        apply_connection(&ui, &other);
+        assert_eq!(ui.get_broker_field_v0(), "");
+        assert_eq!(ui.get_broker_field_v1(), "");
+
+        // ── CONNECTION: the selected row carries the session verdict ──
+        let failed = BrokerWorkspace::from_json(&serde_json::json!({
+            "brokers": [
+                {"id": "fyers", "display_name": "Fyers",
+                 "venue_subtitle": "FYERS API v3",
+                 "status": "CONNECTED", "connected": true, "selected": true}
+            ],
+            "selected_id": "fyers",
+            "panel_id": "fyers",
+            "status_raw": "ERROR",
+            "configured": true,
+            "credential_fields": [],
+        }));
+        apply_connection(&ui, &failed);
+        let rows = ui.get_conn_brokers();
+        let row = rows.row_data(0).expect("selected broker row must exist");
+        assert_eq!(row.status_label, "Connection Failed");
+        assert_eq!(row.status_tone, 3);
+        assert!(!row.connected);
 
         select(&ui, ShellScreen::Broker);
         assert_eq!(ui.get_active_screen(), ShellScreen::Broker);
@@ -4941,13 +5012,16 @@ mod tests {
             can_stop: false,
             needs_live_confirm: false,
             confirmed_live: false,
-            confirm_dialog_open: false,
             symbol_total: "527 symbols (OBR C1C4)".into(),
             stock_universe: Rc::new(slint::VecModel::from(Vec::<slint::SharedString>::new()))
                 .into(),
             universe_exchange: "NSE".into(),
             pending_start: false,
             pending_stop: false,
+            lifecycle_stage: "".into(),
+            lifecycle_detail: "".into(),
+            lifecycle_done: 0,
+            lifecycle_total: 0,
         });
         harness.set_market(LiveMarket {
             has_data: false,

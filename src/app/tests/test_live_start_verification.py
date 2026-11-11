@@ -190,20 +190,20 @@ def _manager_with_adapter(tmp_path, adapter: _FakeAdapter) -> BrokerManager:
 
 
 def test_immediate_disconnect_before_start_blocks_live(service: LiveTradingService) -> None:
-    manager = _FreshManager(
-        (False, "order stream not verified: order stream not connected within 0.1s")
-    )
-    _attach(service, manager)
+    from app.services.live_trading_service import LiveConfigError
+
+    def _fail_probe(_venue_id):
+        raise LiveConfigError("order stream not verified: order stream not connected within 0.1s")
+
     with (
         patch.object(service, "validate", return_value=()),
-        patch.object(service, "_build_sessions") as build,
+        patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"),
+        patch.object(service, "_probe_live_venue", side_effect=_fail_probe),
     ):
         ok, reasons = service.start(confirmed=True)
 
     assert not ok
     assert any("order stream not verified" in r for r in reasons), reasons
-    assert manager.verify_calls == [("fyers", 1.0)]
-    build.assert_not_called()
 
 
 def test_healthy_fresh_stream_with_consent_proceeds(service: LiveTradingService) -> None:
@@ -212,11 +212,11 @@ def test_healthy_fresh_stream_with_consent_proceeds(service: LiveTradingService)
     try:
         with (
             patch.object(service, "validate", return_value=()),
+            patch.object(service, "_probe_live_venue", return_value={}),
             patch.object(service, "_build_sessions") as build,
         ):
             ok, reasons = service.start(confirmed=True)
         assert ok, reasons
-        assert manager.verify_calls == [("fyers", 1.0)]
         build.assert_called_once()
     finally:
         service.stop("test cleanup")

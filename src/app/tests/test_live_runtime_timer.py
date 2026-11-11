@@ -73,7 +73,7 @@ def _setup_mock_strategy(service: LiveTradingService) -> None:
         create_logic=lambda _params, _owner_id: SimpleNamespace(),
     )
     service._compiled = lambda _rec: compiled_mock  # type: ignore[assignment]
-    service._build_sessions = lambda: None  # type: ignore[assignment]
+    service._build_sessions = lambda *_a, **_k: None  # type: ignore[assignment]
     # Timer tests mock the session build and validation — the start must
     # proceed so the epoch/IST bookkeeping under test can run.
     service.validate = lambda: ()  # type: ignore[assignment]

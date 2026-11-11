@@ -1424,6 +1424,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 live_state.borrow_mut().gateway.last_heartbeat = timestamp;
                                 dirty = true;
                             }
+                            RemoteUiUpdate::CommandAccepted { action, payload } => {
+                                // Immediate gateway ack: the click is visibly
+                                // in flight before the backend build finishes.
+                                let _ = &payload;
+                                apply_lifecycle_accepted(&mut live_state.borrow_mut(), &action);
+                                dirty = true;
+                            }
+                            RemoteUiUpdate::CommandProgress { action, payload } => {
+                                // One backend stage at a time; strictly
+                                // correlated to the pending lifecycle action.
+                                apply_lifecycle_progress(
+                                    &mut live_state.borrow_mut(),
+                                    &action,
+                                    &payload,
+                                );
+                                dirty = true;
+                            }
                             RemoteUiUpdate::CommandAck {
                                 action,
                                 ok,
@@ -1446,8 +1463,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 if action == "select_broker" {
                                     ui.set_conn_default_saving(false);
+                                    // A refused switch (mid-session, unknown
+                                    // broker) must explain itself on the panel.
+                                    if !ok {
+                                        ui.set_conn_error_message(detail.clone().into());
+                                        ui.set_conn_status_message(detail.clone().into());
+                                    }
                                 }
-                                if action == "connect_broker" || action == "disconnect_broker" {
+                                if action == "select_broker"
+                                    || action == "connect_broker"
+                                    || action == "disconnect_broker"
+                                    || action == "save_broker_credentials"
+                                    || action == "broker_status"
+                                {
+                                    // The gateway's result snapshot carries the
+                                    // authoritative broker sections; repaint the
+                                    // SYSTEM panel from it (a broker_status
+                                    // refresh must actually refresh).
+                                    if let Some(snapshot) = payload.get("snapshot") {
+                                        if snapshot.is_object() {
+                                            sync_broker_ui(&ui, snapshot, &timer_broker_form);
+                                        }
+                                    }
+                                }
+                                if action == "connect_broker"
+                                    || action == "disconnect_broker"
+                                    || action == "save_broker_credentials"
+                                {
                                     // The gateway forces a resync snapshot that
                                     // repaints the panel from the authoritative
                                     // session; failures also paint here so a
@@ -1462,50 +1504,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         ui.set_conn_form_enabled(true);
                                     }
                                 }
-                                {
-                                    let mut state = live_state.borrow_mut();
-                                    state.pending_action = None;
-                                    state.pending_since = None;
-                                    state.action_note = Some(if ok {
-                                        format!("{action} confirmed by backend")
-                                    } else {
-                                        format!("{action} refused — {detail}")
-                                    });
-                                    if action == "start" {
-                                        if ok {
-                                            let s_status = payload.get("session_status").and_then(|s| s.as_str()).unwrap_or("");
-                                            if s_status == "STARTING" {
-                                                state.session = live::SessionStatus::Starting;
-                                                state.pending_action = Some("start".into());
-                                                state.pending_since = Some(std::time::Instant::now());
-                                                state.action_note = Some("start in progress — initializing live engine".into());
-                                            } else {
-                                                state.session = live::SessionStatus::Running;
-                                                if state.start_epoch_secs.is_none() {
-                                                    state.start_epoch_secs = Some(
-                                                        std::time::SystemTime::now()
-                                                            .duration_since(std::time::UNIX_EPOCH)
-                                                            .map(|d| d.as_secs_f64())
-                                                            .unwrap_or(0.0),
-                                                    );
-                                                }
-                                                state.action_note = None;
-                                            }
-                                        } else {
-                                            state.session = live::SessionStatus::Stopped;
-                                        }
-                                    } else if action == "stop" {
-                                        state.session = live::SessionStatus::Stopped;
-                                        state.start_epoch_secs = None;
-                                    }
-                                    if let Some(snapshot) = payload.get("snapshot") {
-                                        if snapshot.is_object() {
-                                            vayren_shell::remote_live::apply_remote_sections(
-                                                &mut state, snapshot, true,
-                                            );
-                                        }
-                                    }
-                                }
+                                apply_lifecycle_ack(
+                                    &mut live_state.borrow_mut(),
+                                    &action,
+                                    ok,
+                                    &detail,
+                                    &payload,
+                                );
                                 dirty = true;
                             }
                         }
@@ -1706,6 +1711,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if id > last_live {
                                 last_live = id;
                                 if let Some(data) = data {
+                                    // A refused broker selection arrives as a
+                                    // LiveSnapshot `action_note` — surface it
+                                    // on the SYSTEM panel too so the switch
+                                    // explains itself.
+                                    if let Some(note) = data
+                                        .get("action_note")
+                                        .and_then(|v| v.as_str())
+                                        .filter(|s| s.contains("broker selection refused"))
+                                    {
+                                        ui.set_conn_is_failed(true);
+                                        ui.set_conn_error_message(note.into());
+                                        ui.set_conn_status_message(note.into());
+                                    }
                                     live_state.borrow_mut().apply_snapshot(&data);
                                     shell::apply_live(&ui, &live_state.borrow());
                                 }
@@ -1716,6 +1734,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if let Some(data) = latest_system {
                     if let Some(data) = data {
+                        // Surfaced backend errors must never be swallowed: a
+                        // refused broker switch or save failure explains
+                        // itself on the panel instead of looking pending.
+                        // (Read BEFORE apply_connection, which only paints
+                        // Failed-state messages.)
+                        let system_note = data
+                            .get("selection_error")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.trim().is_empty())
+                            .or_else(|| {
+                                data.get("action_note")
+                                    .and_then(|v| v.as_str())
+                                    .filter(|s| !s.trim().is_empty())
+                            })
+                            .map(str::to_string);
                         let workspace = BrokerWorkspace::from_json(&data);
                         *current_workspace.borrow_mut() = workspace.clone();
                         // With a gateway link the EC2 session owns this panel;
@@ -1724,6 +1757,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // this PC's own session facts.
                         if local_system_paints_panel(has_gateway_link) {
                             shell::apply_connection(&ui, &workspace);
+                            if let Some(note) = system_note {
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(note.clone().into());
+                                ui.set_conn_status_message(note.into());
+                            }
                         }
                         // Trigger immediate LIVE tab poll so broker state and capital sync at once
                         next_live_poll = std::time::Instant::now();
@@ -1905,6 +1943,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Remote mode: the gateway owns the authoritative store, so the
             // request goes over the authenticated command channel and the UI
             // only reflects it after the snapshot comes back.
+            // Remote mode: EC2 is the ONLY owner of the selection store —
+            // send there and return. Never also run the same action against
+            // the local backend: that split the stores apart and a refused
+            // (mid-session) switch still repainted as if it applied.
             if let Some(ref sender) = command {
                 let params = serde_json::json!({ "broker": broker_id });
                 if sender
@@ -1916,14 +1958,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     if let Some(ui) = handle.upgrade() {
                         ui.set_conn_default_saving(false);
+                        ui.set_conn_error_message(
+                            "Gateway link closed — broker not saved as default".into(),
+                        );
                         eprintln!("SET AS DEFAULT: gateway link closed — not saved");
                     }
                 }
+                return;
             }
-            // Refresh the snapshot either way: in remote mode it carries the
-            // gateway's confirmed default; locally it carries the persisted
-            // store. Neither path asserts success on its own.
-            // Persist the default broker locally as well and refresh the snapshot
+            // Local mode only: persist and refresh the snapshot.
             let b_clone = Arc::clone(&backend);
             let tx_clone = tx.clone();
             let b_id = broker_id.clone();
@@ -1948,10 +1991,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let backend = Arc::clone(&backend);
         let tx = fetch_tx.clone();
-        let is_remote = remote_command_tx.is_some();
+        let cmd = remote_command_tx.clone();
+        let handle_ref = ui.as_weak();
+        let form_state_ref = broker_form.clone();
+        let gate_ref = live_state.clone();
         ui.on_broker_refresh_requested(move || {
             println!("Broker refresh requested");
-            if !is_remote {
+            if let Some(ref sender) = cmd {
+                // Remote mode: the gateway owns the session — ask it for a
+                // fresh broker_status snapshot. Previously this button did
+                // nothing at all in remote mode.
+                let broker_id = form_state_ref.borrow().broker_id.clone();
+                send_remote_broker_command(
+                    &handle_ref,
+                    sender,
+                    &gate_ref,
+                    "broker_status",
+                    &broker_id,
+                    None,
+                    "Refreshing with the EC2 broker session…",
+                );
+            } else {
                 spawn_fetch(
                     &backend,
                     &tx,
@@ -1965,6 +2025,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let handle = ui.as_weak();
         let backend = Arc::clone(&backend);
         let cur_ws = current_workspace.clone();
+        let fetch_tx = fetch_tx.clone();
         let remote_cmd = remote_command_tx.clone();
         let form_state = broker_form.clone();
         let gate = live_state.clone();
@@ -1976,18 +2037,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // the panel repaints only from the gateway's resync snapshot —
             // never from a local verdict.
             if let Some(ref sender) = remote_cmd {
+                // The EC2 snapshot's venue + schema define the target; a
+                // local id or an invented venue would send the user's typed
+                // credentials to the wrong broker. Empty means "EC2 broker
+                // state not loaded yet" — fail closed, never invent one.
                 let (broker_id, keys) = {
                     let form = form_state.borrow();
                     if !form.broker_id.is_empty() {
                         (form.broker_id.clone(), form.keys.clone())
                     } else {
-                        let cur = cur_ws.borrow().selected_id.clone();
-                        let b_id = if !cur.is_empty() {
-                            cur
-                        } else {
-                            "fyers".to_string()
-                        };
-                        (b_id, Vec::new())
+                        (String::new(), Vec::new())
                     }
                 };
                 let values = [
@@ -1998,21 +2057,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     v4.as_str().to_string(),
                     v5.as_str().to_string(),
                 ];
+                let credentials = vayren_shell::remote_live::zip_broker_credentials(&keys, &values);
+                // Never silently drop typed values: if the snapshot carried
+                // no schema order the values cannot be mapped — fail closed.
+                if !broker_id.is_empty() && keys.is_empty() {
+                    let typed_any = values.iter().any(|v| !v.replace('•', "").trim().is_empty());
+                    if typed_any {
+                        if let Some(ui) = handle.upgrade() {
+                            ui.set_conn_is_failed(true);
+                            ui.set_conn_error_message(
+                                "Broker credential schema not loaded — reconnect first.".into(),
+                            );
+                            ui.set_conn_pill_label("Connection Failed".into());
+                            ui.set_conn_pill_tone(3);
+                            ui.set_conn_cta_enabled(true);
+                            ui.set_conn_form_enabled(true);
+                        }
+                        return;
+                    }
+                }
                 send_remote_broker_command(
                     &handle,
                     sender,
                     &gate,
                     "connect_broker",
                     &broker_id,
-                    Some(vayren_shell::remote_live::zip_broker_credentials(
-                        &keys, &values,
-                    )),
+                    Some(credentials),
                     "Authenticating with the EC2 broker session…",
                 );
                 return;
             }
 
-            let broker_id = cur_ws.borrow().selected_id.clone();
+            // Local mode: target the broker whose fields are on screen.
+            let broker_id = cur_ws.borrow().operation_broker_id();
+            if broker_id.trim().is_empty() {
+                if let Some(ui) = handle.upgrade() {
+                    ui.set_conn_is_failed(true);
+                    ui.set_conn_error_message(
+                        "No broker loaded yet — select a venue first.".into(),
+                    );
+                    ui.set_conn_pill_label("Connection Failed".into());
+                    ui.set_conn_pill_tone(3);
+                    ui.set_conn_cta_enabled(true);
+                    ui.set_conn_form_enabled(true);
+                }
+                return;
+            }
             let fields = cur_ws.borrow().fields.clone();
             let raw_values = [v0, v1, v2, v3, v4, v5];
             // Sentinel written by apply_connection when a field is saved in the
@@ -2035,8 +2125,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 credentials.len()
             );
 
-            // Update UI immediately to Authenticating state so user sees progress instantly
-            if let Some(ui) = handle.upgrade() {
+            // Update UI immediately to Authenticating state so user sees progress instantly.
+            // The SAME state goes into `current_workspace` so a concurrent
+            // handler/action cannot read the pre-action (connected) state.
+            {
                 let mut auth_ws = cur_ws.borrow().clone();
                 auth_ws.state = vayren_shell::broker_connection::ConnectionState::Authenticating;
                 for b in auth_ws.brokers.iter_mut() {
@@ -2044,12 +2136,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         b.connected = false;
                     }
                 }
-                shell::apply_connection(&ui, &auth_ws);
+                if let Some(ui) = handle.upgrade() {
+                    shell::apply_connection(&ui, &auth_ws);
+                }
+                *cur_ws.borrow_mut() = auth_ws;
             }
 
             // Spawn background thread to perform the connection IPC so UI event loop stays fluid
             let handle_bg = handle.clone();
             let backend_bg = Arc::clone(&backend);
+            let tx_bg = fetch_tx.clone();
             std::thread::spawn(move || {
                 match PythonBackend::lock_send(
                     &backend_bg,
@@ -2059,12 +2155,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                 ) {
                     Ok(BackendResponse::SystemSnapshot { data }) => {
-                        let workspace = BrokerWorkspace::from_json(&data);
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = handle_bg.upgrade() {
-                                shell::apply_connection(&ui, &workspace);
-                            }
-                        });
+                        // Hand the snapshot to the UI pump: it owns
+                        // `current_workspace` (Rc) and applies the projection.
+                        let _ = tx_bg.send(FetchResult::System(Some(data)));
                     }
                     Ok(BackendResponse::Error { data }) => {
                         eprintln!("Broker connect failed: {}", data.message);
@@ -2080,8 +2173,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         });
                     }
-                    Ok(other) => {
-                        eprintln!("Broker connect: unexpected response ({other:?})");
+                    Ok(_) => {
+                        eprintln!("Broker connect: unexpected response");
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(
+                                    "Connection failed — unexpected backend response.".into(),
+                                );
+                                ui.set_conn_pill_label("Connection Failed".into());
+                                ui.set_conn_pill_tone(3);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
+                            }
+                        });
                     }
                     Err(err) => {
                         eprintln!("Broker connect IPC error: {err}");
@@ -2107,6 +2212,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let handle = ui.as_weak();
         let backend = Arc::clone(&backend);
         let cur_ws = current_workspace.clone();
+        let fetch_tx = fetch_tx.clone();
         let remote_cmd = remote_command_tx.clone();
         let form_state = broker_form.clone();
         let gate = live_state.clone();
@@ -2114,18 +2220,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Remote mode: retry against the EC2 session with the
             // gateway's stored config — no credential values cross at all.
             if let Some(ref sender) = remote_cmd {
-                let broker_id = {
-                    let form = form_state.borrow();
-                    if !form.broker_id.is_empty() {
-                        form.broker_id.clone()
-                    } else {
-                        let cur = cur_ws.borrow().selected_id.clone();
-                        if !cur.is_empty() {
-                            cur
-                        } else {
-                            "fyers".to_string()
-                        }
-                    }
+                let broker_id = if !form_state.borrow().broker_id.is_empty() {
+                    form_state.borrow().broker_id.clone()
+                } else {
+                    // No EC2 broker state yet — fail closed, never invent one.
+                    String::new()
                 };
                 send_remote_broker_command(
                     &handle,
@@ -2138,16 +2237,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 return;
             }
-            let broker_id = cur_ws.borrow().selected_id.clone();
+            let broker_id = cur_ws.borrow().operation_broker_id();
+            if broker_id.trim().is_empty() {
+                if let Some(ui) = handle.upgrade() {
+                    ui.set_conn_is_failed(true);
+                    ui.set_conn_error_message(
+                        "No broker loaded yet — select a venue first.".into(),
+                    );
+                    ui.set_conn_pill_label("Connection Failed".into());
+                    ui.set_conn_pill_tone(3);
+                    ui.set_conn_cta_enabled(true);
+                    ui.set_conn_form_enabled(true);
+                }
+                return;
+            }
             println!("Broker retry requested for '{}'", broker_id);
-            if let Some(ui) = handle.upgrade() {
+            {
                 let mut auth_ws = cur_ws.borrow().clone();
                 auth_ws.state = vayren_shell::broker_connection::ConnectionState::Authenticating;
-                shell::apply_connection(&ui, &auth_ws);
+                if let Some(ui) = handle.upgrade() {
+                    shell::apply_connection(&ui, &auth_ws);
+                }
+                *cur_ws.borrow_mut() = auth_ws;
             }
 
             let handle_bg = handle.clone();
             let backend_bg = Arc::clone(&backend);
+            let tx_bg = fetch_tx.clone();
             std::thread::spawn(move || {
                 match PythonBackend::lock_send(
                     &backend_bg,
@@ -2157,12 +2273,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                 ) {
                     Ok(BackendResponse::SystemSnapshot { data }) => {
-                        let workspace = BrokerWorkspace::from_json(&data);
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = handle_bg.upgrade() {
-                                shell::apply_connection(&ui, &workspace);
-                            }
-                        });
+                        let _ = tx_bg.send(FetchResult::System(Some(data)));
                     }
                     Ok(BackendResponse::Error { data }) => {
                         eprintln!("Broker retry failed: {}", data.message);
@@ -2178,8 +2289,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         });
                     }
-                    Ok(other) => {
-                        eprintln!("Broker retry: unexpected response ({other:?})");
+                    Ok(_) => {
+                        eprintln!("Broker retry: unexpected response");
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(
+                                    "Retry failed — unexpected backend response.".into(),
+                                );
+                                ui.set_conn_pill_label("Connection Failed".into());
+                                ui.set_conn_pill_tone(3);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
+                            }
+                        });
                     }
                     Err(err) => {
                         eprintln!("Broker retry IPC error: {err}");
@@ -2205,6 +2328,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let handle = ui.as_weak();
         let backend = Arc::clone(&backend);
         let cur_ws = current_workspace.clone();
+        let fetch_tx = fetch_tx.clone();
         let remote_cmd = remote_command_tx.clone();
         let form_state = broker_form.clone();
         let gate = live_state.clone();
@@ -2212,18 +2336,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Remote mode: disconnect the EC2 session, never just the
             // local one — otherwise the panel and LIVE disagree again.
             if let Some(ref sender) = remote_cmd {
-                let broker_id = {
-                    let form = form_state.borrow();
-                    if !form.broker_id.is_empty() {
-                        form.broker_id.clone()
-                    } else {
-                        let cur = cur_ws.borrow().selected_id.clone();
-                        if !cur.is_empty() {
-                            cur
-                        } else {
-                            "fyers".to_string()
-                        }
-                    }
+                let broker_id = if !form_state.borrow().broker_id.is_empty() {
+                    form_state.borrow().broker_id.clone()
+                } else {
+                    String::new()
                 };
                 send_remote_broker_command(
                     &handle,
@@ -2236,28 +2352,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 return;
             }
-            let broker_id = cur_ws.borrow().selected_id.clone();
+            let broker_id = cur_ws.borrow().operation_broker_id();
+            if broker_id.trim().is_empty() {
+                if let Some(ui) = handle.upgrade() {
+                    ui.set_conn_error_message(
+                        "No broker loaded yet — nothing to disconnect.".into(),
+                    );
+                }
+                return;
+            }
             println!("Broker disconnect requested for '{}'", broker_id);
             let handle_bg = handle.clone();
             let backend_bg = Arc::clone(&backend);
+            let tx_bg = fetch_tx.clone();
             std::thread::spawn(move || {
                 match PythonBackend::lock_send(
                     &backend_bg,
                     BackendCommand::DisconnectBroker { broker_id },
                 ) {
                     Ok(BackendResponse::SystemSnapshot { data }) => {
-                        let workspace = BrokerWorkspace::from_json(&data);
+                        // Hand the snapshot to the UI pump: it owns
+                        // `current_workspace` (Rc) and applies the projection.
+                        let _ = tx_bg.send(FetchResult::System(Some(data)));
+                    }
+                    Ok(BackendResponse::Error { data }) => {
+                        eprintln!("Broker disconnect failed: {}", data.message);
+                        let msg = data.message.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(ui) = handle_bg.upgrade() {
-                                shell::apply_connection(&ui, &workspace);
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(msg.into());
+                                ui.set_conn_pill_label("Connection Failed".into());
+                                ui.set_conn_pill_tone(3);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
                             }
                         });
                     }
-                    Ok(other) => {
-                        eprintln!("Broker disconnect: unexpected response ({other:?})");
+                    Ok(_) => {
+                        eprintln!("Broker disconnect: unexpected response");
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(
+                                    "Disconnect failed — unexpected backend response.".into(),
+                                );
+                                ui.set_conn_pill_label("Connection Failed".into());
+                                ui.set_conn_pill_tone(3);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
+                            }
+                        });
                     }
                     Err(err) => {
                         eprintln!("Broker disconnect failed: {err}");
+                        let err_str = err.to_string();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(
+                                    format!("Disconnect failed: {err_str}").into(),
+                                );
+                                ui.set_conn_pill_label("Connection Failed".into());
+                                ui.set_conn_pill_tone(3);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
+                            }
+                        });
                     }
                 }
             });
@@ -2268,15 +2429,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     // REMOVE wiring removed with the footer (no backend remove verb exists).
     {
-        // CONFIG SAVE. The backend exposes no standalone "save one field"
-        // command either: credentials are persisted as part of `connect_broker`
-        // (which merges the typed values into the vault and then configures the
-        // venue). Inventing a command here would be a no-op that reports
-        // success. So the honest wiring is to route the typed key/value pair
-        // through the EXISTING connect path, which is what actually stores it.
+        // CONFIG SAVE (save-only, never connects): one field is stored via
+        // `configure` in the owner of the session (EC2 gateway in remote
+        // mode, local vault otherwise). Connecting is an explicit CONNECT
+        // press — a save must never trigger authentication.
         let handle = ui.as_weak();
         let backend = Arc::clone(&backend);
         let cur_ws = current_workspace.clone();
+        let fetch_tx = fetch_tx.clone();
+        let remote_cmd = remote_command_tx.clone();
+        let form_state = broker_form.clone();
+        let gate = live_state.clone();
         ui.on_broker_config_saved(
             move |key: slint::SharedString, value: slint::SharedString| {
                 let key = key.as_str().trim().to_string();
@@ -2285,27 +2448,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if clean_val.is_empty() {
                     return;
                 }
-                let broker_id = cur_ws.borrow().selected_id.clone();
+                // Remote mode: production credentials live on EC2 only.
+                if let Some(ref sender) = remote_cmd {
+                    let broker_id = form_state.borrow().broker_id.clone();
+                    let keys = form_state.borrow().keys.clone();
+                    let mut creds = serde_json::Map::new();
+                    if keys.is_empty() || !keys.contains(&key) {
+                        if let Some(ui) = handle.upgrade() {
+                            ui.set_conn_error_message(
+                                "Credential schema not loaded — cannot save this field.".into(),
+                            );
+                        }
+                        return;
+                    }
+                    creds.insert(key.clone(), serde_json::Value::String(clean_val));
+                    send_remote_broker_command(
+                        &handle,
+                        sender,
+                        &gate,
+                        "save_broker_credentials",
+                        &broker_id,
+                        Some(serde_json::Value::Object(creds)),
+                        "Saving broker configuration…",
+                    );
+                    return;
+                }
+                let broker_id = cur_ws.borrow().operation_broker_id();
+                if broker_id.trim().is_empty() {
+                    if let Some(ui) = handle.upgrade() {
+                        ui.set_conn_error_message("No broker loaded yet — cannot save.".into());
+                    }
+                    return;
+                }
                 println!("Broker config saved for '{}' (key '{}')", broker_id, key);
                 let mut credentials = std::collections::HashMap::new();
                 credentials.insert(key, clean_val);
                 let handle_bg = handle.clone();
                 let backend_bg = Arc::clone(&backend);
+                let tx_bg = fetch_tx.clone();
                 std::thread::spawn(move || {
                     match PythonBackend::lock_send(
                         &backend_bg,
-                        BackendCommand::ConnectBroker {
+                        BackendCommand::SaveBrokerCredentials {
                             broker_id,
                             credentials,
                         },
                     ) {
                         Ok(BackendResponse::SystemSnapshot { data }) => {
-                            let workspace = BrokerWorkspace::from_json(&data);
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(ui) = handle_bg.upgrade() {
-                                    shell::apply_connection(&ui, &workspace);
-                                }
-                            });
+                            // Hand the snapshot to the UI pump: it owns
+                            // `current_workspace` (Rc) and applies the projection.
+                            let _ = tx_bg.send(FetchResult::System(Some(data)));
                         }
                         Ok(BackendResponse::Error { data }) => {
                             eprintln!("Broker config save failed: {}", data.message);
@@ -2314,14 +2506,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if let Some(ui) = handle_bg.upgrade() {
                                     ui.set_conn_is_failed(true);
                                     ui.set_conn_error_message(msg.into());
+                                    ui.set_conn_pill_label("Connection Failed".into());
+                                    ui.set_conn_pill_tone(3);
+                                    ui.set_conn_cta_enabled(true);
+                                    ui.set_conn_form_enabled(true);
                                 }
                             });
                         }
-                        Ok(other) => {
-                            eprintln!("Broker config save: unexpected response ({other:?})");
+                        Ok(_) => {
+                            eprintln!("Broker config save: unexpected response");
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = handle_bg.upgrade() {
+                                    ui.set_conn_is_failed(true);
+                                    ui.set_conn_error_message(
+                                        "Config save failed — unexpected backend response.".into(),
+                                    );
+                                    ui.set_conn_pill_label("Connection Failed".into());
+                                    ui.set_conn_pill_tone(3);
+                                    ui.set_conn_cta_enabled(true);
+                                    ui.set_conn_form_enabled(true);
+                                }
+                            });
                         }
                         Err(err) => {
                             eprintln!("Broker config save IPC error: {err}");
+                            let err_str = err.to_string();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = handle_bg.upgrade() {
+                                    ui.set_conn_is_failed(true);
+                                    ui.set_conn_error_message(
+                                        format!("Config save failed: {err_str}").into(),
+                                    );
+                                    ui.set_conn_pill_label("Connection Failed".into());
+                                    ui.set_conn_pill_tone(3);
+                                    ui.set_conn_cta_enabled(true);
+                                    ui.set_conn_form_enabled(true);
+                                }
+                            });
                         }
                     }
                 });
@@ -2329,9 +2550,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     {
+        // PASTE is a pure UI fill — never persists, never connects. The pasted
+        // value lands in the field and waits for an explicit SAVE or CONNECT.
         let handle = ui.as_weak();
-        let backend = Arc::clone(&backend);
-        let cur_ws = current_workspace.clone();
         ui.on_broker_paste_requested(move |idx: i32| {
             // clipboard-win is a Windows-only crate (empty elsewhere), so the
             // read itself is platform-gated; other platforms report unavailable.
@@ -2360,37 +2581,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         5 => ui.set_broker_field_v5(s),
                         _ => {
                             eprintln!("Broker paste ignored: no field {idx}");
-                            return;
+                            ui.set_conn_error_message(
+                                format!("Paste ignored: no field {idx}").into(),
+                            );
                         }
                     }
-                }
-                if let Some(field) = cur_ws.borrow().fields.get(idx as usize) {
-                    let broker_id = cur_ws.borrow().selected_id.clone();
-                    let key = field.key.clone();
-                    println!("Broker config auto-saving pasted key '{key}' for '{broker_id}'");
-                    let mut credentials = std::collections::HashMap::new();
-                    credentials.insert(key, clean_text);
-                    let handle_bg = handle.clone();
-                    let backend_bg = Arc::clone(&backend);
-                    std::thread::spawn(move || {
-                        match PythonBackend::lock_send(
-                            &backend_bg,
-                            BackendCommand::ConnectBroker {
-                                broker_id,
-                                credentials,
-                            },
-                        ) {
-                            Ok(BackendResponse::SystemSnapshot { data }) => {
-                                let workspace = BrokerWorkspace::from_json(&data);
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(ui) = handle_bg.upgrade() {
-                                        shell::apply_connection(&ui, &workspace);
-                                    }
-                                });
-                            }
-                            _ => {}
-                        }
-                    });
                 }
             } else {
                 eprintln!("Broker paste failed: clipboard empty or unavailable");
@@ -2422,6 +2617,140 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("VAYREN shutdown complete");
 
     Ok(())
+}
+
+/// Paint the gateway's immediate `command_accepted` frame for an async
+/// lifecycle command. START/STOP is visibly in flight from the click, before
+/// the backend build finishes — never a dead button.
+fn apply_lifecycle_accepted(state: &mut live::LiveState, action: &str) {
+    match action {
+        "start" => {
+            state.session = live::SessionStatus::Starting;
+            state.pending_action = Some("start".into());
+            state.pending_since = Some(Instant::now());
+            state.action_note = Some("START accepted — initializing live engine".into());
+            state.lifecycle_stage = "accepted".into();
+            state.lifecycle_detail = "accepted by gateway".into();
+            state.lifecycle_done = 0;
+            state.lifecycle_total = 0;
+        }
+        "stop" => {
+            state.session = live::SessionStatus::Stopping;
+            state.pending_action = Some("stop".into());
+            state.pending_since = Some(Instant::now());
+            state.action_note = Some("STOP accepted — disarming before teardown".into());
+            state.lifecycle_stage = "disarming".into();
+            state.lifecycle_detail = "STOP accepted — disarming before teardown".into();
+            state.lifecycle_done = 0;
+            state.lifecycle_total = 0;
+        }
+        _ => {}
+    }
+}
+
+/// Paint one `command_progress` frame for the lifecycle currently pending.
+/// Strictly correlated: a stale frame from an older command never moves the
+/// current one, so a preempted START cannot overwrite the STOP's progress.
+fn apply_lifecycle_progress(
+    state: &mut live::LiveState,
+    action: &str,
+    payload: &serde_json::Value,
+) {
+    if state.pending_action.as_deref() != Some(action) {
+        return;
+    }
+    let stage = payload
+        .get("stage")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .trim();
+    if stage.is_empty() {
+        return;
+    }
+    state.lifecycle_stage = stage.to_string();
+    state.lifecycle_detail = payload
+        .get("detail")
+        .and_then(|d| d.as_str())
+        .unwrap_or("")
+        .to_string();
+    state.lifecycle_done = payload.get("done").and_then(|d| d.as_i64()).unwrap_or(0);
+    state.lifecycle_total = payload.get("total").and_then(|d| d.as_i64()).unwrap_or(0);
+    match action {
+        "start" => state.session = live::SessionStatus::Starting,
+        "stop" => state.session = live::SessionStatus::Stopping,
+        _ => {}
+    }
+}
+
+/// Apply a `command_result` ack for a control command. The pending intent is
+/// cleared ONLY when the ack names it: an unrelated ack (broker form, server
+/// op, select_broker) must never unstick a START/STOP that is still running.
+fn apply_lifecycle_ack(
+    state: &mut live::LiveState,
+    action: &str,
+    ok: bool,
+    detail: &str,
+    payload: &serde_json::Value,
+) {
+    if state.pending_action.as_deref() == Some(action) {
+        state.pending_action = None;
+        state.pending_since = None;
+    }
+    if action == "start" {
+        state.action_note = Some(if ok {
+            "start confirmed by backend".to_string()
+        } else {
+            format!("start refused — {detail}")
+        });
+        if ok {
+            let s_status = payload
+                .get("session_status")
+                .and_then(|s| s.as_str())
+                .unwrap_or("");
+            if s_status == "STARTING" {
+                state.session = live::SessionStatus::Starting;
+                state.pending_action = Some("start".into());
+                state.pending_since = Some(Instant::now());
+                state.action_note = Some("start in progress — initializing live engine".into());
+            } else {
+                state.session = live::SessionStatus::Running;
+                if state.start_epoch_secs.is_none() {
+                    state.start_epoch_secs = Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs_f64())
+                            .unwrap_or(0.0),
+                    );
+                }
+                state.action_note = None;
+                state.lifecycle_stage = "done".into();
+                state.lifecycle_detail = "session running".into();
+                state.lifecycle_done = 0;
+                state.lifecycle_total = 0;
+            }
+        } else {
+            state.session = live::SessionStatus::Stopped;
+            state.lifecycle_stage = "cancelled".into();
+            state.lifecycle_detail = detail.to_string();
+        }
+    } else if action == "stop" {
+        state.action_note = Some(if ok {
+            "stop confirmed by backend".to_string()
+        } else {
+            format!("stop refused — {detail}")
+        });
+        state.session = live::SessionStatus::Stopped;
+        state.start_epoch_secs = None;
+        state.lifecycle_stage = "done".into();
+        state.lifecycle_detail = "session stopped".into();
+        state.lifecycle_done = 0;
+        state.lifecycle_total = 0;
+    }
+    if let Some(snapshot) = payload.get("snapshot") {
+        if snapshot.is_object() {
+            vayren_shell::remote_live::apply_remote_sections(state, snapshot, true);
+        }
+    }
 }
 
 fn apply_server_op_ack(
@@ -2800,10 +3129,16 @@ fn send_remote_broker_command(
         ui.set_conn_status_message("Gateway link closed — request not sent.".into());
         return;
     }
-    ui.set_conn_pill_label("Connecting…".into());
-    ui.set_conn_pill_tone(2);
-    ui.set_conn_is_failed(false);
-    ui.set_conn_status_message(progress_note.into());
+    // Read/save actions must never paint a fake "Connecting…" pill: the
+    // session state only changes on an explicit connect/disconnect.
+    if action == "broker_status" || action == "save_broker_credentials" {
+        ui.set_conn_status_message(progress_note.into());
+    } else {
+        ui.set_conn_pill_label("Connecting…".into());
+        ui.set_conn_pill_tone(2);
+        ui.set_conn_is_failed(false);
+        ui.set_conn_status_message(progress_note.into());
+    }
 }
 
 /// Remote graphical client (read-only; also the packaged default).
@@ -3143,6 +3478,19 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             live_state.borrow_mut().gateway.last_heartbeat = timestamp;
                             dirty = true;
                         }
+                        RemoteUiUpdate::CommandAccepted { action, payload } => {
+                            let _ = &payload;
+                            apply_lifecycle_accepted(&mut live_state.borrow_mut(), &action);
+                            dirty = true;
+                        }
+                        RemoteUiUpdate::CommandProgress { action, payload } => {
+                            apply_lifecycle_progress(
+                                &mut live_state.borrow_mut(),
+                                &action,
+                                &payload,
+                            );
+                            dirty = true;
+                        }
                         RemoteUiUpdate::CommandAck {
                             action,
                             ok,
@@ -3160,8 +3508,27 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             }
                             if action == "select_broker" {
                                 ui.set_conn_default_saving(false);
+                                if !ok {
+                                    ui.set_conn_error_message(detail.clone().into());
+                                    ui.set_conn_status_message(detail.clone().into());
+                                }
                             }
-                            if action == "connect_broker" || action == "disconnect_broker" {
+                            if action == "select_broker"
+                                || action == "connect_broker"
+                                || action == "disconnect_broker"
+                                || action == "save_broker_credentials"
+                                || action == "broker_status"
+                            {
+                                if let Some(snapshot) = payload.get("snapshot") {
+                                    if snapshot.is_object() {
+                                        sync_broker_ui(&ui, snapshot, &broker_form);
+                                    }
+                                }
+                            }
+                            if action == "connect_broker"
+                                || action == "disconnect_broker"
+                                || action == "save_broker_credentials"
+                            {
                                 // The gateway forces a resync snapshot that
                                 // repaints the panel from the authoritative
                                 // session; failures also paint here so a
@@ -3176,54 +3543,13 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                     ui.set_conn_form_enabled(true);
                                 }
                             }
-                            let mut state = live_state.borrow_mut();
-                            state.pending_action = None;
-                            state.pending_since = None;
-                            state.action_note = Some(if ok {
-                                format!("{action} confirmed by backend")
-                            } else {
-                                format!("{action} refused — {detail}")
-                            });
-                            if action == "start" {
-                                if ok {
-                                    let s_status = payload
-                                        .get("session_status")
-                                        .and_then(|s| s.as_str())
-                                        .unwrap_or("");
-                                    if s_status == "STARTING" {
-                                        state.session = live::SessionStatus::Starting;
-                                        state.pending_action = Some("start".into());
-                                        state.pending_since = Some(std::time::Instant::now());
-                                        state.action_note = Some(
-                                            "start in progress — initializing live engine".into(),
-                                        );
-                                    } else {
-                                        state.session = live::SessionStatus::Running;
-                                        if state.start_epoch_secs.is_none() {
-                                            state.start_epoch_secs = Some(
-                                                std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .map(|d| d.as_secs_f64())
-                                                    .unwrap_or(0.0),
-                                            );
-                                        }
-                                        state.action_note = None;
-                                    }
-                                } else {
-                                    state.session = live::SessionStatus::Stopped;
-                                }
-                            } else if action == "stop" {
-                                state.session = live::SessionStatus::Stopped;
-                                state.start_epoch_secs = None;
-                            }
-                            if let Some(snapshot) = payload.get("snapshot") {
-                                if snapshot.is_object() {
-                                    vayren_shell::remote_live::apply_remote_sections(
-                                        &mut state, snapshot, true,
-                                    );
-                                }
-                            }
-                            drop(state);
+                            apply_lifecycle_ack(
+                                &mut live_state.borrow_mut(),
+                                &action,
+                                ok,
+                                &detail,
+                                &payload,
+                            );
                             dirty = true;
                         }
                     }

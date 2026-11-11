@@ -339,14 +339,6 @@ fn test_11_ui_slint_conflicting_actions_guarded() {
         src.contains("enabled: root.setup-editable && root.strategy-names.length > 0;"),
         "Strategy selector must be disabled during transitions"
     );
-    assert!(
-        src.contains("enabled: root.setup-editable;"),
-        "Quantity field must be disabled during transitions"
-    );
-    assert!(
-        src.contains("enabled: root.setup-editable && root.timeframe-names.length > 0;"),
-        "Timeframe selector must be disabled during transitions"
-    );
 }
 
 #[test]

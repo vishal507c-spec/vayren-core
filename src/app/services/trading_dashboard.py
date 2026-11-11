@@ -1192,19 +1192,21 @@ class SystemWorkspaceView(QWidget):
         h_layout.setContentsMargins(4, 8, 4, 4)
 
         self.table_health = create_excel_table(["Subsystem", "Status", "Latency / Age", "Details"])
+        # Honest unknown until a backend snapshot states otherwise. A
+        # hardcoded CONNECTED/PASS would be a fabricated health verdict.
         health_rows = [
-            ("Broker Gateway", "CONNECTED", "18ms", "FYERS REST & Auth valid"),
-            ("Market WebSocket", "CONNECTED", "0.2s", "Real-time tick feed healthy"),
-            ("Order WebSocket", "CONNECTED", "12ms", "Trade fill streaming active"),
-            ("Execution Engine", "READY", "0.0s", "State machine operational"),
-            ("Recovery Engine", "READY", "0.0s", "Auto-recovery idle / standby"),
-            ("Heartbeat Monitor", "HEALTHY", "1.0s", "System clock monotonic & sane"),
-            ("Reconciliation", "MATCHED", "30s", "Positions & orders 100% in sync"),
+            ("Broker Gateway", "UNKNOWN", "—", "Waiting for backend snapshot"),
+            ("Market WebSocket", "UNKNOWN", "—", "Waiting for backend snapshot"),
+            ("Order WebSocket", "UNKNOWN", "—", "Waiting for backend snapshot"),
+            ("Execution Engine", "UNKNOWN", "—", "Waiting for backend snapshot"),
+            ("Recovery Engine", "UNKNOWN", "—", "Waiting for backend snapshot"),
+            ("Heartbeat Monitor", "UNKNOWN", "—", "Waiting for backend snapshot"),
+            ("Reconciliation", "UNKNOWN", "—", "Waiting for backend snapshot"),
         ]
         self.table_health.setRowCount(len(health_rows))
         for r, (sub, st, lat, det) in enumerate(health_rows):
             self.table_health.setItem(r, 0, make_cell(sub, t.ACCENT))
-            self.table_health.setItem(r, 1, make_cell(st, t.POS))
+            self.table_health.setItem(r, 1, make_cell(st, t.TEXT2))
             self.table_health.setItem(r, 2, make_cell(lat, align=Qt.AlignmentFlag.AlignRight))
             self.table_health.setItem(r, 3, make_cell(det, t.TEXT2))
 
@@ -1219,19 +1221,19 @@ class SystemWorkspaceView(QWidget):
 
         self.table_gates = create_excel_table(["Safety Gate", "State", "Reason / Audit"])
         gates = [
-            ("LIVE_TRADING_ENABLED", "PASS", "Explicit live authorization enabled"),
-            ("BROKER_LIVE_ENABLED", "PASS", "Broker live routing confirmed"),
-            ("ACCOUNT_CONFIRMED", "PASS", "Live trading account verified"),
-            ("RISK_LIMITS_VALID", "PASS", "Risk policy parameters in safe bounds"),
-            ("KILL_SWITCH_OFF", "PASS", "Global kill switch safe / unengaged"),
-            ("Broker Session Healthy", "PASS", "Broker authenticated and active"),
-            ("Reconciliation Healthy", "PASS", "Zero discrepancy across ledgers"),
-            ("Required Stop Protection", "PASS", "Protective SL engine active"),
+            ("LIVE_TRADING_ENABLED", "UNKNOWN", "No backend data"),
+            ("BROKER_LIVE_ENABLED", "UNKNOWN", "No backend data"),
+            ("ACCOUNT_CONFIRMED", "UNKNOWN", "No backend data"),
+            ("RISK_LIMITS_VALID", "UNKNOWN", "No backend data"),
+            ("KILL_SWITCH_OFF", "UNKNOWN", "No backend data"),
+            ("Broker Session Healthy", "UNKNOWN", "No backend data"),
+            ("Reconciliation Healthy", "UNKNOWN", "No backend data"),
+            ("Required Stop Protection", "UNKNOWN", "No backend data"),
         ]
         self.table_gates.setRowCount(len(gates))
         for r, (gate, st, rsn) in enumerate(gates):
             self.table_gates.setItem(r, 0, make_cell(gate, t.TEXT))
-            self.table_gates.setItem(r, 1, make_cell(st, t.POS))
+            self.table_gates.setItem(r, 1, make_cell(st, t.TEXT2))
             self.table_gates.setItem(r, 2, make_cell(rsn, t.TEXT2))
 
         g_layout.addWidget(self.table_gates)
@@ -1275,94 +1277,117 @@ class SystemWorkspaceView(QWidget):
         self.table_journal.scrollToBottom()
 
     def update_from_snapshot(self, snapshot: dict[str, Any]) -> None:
-        """Update system health and safety gate tables."""
-        safety = snapshot.get("safety") or {}
-        stale = snapshot.get("market_ws") == "STALE" or safety.get("market_data_stale", False)
+        """Update system health and safety gate tables.
 
-        # Update health table
-        self.table_health.setItem(
-            0,
-            1,
-            make_cell(
-                snapshot.get("broker_connection", "CONNECTED"),
-                t.POS if snapshot.get("broker_connection") == "CONNECTED" else t.NEG,
-            ),
-        )
-        self.table_health.setItem(
-            1,
-            1,
-            make_cell("STALE (>15s)" if stale else "CONNECTED", t.NEG if stale else t.POS),
-        )
-        self.table_health.setItem(
-            3,
-            1,
-            make_cell(
-                snapshot.get("execution_state", "READY"),
-                t.POS if snapshot.get("execution_state") != "BLOCKED" else t.NEG,
-            ),
-        )
+        Only facts the backend actually reported are written. Missing keys
+        stay UNKNOWN (never CONNECTED/PASS/READY) so an absent subsystem can
+        never be presented as healthy.
+        """
+        safety = snapshot.get("safety") or {}
+        stale = snapshot.get("market_ws") == "STALE" or bool(safety.get("market_data_stale", False))
+
+        def health_cell(row: int, key: str, *, truthy: str = "CONNECTED") -> None:
+            value = snapshot.get(key)
+            if not isinstance(value, str) or not value.strip():
+                self.table_health.setItem(row, 1, make_cell("UNKNOWN", t.TEXT2))
+                return
+            state = value.strip()
+            color = t.POS if state == truthy else t.NEG
+            self.table_health.setItem(row, 1, make_cell(state, color))
+
+        health_cell(0, "broker_connection")
+        if isinstance(snapshot.get("market_ws"), str) and snapshot.get("market_ws"):
+            state = "STALE (>15s)" if stale else snapshot["market_ws"]
+            self.table_health.setItem(
+                1,
+                1,
+                make_cell(state, t.NEG if stale else (t.POS if state == "CONNECTED" else t.TEXT2)),
+            )
+        else:
+            self.table_health.setItem(1, 1, make_cell("UNKNOWN", t.TEXT2))
+        health_cell(3, "execution_state", truthy="READY")
+        health_cell(2, "order_stream")
 
         # Update safety gates matrix
-        ks_engaged = safety.get("kill_switch_engaged", False)
-        rec_healthy = safety.get("reconciliation_healthy", True)
-        rec_status = safety.get("reconciliation_status", "MATCHED")
+        ks_engaged = bool(safety.get("kill_switch_engaged", False))
+        rec_healthy = safety.get("reconciliation_healthy")
+        rec_status = safety.get("reconciliation_status", "UNKNOWN")
         rec_reasons = safety.get("reconciliation_reasons", [])
 
-        # Update reconciliation in health table (row 6)
+        # Update reconciliation in health table (row 6) only when reported.
         if self.table_health.rowCount() > 6:
-            self.table_health.setItem(
-                6,
-                1,
-                make_cell(rec_status, t.POS if rec_healthy else t.NEG),
-            )
+            if rec_healthy is None:
+                self.table_health.setItem(6, 1, make_cell("UNKNOWN", t.TEXT2))
+            else:
+                self.table_health.setItem(
+                    6,
+                    1,
+                    make_cell(rec_status, t.POS if rec_healthy else t.NEG),
+                )
 
-        # Update Recovery Engine (row 4) with HA / Disaster Recovery role & lease
-        ha = snapshot.get("disaster_recovery") or {}
-        role = ha.get("role", "READY")
-        epoch = ha.get("epoch", 1)
-        lease_valid = ha.get("lease_valid", True)
-        fenced = ha.get("is_fenced", False)
-        ha_status = "FENCED" if fenced else role
-        ha_color = t.NEG if (fenced or ha_status in ("BLOCKED", "FAILOVER_PENDING")) else t.POS
-        if self.table_health.rowCount() > 4:
-            self.table_health.setItem(4, 1, make_cell(ha_status, ha_color))
-            det_str = f"Epoch {epoch} | Lease {'Valid' if lease_valid else 'EXPIRED'}"
-            self.table_health.setItem(4, 3, make_cell(det_str, t.TEXT2 if lease_valid else t.NEG))
+        # Update Recovery Engine (row 4) only when reported.
+        ha = snapshot.get("disaster_recovery")
+        if isinstance(ha, dict) and ha:
+            role = ha.get("role")
+            if isinstance(role, str) and role.strip():
+                epoch = ha.get("epoch", "—")
+                lease_valid = ha.get("lease_valid")
+                fenced = bool(ha.get("is_fenced", False))
+                ha_status = "FENCED" if fenced else role
+                ha_color = (
+                    t.NEG if (fenced or ha_status in ("BLOCKED", "FAILOVER_PENDING")) else t.POS
+                )
+                if self.table_health.rowCount() > 4:
+                    self.table_health.setItem(4, 1, make_cell(ha_status, ha_color))
+                    lease_text = (
+                        "Valid"
+                        if lease_valid
+                        else "EXPIRED"
+                        if lease_valid is not None
+                        else "UNKNOWN"
+                    )
+                    det_str = f"Epoch {epoch} | Lease {lease_text}"
+                    self.table_health.setItem(
+                        4, 3, make_cell(det_str, t.TEXT2 if lease_valid else t.NEG)
+                    )
 
+        # Kill-switch gate: only a backend report changes the state.
+        kill_switch_known = "kill_switch_engaged" in safety
         self.table_gates.setItem(
             4,
             1,
             make_cell(
-                "BLOCKED" if ks_engaged else "PASS",
-                t.NEG if ks_engaged else t.POS,
+                ("BLOCKED" if ks_engaged else "PASS") if kill_switch_known else "UNKNOWN",
+                t.NEG if ks_engaged else t.POS if kill_switch_known else t.TEXT2,
             ),
         )
         self.table_gates.setItem(
             4,
             2,
             make_cell(
-                safety.get("kill_switch_reason", "Global kill switch safe") or "Safe",
+                safety.get("kill_switch_reason", "No backend data"),
                 t.NEG if ks_engaged else t.TEXT2,
             ),
         )
-        self.table_gates.setItem(
-            6,
-            1,
-            make_cell(
-                "PASS" if rec_healthy else "BLOCKED",
-                t.POS if rec_healthy else t.NEG,
-            ),
-        )
-        rec_reason_str = (
-            "; ".join(rec_reasons)
-            if rec_reasons
-            else ("Zero discrepancy across ledgers" if rec_healthy else "Mismatch detected")
-        )
-        self.table_gates.setItem(
-            6,
-            2,
-            make_cell(rec_reason_str, t.TEXT2 if rec_healthy else t.NEG),
-        )
+        if rec_healthy is None:
+            self.table_gates.setItem(6, 1, make_cell("UNKNOWN", t.TEXT2))
+            self.table_gates.setItem(6, 2, make_cell("No backend data", t.TEXT2))
+        else:
+            self.table_gates.setItem(
+                6,
+                1,
+                make_cell("PASS" if rec_healthy else "BLOCKED", t.POS if rec_healthy else t.NEG),
+            )
+            rec_reason_str = (
+                "; ".join(rec_reasons)
+                if rec_reasons
+                else ("Zero discrepancy across ledgers" if rec_healthy else "Mismatch detected")
+            )
+            self.table_gates.setItem(
+                6,
+                2,
+                make_cell(rec_reason_str, t.TEXT2 if rec_healthy else t.NEG),
+            )
 
 
 # ── MASTER DASHBOARD CONTAINER ───────────────────────────────────────────────

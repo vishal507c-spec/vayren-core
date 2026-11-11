@@ -31,21 +31,6 @@ fn test_live_banner_guards_against_dangling_dash() {
 }
 
 #[test]
-fn test_confirmation_modal_requires_zero_venue_blockers() {
-    let src = include_str!("../ui/live.slint");
-    assert!(
-        src.contains(
-            "can-confirm: root.setup.needs-live-confirm && root.venue-blockers.length == 0;"
-        ),
-        "LiveConfirmModal can-confirm must require zero venue blockers"
-    );
-    assert!(
-        src.contains("label: root.can-confirm ? \"CONFIRM & START LIVE\" : \"BLOCKED BY VENUE\";"),
-        "Confirmation button must indicate blocked state when venue gates are not ready"
-    );
-}
-
-#[test]
 fn test_blotters_have_scrollviews_for_all_four_tabs() {
     let src = include_str!("../ui/live.slint");
     assert!(
@@ -303,19 +288,6 @@ fn test_defect_5_broker_configuration_action_wired() {
     assert!(
         src.contains("\" · CONFIGURE\""),
         "Top broker card must hint that clicking configures the broker"
-    );
-}
-
-#[test]
-fn test_defect_6_live_confirm_modal_broker_name_graceful() {
-    let src = include_str!("../ui/live.slint");
-    assert!(
-        src.contains("text: root.broker-name != \"\" ? (root.broker-name + (root.broker-conn != \"\" ? (\" (\" + root.broker-conn + \")\") : \"\")) : \"Broker not configured\";"),
-        "LiveConfirmModal must display 'Broker not configured' without empty parentheses when broker is empty"
-    );
-    assert!(
-        !src.contains("Text { text: root.broker-name + \" (\" + root.broker-conn + \")\";"),
-        "LiveConfirmModal must not format blind parentheses"
     );
 }
 

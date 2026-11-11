@@ -543,6 +543,14 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     {
         translated.insert("live_armed".to_string(), serde_json::Value::Bool(armed));
     }
+    // Async lifecycle progress rides on every snapshot so a reconnect (or a
+    // late-joining client) still shows the real START/STOP stage instead of
+    // a button stuck in limbo.
+    if let Some(progress) = sections.get("lifecycle_progress") {
+        if progress.is_object() {
+            translated.insert("lifecycle_progress".to_string(), progress.clone());
+        }
+    }
 
     if let Some(auth) = authoritative_broker(sections) {
         // Authoritative EC2 session first: the same snapshot SYSTEM reads.
@@ -1112,6 +1120,18 @@ pub enum RemoteUiUpdate {
         rtt_ms: Option<f64>,
         timestamp: String,
     },
+    /// The gateway accepted an async lifecycle command (immediate ack).
+    /// Pending state is painted from this frame, before the backend build
+    /// finishes, so START/STOP never looks like a dead click.
+    CommandAccepted {
+        action: String,
+        payload: serde_json::Value,
+    },
+    /// One lifecycle progress stage for an accepted command.
+    CommandProgress {
+        action: String,
+        payload: serde_json::Value,
+    },
     /// The gateway answered a control command (`command_result`): `ok` plus
     /// the reason text when it was refused. This is what clears a pending
     /// START/STOP and paints the real outcome.
@@ -1349,6 +1369,38 @@ pub fn spawn_remote_pump(
                             rtt_ms: rtt,
                             timestamp: current_time_str(),
                         });
+                    }
+                    Ok(ClientEvent::CommandAccepted {
+                        request_id,
+                        payload,
+                    }) => {
+                        let action = payload
+                            .get("action")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .or_else(|| {
+                                request_id
+                                    .as_deref()
+                                    .and_then(|id| in_flight.get(id).cloned())
+                            })
+                            .unwrap_or_default();
+                        let _ = tx.send(RemoteUiUpdate::CommandAccepted { action, payload });
+                    }
+                    Ok(ClientEvent::CommandProgress {
+                        request_id,
+                        payload,
+                    }) => {
+                        let action = payload
+                            .get("action")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .or_else(|| {
+                                request_id
+                                    .as_deref()
+                                    .and_then(|id| in_flight.get(id).cloned())
+                            })
+                            .unwrap_or_default();
+                        let _ = tx.send(RemoteUiUpdate::CommandProgress { action, payload });
                     }
                     Ok(ClientEvent::CommandResult {
                         request_id,

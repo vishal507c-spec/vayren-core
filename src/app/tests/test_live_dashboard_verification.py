@@ -50,7 +50,7 @@ def test_1_never_shows_ready_when_degraded_or_failed(tmp_path: Path) -> None:
     snap = svc.snapshot()
     # Live trading service status must not be READY
     assert snap["account"]["ready"] is False
-    assert snap["websocket"]["status"] in ("DEGRADED", "MARKET CLOSED")
+    assert snap["websocket"]["status"] in ("DEGRADED", "MARKET CLOSED", "HOLIDAY")
 
     # B) FAILED / DISCONNECTED state
     svc._broker_manager.snapshot.return_value = {
@@ -105,8 +105,8 @@ def test_2_outside_market_hours_status_and_account_preserved(tmp_path: Path) -> 
     snap = svc.snapshot()
     # When market is closed and engine is stopped/idle
     if not is_nse_market_open():
-        assert snap["websocket"]["status"] == "MARKET CLOSED"
-        assert snap["market_data"]["status"] == "MARKET CLOSED"
+        assert snap["websocket"]["status"] in ("MARKET CLOSED", "HOLIDAY")
+        assert snap["market_data"]["status"] in ("MARKET CLOSED", "HOLIDAY")
 
     # Crucial: broker account information is NOT falsely wiped or cleared
     assert snap["capital"]["broker_name"] == "FYERS"

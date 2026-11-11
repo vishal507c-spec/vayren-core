@@ -87,6 +87,17 @@ pub enum ClientEvent {
         request_id: Option<String>,
         payload: serde_json::Value,
     },
+    /// Gateway accepted an async lifecycle command (immediate ack, before
+    /// the backend START/STOP work finishes).
+    CommandAccepted {
+        request_id: Option<String>,
+        payload: serde_json::Value,
+    },
+    /// One lifecycle progress stage for an accepted command.
+    CommandProgress {
+        request_id: Option<String>,
+        payload: serde_json::Value,
+    },
     /// Gateway refusal (auth, authorization, unknown command, ...).
     GatewayError {
         code: String,
@@ -396,6 +407,14 @@ fn classify(message: ServerMessage) -> ClientEvent {
         },
         "pong" => ClientEvent::Pong,
         "command_result" => ClientEvent::CommandResult {
+            request_id: message.request_id,
+            payload: message.payload,
+        },
+        "command_accepted" => ClientEvent::CommandAccepted {
+            request_id: message.request_id,
+            payload: message.payload,
+        },
+        "command_progress" => ClientEvent::CommandProgress {
             request_id: message.request_id,
             payload: message.payload,
         },

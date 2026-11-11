@@ -302,11 +302,14 @@ def test_command_passthrough_and_duplicate_cached(live_server: Any) -> None:
     try:
         command = {"type": "command", "v": 1, "request_id": "req-42", "payload": {"action": "stop"}}
         client.send_obj(command)
+        accepted = client.recv_obj()
+        assert accepted is not None and accepted["type"] == "command_accepted"
         first = client.recv_obj()
         assert first is not None and first["type"] == "command_result"
         assert first["request_id"] == "req-42"
         assert first["payload"]["cached"] is False
-        assert gateway.commands == [{"action": "stop"}]
+        assert len(gateway.commands) == 1
+        assert gateway.commands[0]["action"] == "stop"
         client.send_obj(command)
         second = client.recv_obj()
         assert second is not None and second["type"] == "command_result"
@@ -571,6 +574,8 @@ def test_start_requires_explicit_confirmation(live_server: Any) -> None:
                 "payload": {"action": "start", "params": {"confirmed": True}},
             }
         )
+        accepted = client.recv_obj()
+        assert accepted is not None and accepted["type"] == "command_accepted"
         result = client.recv_obj()
         assert result is not None and result["type"] == "command_result"
         assert result["payload"]["session_status"] == "RUNNING"
@@ -605,10 +610,12 @@ def test_gate_blockers_preserved_in_result(live_server: Any) -> None:
         client.send_obj(
             {"type": "command", "v": 1, "request_id": "r-6", "payload": {"action": "stop"}}
         )
+        accepted = client.recv_obj()
+        assert accepted is not None and accepted["type"] == "command_accepted"
         result = client.recv_obj()
         assert result is not None and result["type"] == "command_result"
         assert result["payload"]["start_blockers"] == ["no strategy selected"]
-        assert result["payload"]["snapshot"]["strategy"]["status"] == "BLOCKED"
+        assert result["payload"].get("session_status") in (None, "STOPPED")
     finally:
         client.close()
 

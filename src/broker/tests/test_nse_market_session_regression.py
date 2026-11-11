@@ -21,6 +21,8 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.services.live_trading_service import LiveTradingService
 from broker.providers.fyers.live_market_data import (
     get_nse_market_session,
@@ -35,6 +37,29 @@ from execution.runtime.session import LiveSession
 
 IST = ZoneInfo("Asia/Kolkata")
 UTC = ZoneInfo("UTC")
+
+#: A frozen OPEN market session. Scenarios 8/9 assert the OPEN-session
+#: rendering of the LIVE snapshot; without a frozen clock they only pass
+#: during market hours (a 22:37 IST run failed them on `market_session`).
+OPEN_SESSION: dict[str, Any] = {
+    "session": "OPEN",
+    "is_open": True,
+    "description": "Regular Trading Session (09:15 - 15:30 IST)",
+    "current_time_ist": "11:06:23",
+    "next_session": "15:30 IST (Market Close)",
+}
+
+
+def _freeze_open_market(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the market clock to an OPEN session for the snapshot assertions."""
+    monkeypatch.setattr(
+        "broker.providers.fyers.live_market_data.is_nse_market_open",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "broker.providers.fyers.live_market_data.get_nse_market_session",
+        lambda *_args, **_kwargs: dict(OPEN_SESSION),
+    )
 
 
 class TestNseMarketSessionRegression:
@@ -181,7 +206,10 @@ class TestNseMarketSessionRegression:
         assert is_nse_market_open(utc_post.timestamp()) is False
 
     # Scenario 8: Stale WebSocket / disconnected market feed
-    def test_scenario_8_stale_websocket_disconnected_feed(self, tmp_path: Path):
+    def test_scenario_8_stale_websocket_disconnected_feed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        _freeze_open_market(monkeypatch)
         service = LiveTradingService(data_dir=tmp_path)
 
         # A: When WS disconnected during market hours
@@ -240,7 +268,10 @@ class TestNseMarketSessionRegression:
         assert "Regular Trading Session" in snap_fresh["websocket"]["session_desc"]
 
     # Scenario 9: Frontend refresh and backend restart
-    def test_scenario_9_frontend_refresh_and_backend_restart(self, tmp_path: Path) -> None:
+    def test_scenario_9_frontend_refresh_and_backend_restart(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _freeze_open_market(monkeypatch)
         # Simulated sequence of requests as frontend connects, disconnects, reloads
         service1 = LiveTradingService(data_dir=tmp_path)
         service1._broker_view = MagicMock(

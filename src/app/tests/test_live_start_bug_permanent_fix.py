@@ -48,7 +48,7 @@ def _setup_service(tmp_path: Path) -> tuple[LiveTradingService, _MockSession]:
 
     mock_session = _MockSession("NSE:RELIANCE")
 
-    def _mock_build_sessions():
+    def _mock_build_sessions(progress_cb=None, cancel_event=None, gen=None):  # noqa: ARG001
         srv._sessions = {"NSE:RELIANCE": mock_session}  # type: ignore[assignment]
 
     srv._build_sessions = _mock_build_sessions
@@ -123,7 +123,7 @@ def test_scenario_3_gateway_slow_no_duplicate_execution(tmp_path: Path):
     srv, _ = _setup_service(tmp_path)
     build_count = 0
 
-    def _counted_build():
+    def _counted_build(progress_cb=None, cancel_event=None, gen=None):  # noqa: ARG001
         nonlocal build_count
         build_count += 1
         srv._status = "RUNNING"
@@ -203,14 +203,17 @@ def test_scenario_7_blocked_readiness_remains_blocked(tmp_path: Path):
 # ── Scenario 8: FYERS disconnected -> no live order execution ──
 def test_scenario_8_fyers_disconnected_no_execution(tmp_path: Path):
     srv, _ = _setup_service(tmp_path)
-    # Simulate broker live session verification failure
-    srv._verify_live_session_fresh = MagicMock(
-        return_value=("fyers broker adapter is not connected",)
-    )
+    # Simulate broker venue probe failure surfacing from the build step
+    from app.services.live_trading_service import LiveConfigError
+
+    def _failing_build(progress_cb=None, cancel_event=None, gen=None):  # noqa: ARG001
+        raise LiveConfigError("fyers broker adapter is not connected")
+
+    srv._build_sessions = _failing_build  # type: ignore[assignment]
 
     ok, blockers = srv.start(confirmed=True)
     assert not ok
-    assert srv.status == "STOPPED"
+    assert srv.status == "ERROR"
     assert any("not connected" in b for b in blockers)
     assert len(srv._sessions) == 0, "No live trading sessions or orders allowed"
 

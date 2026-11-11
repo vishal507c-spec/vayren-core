@@ -184,7 +184,7 @@ def test_confirm_live_lifts_consent_from_the_snapshot(dirs: tuple[str, str]) -> 
     with p1, p2, p3:
         snap = _act(dirs, {"action": "confirm_live"})
         assert service.is_live_confirmed() is True
-        assert "LIVE consent confirmed" in snap["action_note"]
+        assert "LIVE ARMED" in snap["action_note"]
         assert not any("consent" in b or "confirmation" in b for b in snap["start_blockers"])
 
 

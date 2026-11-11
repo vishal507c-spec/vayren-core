@@ -725,11 +725,17 @@ pub struct LiveState {
     pub inspector_open: bool,
     /// Last action feedback note (arm/halt/mode refusals); never fabricated.
     pub action_note: Option<String>,
+    /// Async lifecycle progress (START/STOP worker). `stage` is a stable
+    /// machine word (`validating`, `probing`, `history`, `sessions`,
+    /// `arming`, `disarming`, `timer`, `teardown`, `done`, `cancelled`);
+    /// `done`/`total` drive the progress bar (0 when unreported).
+    pub lifecycle_stage: String,
+    pub lifecycle_detail: String,
+    pub lifecycle_done: i64,
+    pub lifecycle_total: i64,
     /// Unified eligibility facts (Phase-6/7 backend section). Unreported
     /// until a snapshot carries it — the UI prints "NOT REPORTED".
     pub eligibility: EligibilityFacts,
-    /// Explicit operator confirmation dialog open state for LIVE mode.
-    pub confirm_dialog_open: bool,
     /// Explicit clock override for deterministic tests (if None, reads system time).
     pub test_clock: Option<String>,
     /// Server code synchronization status ("SERVER CODE: UPDATED" or "SERVER CODE: NOT UPDATED").
@@ -828,8 +834,11 @@ impl Default for LiveState {
             // viewport cannot fit it beside the workspace.
             inspector_open: true,
             action_note: None,
+            lifecycle_stage: String::new(),
+            lifecycle_detail: String::new(),
+            lifecycle_done: 0,
+            lifecycle_total: 0,
             eligibility: EligibilityFacts::default(),
-            confirm_dialog_open: false,
             test_clock: None,
             server_code_status: "SERVER CODE: NOT UPDATED".to_string(),
         }
@@ -1425,26 +1434,41 @@ impl LiveState {
         self.action_note = None;
     }
 
+    /// Persistent LIVE authorization ("LIVE ARMED") — the one-click consent
+    /// control that replaces the per-START confirmation modal.
+    ///
+    /// Arming is explicit and persists until STOP (which always disarms) or
+    /// the operator toggles it off. It never starts execution by itself:
+    /// START is still a separate click and every venue gate/blocker is still
+    /// enforced by the backend. In host mode the arm is also persisted in
+    /// the backend (``confirm_live`` action) so a gateway restart cannot
+    /// silently forget the operator's authorization.
     pub fn confirm_live(&mut self) {
-        if self.mode == ExecMode::Live && self.venue_gates_ready() {
-            self.live_confirmed = true;
-            self.confirm_dialog_open = false;
-            self.action_note = None;
-            if self.host_mode && self.can_start() {
-                self.start();
-            }
-        } else {
+        if self.mode != ExecMode::Live {
+            self.action_note = Some("LIVE ARMED requires LIVE execution mode".into());
+            return;
+        }
+        if !self.venue_gates_ready() {
             self.action_note =
-                Some("confirmation requires LIVE mode with every venue gate ready".into());
+                Some("LIVE ARMED refused — venue safety gates are not satisfied".into());
+            return;
+        }
+        self.live_confirmed = true;
+        self.action_note = Some("LIVE ARMED — START will execute immediately".into());
+        if self.host_mode {
+            self.push_action(serde_json::json!({"action": "confirm_live"}));
         }
     }
 
-    pub fn open_confirm_dialog(&mut self) {
-        self.confirm_dialog_open = true;
-    }
-
-    pub fn close_confirm_dialog(&mut self) {
-        self.confirm_dialog_open = false;
+    /// Toggle persistent LIVE authorization OFF without touching a running
+    /// session. The backend mirrors this: no new order can dispatch while
+    /// disarmed, but existing working orders stay tracked (never cancelled).
+    pub fn disarm_live(&mut self) {
+        self.live_confirmed = false;
+        self.action_note = Some("LIVE DISARMED — ARM required before the next START".into());
+        if self.host_mode {
+            self.push_action(serde_json::json!({"action": "disarm_live"}));
+        }
     }
 
     pub fn select_watchlist_symbol(&mut self, symbol: &str) {
@@ -1621,7 +1645,10 @@ impl LiveState {
             // a second request — the backend must never see two starts.
             return;
         }
-        // Mandatory LIVE confirmation gate: never auto-confirm LIVE on start
+        // Mandatory LIVE authorization gate: never auto-arm LIVE on start.
+        // The persistent LIVE ARMED toggle is the consent control; an
+        // unarmed START refuses with an exact reason instead of opening a
+        // modal (one click when armed, zero hidden steps).
         if self.mode == ExecMode::Live && !self.live_confirmed {
             if !self.venue_gates_ready() {
                 let unready = self.venue_unready_blockers();
@@ -1643,9 +1670,8 @@ impl LiveState {
                 self.action_note = Some(note);
                 return;
             }
-            self.confirm_dialog_open = true;
             self.action_note =
-                Some("Explicit operator confirmation required for LIVE execution.".into());
+                Some("START BLOCKED: LIVE not armed — enable LIVE ARMED first".into());
             return;
         }
         // Start safety check: consult can_start() and backend blockers
@@ -1673,6 +1699,10 @@ impl LiveState {
             // Never optimistically mark RUNNING before backend confirmation
             self.session = SessionStatus::Starting;
             self.set_pending("start");
+            self.lifecycle_stage = "accepted".into();
+            self.lifecycle_detail = "waiting for gateway acknowledgement".into();
+            self.lifecycle_done = 0;
+            self.lifecycle_total = 0;
             let confirmed = match self.mode {
                 ExecMode::Live => self.live_confirmed,
                 _ => true,
@@ -1756,8 +1786,12 @@ impl LiveState {
             self.session = SessionStatus::Stopping;
             self.live_confirmed = false;
             self.set_pending("stop");
+            self.lifecycle_stage = "disarming".into();
+            self.lifecycle_detail = "STOP requested — disarming before teardown".into();
+            self.lifecycle_done = 0;
+            self.lifecycle_total = 0;
             self.push_action(serde_json::json!({"action": "stop"}));
-            self.action_note = Some("stop requested — halting engine".into());
+            self.action_note = Some("stop requested — disarming and halting engine".into());
             return;
         }
         self.session = SessionStatus::Stopping;
@@ -2641,6 +2675,21 @@ impl LiveState {
                 Some(note.to_string())
             };
         }
+        // Async lifecycle progress: the same stage/detail the gateway streams
+        // as `command_progress`, mirrored in every snapshot so a reconnect
+        // (or a late-joining client) still sees where START/STOP stands.
+        if let Some(progress) = v.get("lifecycle_progress") {
+            if let Some(stage) = progress.get("stage").and_then(|s| s.as_str()) {
+                self.lifecycle_stage = stage.to_string();
+            }
+            self.lifecycle_detail = progress
+                .get("detail")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .to_string();
+            self.lifecycle_done = progress.get("done").and_then(|d| d.as_i64()).unwrap_or(0);
+            self.lifecycle_total = progress.get("total").and_then(|d| d.as_i64()).unwrap_or(0);
+        }
         if self.session == SessionStatus::Running {
             // The backend confirmed RUNNING, so any lingering request note,
             // progress note, or premature timeout note must be cleared.
@@ -3114,7 +3163,6 @@ pub struct SetupView {
     pub can_stop: bool,
     pub needs_live_confirm: bool,
     pub confirmed_live: bool,
-    pub confirm_dialog_open: bool,
     pub blockers: Vec<String>,
     pub venue_blockers: Vec<String>,
     pub symbol_total: String,
@@ -3129,6 +3177,12 @@ pub struct SetupView {
     pub timeframe_selected: i32,
     pub pending_start: bool,
     pub pending_stop: bool,
+    /// Async lifecycle progress (same facts as the gateway's
+    /// `command_progress` frames, mirrored in every snapshot).
+    pub lifecycle_stage: String,
+    pub lifecycle_detail: String,
+    pub lifecycle_done: i32,
+    pub lifecycle_total: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -4545,7 +4599,6 @@ pub fn project(state: &LiveState) -> LiveView {
             && !state.live_confirmed
             && state.venue_gates_ready(),
         confirmed_live: state.live_confirmed,
-        confirm_dialog_open: state.confirm_dialog_open,
         blockers: LiveState::deduplicate_blockers(&blockers, &state.status_reason),
         venue_blockers: blockers
             .iter()
@@ -4576,6 +4629,10 @@ pub fn project(state: &LiveState) -> LiveView {
         pending_stop: state.session != SessionStatus::Stopped
             && (state.pending_action.as_deref() == Some("stop")
                 || state.session == SessionStatus::Stopping),
+        lifecycle_stage: state.lifecycle_stage.clone(),
+        lifecycle_detail: state.lifecycle_detail.clone(),
+        lifecycle_done: state.lifecycle_done as i32,
+        lifecycle_total: state.lifecycle_total as i32,
     };
 
     // ── readiness (gate rows, exact backend reasons) ──
@@ -6687,7 +6744,7 @@ mod tests {
     }
 
     #[test]
-    fn host_mode_live_start_blocks_without_confirmation_and_dispatches_with_confirmation() {
+    fn host_mode_live_start_refuses_unarmed_and_dispatches_when_armed() {
         let mut st = configured(LiveState::default());
         st.apply_snapshot(&serde_json::json!({
             "mode": "LIVE",
@@ -6703,16 +6760,28 @@ mod tests {
         assert!(view.setup.needs_live_confirm);
         assert!(!view.setup.confirmed_live);
 
-        // Normal START click in unconfirmed LIVE mode opens confirmation modal and does not dispatch
+        // Unarmed START refuses with the exact reason: no modal, no dispatch.
         st.start();
-        assert!(st.confirm_dialog_open);
         assert!(!st.live_confirmed);
+        assert_eq!(st.session, SessionStatus::Stopped);
         assert!(st.take_action().is_none());
+        assert_eq!(
+            st.action_note.as_deref(),
+            Some("START BLOCKED: LIVE not armed — enable LIVE ARMED first")
+        );
 
-        // Explicit operator confirmation confirms LIVE and dispatches confirmed start
+        // ARM is the separate, explicit consent step; it never starts a run.
         st.confirm_live();
-        assert!(!st.confirm_dialog_open);
         assert!(st.live_confirmed);
+        assert_eq!(st.session, SessionStatus::Stopped);
+        let arm: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
+        assert_eq!(arm["action"], "confirm_live");
+        let armed_view = project(&st);
+        assert!(!armed_view.setup.needs_live_confirm);
+        assert!(armed_view.setup.confirmed_live);
+
+        // Armed START is one click and dispatches the confirmed start.
+        st.start();
         assert_eq!(st.session, SessionStatus::Starting);
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["action"], "start");
@@ -7908,7 +7977,7 @@ mod tests {
     }
 
     #[test]
-    fn live_confirm_dialog_lifecycle_and_operator_consent() {
+    fn live_arm_persists_and_disarm_blocks_new_dispatch() {
         let mut st = configured(LiveState::default());
         st.bridge_wired = true;
         st.host_mode = true;
@@ -7916,33 +7985,37 @@ mod tests {
         st.mode = ExecMode::Live;
         assert_eq!(st.mode, ExecMode::Live);
         assert!(!st.live_confirmed);
-        assert!(!st.confirm_dialog_open);
 
-        // Explicitly opening dialog via UI callback
-        st.open_confirm_dialog();
-        assert!(st.confirm_dialog_open);
-
-        // Cancelling closes the dialog without confirming
-        st.close_confirm_dialog();
-        assert!(!st.confirm_dialog_open);
-        assert!(!st.live_confirmed);
-
-        // Normal START click in unconfirmed LIVE mode opens confirmation modal and does not dispatch
+        // Unarmed START refuses without a modal and without dispatching.
         st.start();
-        assert!(st.confirm_dialog_open);
         assert!(!st.live_confirmed);
         assert!(st.take_action().is_none());
 
-        // Explicit operator confirmation confirms LIVE and dispatches confirmed start
+        // ARM alone never starts execution; it persists operator consent.
         st.confirm_live();
-        assert!(!st.confirm_dialog_open);
         assert!(st.live_confirmed);
+        assert_eq!(st.session, SessionStatus::Stopped);
+        let arm = st.take_action();
+        assert!(arm.is_some());
+        assert!(arm.unwrap().contains("confirm_live"));
+
+        // Armed START is a single click.
+        st.start();
         assert_eq!(st.session, SessionStatus::Starting);
         let action = st.take_action();
         assert!(action.is_some());
         let val: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();
         assert_eq!(val["action"], "start");
         assert_eq!(val["confirmed"], true);
+
+        // DISARM blocks new dispatch but never stops the running session
+        // (working orders stay tracked; STOP is the only halt control).
+        st.disarm_live();
+        assert!(!st.live_confirmed);
+        assert_eq!(st.session, SessionStatus::Starting);
+        let disarm = st.take_action();
+        assert!(disarm.is_some());
+        assert!(disarm.unwrap().contains("disarm_live"));
     }
 
     #[test]
@@ -8024,7 +8097,7 @@ mod tests {
     }
 
     #[test]
-    fn test_start_with_unconfirmed_live_opens_modal_and_cancelling_does_not_authorize() {
+    fn test_unarmed_live_start_refuses_with_gate_reasons() {
         let mut st = configured(LiveState::default());
         st.bridge_wired = true;
         st.host_mode = true;
@@ -8033,7 +8106,6 @@ mod tests {
         st.gates = failed_gates();
 
         // 1. When venue gates fail, START is blocked and does not dispatch
-        assert!(!st.confirm_dialog_open);
         assert!(!st.live_confirmed);
         assert!(st.take_action().is_none());
 
@@ -8045,15 +8117,17 @@ mod tests {
             Some("START BLOCKED: [1] BROKER_ADAPTER_READY: not configured · [2] CREDENTIALS_READY: not configured")
         );
 
-        // 2. Explicit modal dialog lifecycle
-        st.open_confirm_dialog();
-        assert!(st.confirm_dialog_open);
-        st.close_confirm_dialog();
-        assert!(!st.confirm_dialog_open);
+        // 2. ARM is refused while the venue gates are not satisfied.
+        st.confirm_live();
+        assert!(!st.live_confirmed);
+        assert_eq!(
+            st.action_note.as_deref(),
+            Some("LIVE ARMED refused — venue safety gates are not satisfied")
+        );
     }
 
     #[test]
-    fn test_confirmed_start_authorizes_and_dispatches_with_readiness_checks() {
+    fn test_armed_start_authorizes_and_dispatches_with_readiness_checks() {
         let mut st = configured(LiveState::default());
         st.bridge_wired = true;
         st.host_mode = true;
@@ -8061,17 +8135,22 @@ mod tests {
         st.live_confirmed = false;
         st.gates = all_ready_gates();
 
-        // Trigger START -> modal opens
+        // Unarmed START refuses (no modal, no dispatch).
         st.start();
-        assert!(st.confirm_dialog_open);
         assert!(!st.live_confirmed);
+        assert!(st.take_action().is_none());
 
-        // Operator explicitly confirms in modal -> dispatches confirmed start action
+        // ARM persists consent, then START dispatches in one click.
         st.confirm_live();
-        assert!(!st.confirm_dialog_open);
         assert!(st.live_confirmed);
-        assert_eq!(st.session, SessionStatus::Starting);
+        assert_eq!(st.session, SessionStatus::Stopped);
+        let arm = st.take_action();
+        assert!(arm.is_some());
+        let arm_val: serde_json::Value = serde_json::from_str(&arm.unwrap()).unwrap();
+        assert_eq!(arm_val["action"], "confirm_live");
 
+        st.start();
+        assert_eq!(st.session, SessionStatus::Starting);
         let action = st.take_action();
         assert!(action.is_some());
         let val: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();

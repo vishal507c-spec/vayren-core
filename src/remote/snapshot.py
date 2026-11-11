@@ -360,6 +360,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         },
         "blockers": [str(item) for item in (live.get("start_blockers", []) or [])],
         "gates": scrub(live.get("gates", [])),
+        "lifecycle_progress": scrub(live.get("lifecycle_progress", {})),
         "quotes": scrub(live.get("quotes", [])),
         "pnl": scrub(live.get("pnl", {})),
         "available_strategies": scrub(live.get("available_strategies", [])),

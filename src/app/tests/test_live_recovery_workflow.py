@@ -102,7 +102,7 @@ def test_resume_exposes_recovering_while_sessions_are_rebuilt(tmp_path: Path) ->
     service._verify_live_session_fresh = lambda: ()  # type: ignore[method-assign]
     seen: list[str] = []
 
-    def build() -> None:
+    def build(progress_cb=None, cancel_event=None, gen=None) -> None:  # noqa: ARG001
         seen.append(service._recovery_phase)
         service._sessions = {}
 
@@ -142,7 +142,7 @@ def test_build_failure_during_recovery_fails_closed_without_consent(tmp_path: Pa
     service.validate = lambda: ()  # type: ignore[method-assign]
     service._verify_live_session_fresh = lambda: ()  # type: ignore[method-assign]
 
-    def explode() -> None:
+    def explode(progress_cb=None, cancel_event=None, gen=None) -> None:  # noqa: ARG001
         raise RuntimeError("session construction failed")
 
     service._build_sessions = explode  # type: ignore[method-assign]
@@ -207,7 +207,7 @@ def test_explicit_confirmed_start_is_the_authorization_and_completes_recovery(
     service = LiveTradingService(data_dir)
     service.validate = lambda: ()  # type: ignore[method-assign]
     service._verify_live_session_fresh = lambda: ()  # type: ignore[method-assign]
-    service._build_sessions = lambda: None  # type: ignore[method-assign]
+    service._build_sessions = lambda *_a, **_k: None  # type: ignore[method-assign]
 
     ok, reasons = service.start(confirmed=True)
 

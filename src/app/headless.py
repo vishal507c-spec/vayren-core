@@ -21,7 +21,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from logging import getLogger
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from broker import BrokerStatus
 
@@ -309,6 +309,112 @@ def _credential_field_rows(record: dict, saved_keys: set | None = None) -> list:
     return rows
 
 
+#: Last refused broker-selection reason (latched by `_live_action`, surfaced
+#: once by the next SYSTEM snapshot so the refusal can never be silent).
+_LAST_SELECTION_ERROR: str = ""
+
+
+def _system_health_rows(out: dict, full: dict, session: dict) -> list[dict]:
+    """System-health grid from the same backend facts the panel renders.
+
+    Shapes (label/value/tone, tone 0-3 shared convention): broker session,
+    credential configuration, auth validity, and per-leg transport state.
+    Only facts the backend actually reported become rows.
+    """
+    rows: list[dict] = []
+    status = str(out.get("status_raw", "") or "").strip()
+    if status:
+        tone = (
+            1
+            if status in ("CONNECTED", "LIVE_READY")
+            else 3
+            if status in ("ERROR", "DISCONNECTED", "LOGIN_REQUIRED")
+            else 2
+        )
+        rows.append({"label": "Broker Session", "value": status, "tone": tone})
+    rows.append(
+        {
+            "label": "Credentials",
+            "value": "CONFIGURED" if out.get("configured") else "NOT CONFIGURED",
+            "tone": 1 if out.get("configured") else 2,
+        }
+    )
+    if session:
+        auth_valid = session.get("auth_valid")
+        if auth_valid is not None:
+            rows.append(
+                {
+                    "label": "Auth",
+                    "value": "VALID" if auth_valid else "INVALID",
+                    "tone": 1 if auth_valid else 3,
+                }
+            )
+    checks = full.get("checks") if isinstance(full, dict) else None
+    if isinstance(checks, dict):
+        for key, value in checks.items():
+            text = str(value).strip() if value is not None else ""
+            if not text:
+                continue
+            upper = text.upper()
+            tone = 1 if upper in ("OK", "READY", "PASS", "CONNECTED") else 2
+            if upper.startswith(("FAIL", "ERROR", "BLOCK")):
+                tone = 3
+            rows.append({"label": str(key), "value": text, "tone": tone})
+    legs = session.get("legs") if isinstance(session, dict) else None
+    if isinstance(legs, list):
+        for leg in legs:
+            if not isinstance(leg, dict):
+                continue
+            name = str(leg.get("name", "") or "").strip()
+            leg_status = str(leg.get("status", "") or "").strip()
+            if name and leg_status:
+                tone = (
+                    1
+                    if leg_status in ("READY", "CONNECTED")
+                    else 3
+                    if leg_status.startswith("FAILED")
+                    else 2
+                )
+                rows.append({"label": name, "value": leg_status, "tone": tone})
+    return rows
+
+
+def _system_log_rows(out: dict, full: dict, session: dict) -> list[dict]:
+    """Event-log lines from the same backend facts — no invented events."""
+    rows: list[dict] = []
+    reason = str(out.get("reason", "") or "").strip()
+    if reason:
+        status = str(out.get("status_raw", "") or "")
+        tone = 3 if "ERROR" in status.upper() or "FAILED" in reason.upper() else 0
+        rows.append({"text": reason, "tone": tone})
+    next_action = str(out.get("next_action", "") or "").strip()
+    if next_action:
+        rows.append({"text": next_action, "tone": 0})
+    checks = full.get("checks") if isinstance(full, dict) else None
+    if isinstance(checks, dict):
+        for key, value in checks.items():
+            text = str(value).strip() if value is not None else ""
+            if not text:
+                continue
+            upper = text.upper()
+            if upper in ("OK", "READY", "PASS"):
+                continue
+            tone = 3 if upper.startswith(("FAIL", "ERROR", "BLOCK")) else 0
+            rows.append({"text": f"{key}: {text}", "tone": tone})
+    legs = session.get("legs") if isinstance(session, dict) else None
+    if isinstance(legs, list):
+        for leg in legs:
+            if not isinstance(leg, dict):
+                continue
+            name = str(leg.get("name", "") or "").strip()
+            leg_status = str(leg.get("status", "") or "").strip()
+            if not name or not leg_status or leg_status in ("READY", "CONNECTED"):
+                continue
+            tone = 3 if leg_status.startswith("FAILED") else 0
+            rows.append({"text": f"{name}: {leg_status}", "tone": tone})
+    return rows
+
+
 def _system_snapshot(
     data_dir: str,
     selected_broker: str | None = None,
@@ -334,26 +440,32 @@ def _system_snapshot(
         )
     except Exception as exc:  # noqa: BLE001
         return {"brokers": [], "error": f"system backend unavailable: {exc}"}
-    selection_error = ""
+    global _LAST_SELECTION_ERROR
+    selection_error = _LAST_SELECTION_ERROR
+    _LAST_SELECTION_ERROR = ""
     try:
         selection_service = BrokerSelectionService(app_selection_store(data_dir))
         selection = selection_service.current()
     except Exception:  # noqa: BLE001
         selection = None
 
-    if manager is None:
-        manager = BrokerManager(data_dir=data_dir)
+    owned_manager = False
+    try:
+        active_manager = manager
+        if active_manager is None:
+            active_manager = BrokerManager(data_dir=data_dir)
+            owned_manager = True
         try:
-            snap = manager.snapshot()
-        finally:
-            manager.stop_worker()
-    else:
-        snap = manager.snapshot()
+            snap = active_manager.snapshot()
+        except Exception as exc:  # noqa: BLE001
+            return {"brokers": [], "error": f"system snapshot failed: {exc}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"brokers": [], "error": f"system backend unavailable: {exc}"}
 
-    # `selected_id` is the AUTHORITATIVE persisted default — never the panel
-    # the operator happens to be looking at. Opening a broker's detail must
-    # never change the global default; only the explicit `select_broker`
-    # action does. `panel_id` is which detail card is open.
+    # Every fact below (environment, status, fields, session) describes
+    # ``target_id`` — the open panel. ``selected_id``/``default_id`` stays the
+    # separate authoritative default. Mixing another broker's environment
+    # into this panel's state was the old cross-broker bug.
     selected_id = getattr(selection, "name", "") or ""
     if not selected_id:
         selected_id = str(snap.get("active_broker", "") or "")
@@ -381,8 +493,11 @@ def _system_snapshot(
         {},
     )
     record = next((b for b in brokers if b["id"] == target_id), None)
+    # Environment belongs to the DEFAULT selection; only report it when the
+    # open panel IS that default. Viewing another broker must never show
+    # the default's environment.
     environment = ""
-    if selection is not None:
+    if selection is not None and target_id == selected_id:
         try:
             environment = selection.environment.value
         except Exception:  # noqa: BLE001
@@ -399,42 +514,57 @@ def _system_snapshot(
             saved_keys = {k for k, v in stored.items() if isinstance(v, str) and v.strip()}
     except Exception:  # noqa: BLE001
         pass
-    out: dict = {
-        "brokers": brokers,
-        "selected_id": selected_id,
-        "default_id": selected_id,
-        "panel_id": panel_id,
-        "display_name": record["display_name"] if record else "",
-        "venue_subtitle": record["venue_subtitle"] if record else "",
-        "environment": environment,
-        "status_raw": str(full.get("status", "") or ""),
-        "configured": bool(full.get("configured", False)),
-        "can_login": bool(full.get("can_login", False)),
-        "can_disconnect": bool(full.get("can_disconnect", False)),
-        "reason": str(full.get("reason", "") or ""),
-        "last_sync": str(full.get("last_sync", "") or ""),
-        "connected": bool(full.get("connected", False)),
-        "checks": dict(full.get("checks", {})),
-        "credential_fields": _credential_field_rows(full, saved_keys),
-        # A refused switch (e.g. requested mid-session) is reported here so
-        # SYSTEM can say why the requested broker is not the selected one,
-        # instead of silently keeping the old selection.
-        "selection_error": selection_error,
-    }
-    # Unified authoritative session for the open panel (new consumers read
-    # `session.state`; legacy `status_raw` stays for compatibility).
     try:
-        if manager is not None and target_id and hasattr(manager, "get_session_snapshot"):
-            session = manager.get_session_snapshot(target_id)
-            out["session"] = session
-            out["status_raw"] = str(session.get("state", out["status_raw"]))
-            out["reason"] = str(session.get("reason", out["reason"]))
-            out["connected"] = bool(session.get("auth_valid", out["connected"]))
-            out["next_action"] = str(session.get("next_action", ""))
-            out["session_version"] = int(session.get("version", 0) or 0)
-    except Exception:
-        pass
-    return out
+        out: dict = {
+            "brokers": brokers,
+            "selected_id": selected_id,
+            "default_id": selected_id,
+            "panel_id": panel_id,
+            "display_name": record["display_name"] if record else "",
+            "venue_subtitle": record["venue_subtitle"] if record else "",
+            "environment": environment,
+            "status_raw": str(full.get("status", "") or ""),
+            "configured": bool(full.get("configured", False)),
+            "can_login": bool(full.get("can_login", False)),
+            "can_disconnect": bool(full.get("can_disconnect", False)),
+            "reason": str(full.get("reason", "") or ""),
+            "last_sync": str(full.get("last_sync", "") or ""),
+            "connected": bool(full.get("connected", False)),
+            "checks": dict(full.get("checks", {})),
+            "credential_fields": _credential_field_rows(full, saved_keys),
+            # A refused switch (e.g. requested mid-session) is reported here so
+            # SYSTEM can say why the requested broker is not the selected one,
+            # instead of silently keeping the old selection.
+            "selection_error": selection_error,
+            "action_note": selection_error,
+        }
+        # Unified authoritative session for the open panel (new consumers read
+        # `session.state`; legacy `status_raw` stays for compatibility). The
+        # owned ephemeral manager must stay alive until this read completes —
+        # stopping it first made this always report empty/stale.
+        session: dict = {}
+        try:
+            if target_id and hasattr(active_manager, "get_session_snapshot"):
+                session = active_manager.get_session_snapshot(target_id) or {}
+                if isinstance(session, dict):
+                    out["session"] = session
+                    out["status_raw"] = str(session.get("state", out["status_raw"]))
+                    out["reason"] = str(session.get("reason", out["reason"]) or out["reason"])
+                    out["connected"] = bool(session.get("auth_valid", out["connected"]))
+                    out["next_action"] = str(session.get("next_action", ""))
+                    out["session_version"] = int(session.get("version", 0) or 0)
+        except Exception:  # noqa: BLE001
+            session = {}
+        # Ops sections (system-health grid + event log) from the SAME facts
+        # the panel already renders — nothing is invented: a leg/field with
+        # no backend fact simply never appears (honest empty).
+        out["health_rows"] = _system_health_rows(out, full, session)
+        out["log_rows"] = _system_log_rows(out, full, session)
+        return out
+    finally:
+        if owned_manager:
+            with contextlib.suppress(Exception):
+                active_manager.stop_worker()
 
 
 _LIVE_ACTION_ERRORS: dict[str, str] = {}
@@ -456,7 +586,16 @@ def _live_action(
     instead of failing silently. An unexpected fault is reported the same way,
     never raised into the command loop.
     """
+    global _LAST_SELECTION_ERROR
     name = str(action.get("action") or "").strip().lower()
+    # Async-lifecycle plumbing (set ONLY by the gateway worker, never from
+    # client params — _translate_command allowlists forbid those keys).
+    _progress_cb = action.pop("_progress_cb", None)
+    if not callable(_progress_cb):
+        _progress_cb = None
+    _cancel_event = action.pop("_cancel_event", None)
+    if not (hasattr(_cancel_event, "is_set") or _cancel_event is None):
+        _cancel_event = None
     try:
         service = _live_service(data_dir, strategy_dir, broker_manager)
         if service is None:
@@ -571,7 +710,11 @@ def _live_action(
             confirmed = bool(action.get("confirmed")) or bool(
                 getattr(service, "is_live_confirmed", lambda: False)()
             )
-            ok, reasons = service.start(confirmed=confirmed)
+            ok, reasons = service.start(
+                confirmed=confirmed,
+                progress_cb=_progress_cb,
+                cancel_event=_cancel_event,
+            )
             if ok:
                 if hasattr(service, "clear_live_confirmation"):
                     service.clear_live_confirmation()
@@ -601,16 +744,30 @@ def _live_action(
             snapshot["action_note"] = "stocks refreshed from Strategy Lab"
             return snapshot
         elif name == "stop":
-            service.stop()
+            service.stop(progress_cb=_progress_cb)
             _LIVE_ACTION_ERRORS.pop("start", None)
             # A finished run voids consent: the next START needs fresh consent.
             if hasattr(service, "clear_live_confirmation"):
                 service.clear_live_confirmation()
             note = "strategy stopped"
         elif name == "confirm_live":
-            # Operator confirmation is the LIVE consent ceremony.
+            # Operator confirmation is the persistent LIVE ARMED ceremony:
+            # it authorizes future STARTs and re-arms a running session.
             service.confirm_live_execution()
-            note = "LIVE consent confirmed on START"
+            note = "LIVE ARMED — START will execute immediately"
+        elif name == "disarm_live":
+            # Persistent LIVE ARMED toggle OFF: clear consent AND disarm
+            # every session. A running session keeps tracking working
+            # orders (never cancelled) but can dispatch no new ones.
+            disarm = getattr(service, "disarm_live_execution", None)
+            if callable(disarm):
+                disarm("operator disarmed")
+            else:
+                if hasattr(service, "clear_live_confirmation"):
+                    service.clear_live_confirmation()
+                if hasattr(service, "note_armed"):
+                    service.note_armed(False)
+            note = "LIVE DISARMED — ARM required before the next START"
         elif name == "confirm_account":
             account_id = str(action.get("account_id") or "").strip()
             service.confirm_account(account_id)
@@ -634,11 +791,15 @@ def _live_action(
                 selection_svc = BrokerSelectionService(app_selection_store(data_dir))
                 selection_svc.select(requested, session_running=running)
                 note = f"default broker set to {requested}"
+                _LAST_SELECTION_ERROR = ""
             except Exception as exc:  # noqa: BLE001
                 # A refused switch (mid-session, unknown broker) is reported,
-                # never silently applied.
+                # never silently applied. Latch it so the SYSTEM panel's next
+                # snapshot carries the reason (the LiveAction response itself
+                # is discarded by the shell after spawning the snapshot).
+                _LAST_SELECTION_ERROR = f"broker selection refused: {exc}"
                 snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
-                snapshot["action_note"] = f"broker selection refused: {exc}"
+                snapshot["action_note"] = _LAST_SELECTION_ERROR
                 return snapshot
         elif name == "select_symbol":
             sym = str(action.get("symbol") or "")
@@ -1954,7 +2115,14 @@ def _with_session_state(snapshot: dict, broker_id: str, broker_manager: Any) -> 
 
 def _handle_connect_broker(command: dict, data_dir: str, broker_manager: Any) -> dict:
     """Run one CONNECT through the authoritative manager; return the snapshot."""
-    broker_id = str(command.get("broker_id") or "fyers").strip()
+    broker_id = str(command.get("broker_id") or "").strip()
+    if not broker_id:
+        return {
+            "brokers": [],
+            "error": "connect_broker requires a broker id",
+            "status_raw": "ERROR",
+            "reason": "connect_broker requires a broker id",
+        }
     credentials = command.get("credentials") or {}
     request_id = str(command.get("request_id", "") or "")
     logger.info("connect_broker received for broker=%s", broker_id)
@@ -1969,9 +2137,66 @@ def _handle_connect_broker(command: dict, data_dir: str, broker_manager: Any) ->
             snapshot["status_raw"] = "ERROR"
             snapshot["reason"] = msg
             return snapshot
-        _await_broker_settled(broker_id, broker_manager)
+        # Non-blocking: take one state read and trigger the interactive login
+        # if the venue needs it. The worker settles asynchronously; the next
+        # snapshot poll shows the outcome. The old 15s sleep froze every
+        # other command on this single-threaded loop.
+        _maybe_start_interactive_login(broker_id, broker_manager)
     snapshot = _system_snapshot(data_dir, broker_id, broker_manager)
     return _with_session_state(snapshot, broker_id, broker_manager)
+
+
+def _handle_save_broker_credentials(command: dict, data_dir: str, broker_manager: Any) -> dict:
+    """Save credentials WITHOUT connecting (vault write only).
+
+    The operator must press CONNECT explicitly to authenticate. A save that
+    needs required fields it does not yet have reports the missing names —
+    it never claims success and never starts a session.
+    """
+    broker_id = str(command.get("broker_id") or "").strip()
+    if not broker_id:
+        return {
+            "brokers": [],
+            "error": "save_broker_credentials requires a broker id",
+            "status_raw": "ERROR",
+            "reason": "save_broker_credentials requires a broker id",
+        }
+    credentials = command.get("credentials") or {}
+    logger.info("save_broker_credentials received for broker=%s", broker_id)
+    if broker_manager is None:
+        return {
+            "brokers": [],
+            "error": "broker backend unavailable",
+            "status_raw": "ERROR",
+            "reason": "broker backend unavailable",
+        }
+    creds_raw = dict(credentials) if isinstance(credentials, dict) else {}
+    creds = {
+        str(k).strip(): str(v).strip()
+        for k, v in creds_raw.items()
+        if str(k).strip() and "•" not in str(v) and str(v).strip()
+    }
+    if not creds:
+        snapshot = _system_snapshot(data_dir, broker_id, broker_manager)
+        snapshot["action_note"] = "nothing to save — no credential values provided"
+        return snapshot
+    save_fn = cast(
+        "Callable[[str, dict[str, str]], tuple[bool, str]] | None",
+        getattr(broker_manager, "save_credentials", None),
+    )
+    if callable(save_fn):
+        ok, msg = save_fn(broker_id, creds)
+    else:
+        # Older manager implementations: fall back to configure.
+        ok, msg = broker_manager.configure(broker_id, creds)
+    logger.info("Broker config save for %s: ok=%s, msg=%s", broker_id, ok, msg)
+    snapshot = _system_snapshot(data_dir, broker_id, broker_manager)
+    snapshot = _with_session_state(snapshot, broker_id, broker_manager)
+    snapshot["action_note"] = msg
+    if not ok:
+        snapshot["status_raw"] = "ERROR"
+        snapshot["reason"] = msg
+    return snapshot
 
 
 def _ensure_fyers_redirect(broker_id: str, creds: dict, broker_manager: Any) -> dict:
@@ -1997,44 +2222,49 @@ def _ensure_fyers_redirect(broker_id: str, creds: dict, broker_manager: Any) -> 
     return base
 
 
-def _await_broker_settled(broker_id: str, broker_manager: Any) -> None:
-    """Wait for the worker to settle (up to 15s); manager owns idempotency."""
-    import time
+def _maybe_start_interactive_login(broker_id: str, broker_manager: Any) -> None:
+    """One non-blocking read: start the venue interactive login if needed.
 
-    deadline = time.monotonic() + 15.0
-    time.sleep(0.3)
-    while time.monotonic() < deadline:
+    Never waits — the worker settles asynchronously and the next snapshot
+    poll reports auth progress. Safe to call on every connect reply.
+    """
+    with contextlib.suppress(Exception):
         st = broker_manager.state(broker_id)
         status = st.get("status")
-        if status not in (BrokerStatus.AUTHENTICATING, BrokerStatus.CONFIGURING):
-            spec = broker_manager._specs.get(broker_id)
-            # Zerodha path without auto_auth: start interactive login.
-            if (
-                status == BrokerStatus.LOGIN_REQUIRED
-                and spec is not None
-                and spec.auto_authenticate is None
-                and spec.interactive_login is not None
-                and not broker_manager.is_connected(broker_id)
-            ):
-                ok_login, msg_login = broker_manager.start_login(broker_id)
-                logger.info(
-                    "start_login triggered for %s: ok=%s, msg=%s",
-                    broker_id,
-                    ok_login,
-                    msg_login,
-                )
-                if ok_login:
-                    time.sleep(0.5)
-                    continue
-            break
-        time.sleep(0.3)
+        spec = broker_manager._specs.get(broker_id)
+        if (
+            status == BrokerStatus.LOGIN_REQUIRED
+            and spec is not None
+            and spec.auto_authenticate is None
+            and spec.interactive_login is not None
+            and not broker_manager.is_connected(broker_id)
+        ):
+            ok_login, msg_login = broker_manager.start_login(broker_id)
+            logger.info(
+                "start_login triggered for %s: ok=%s, msg=%s",
+                broker_id,
+                ok_login,
+                msg_login,
+            )
+
+
+# Backwards-compatible name (tests may reference it): no blocking wait.
+def _await_broker_settled(broker_id: str, broker_manager: Any) -> None:
+    _maybe_start_interactive_login(broker_id, broker_manager)
 
 
 def _handle_disconnect_broker(
     command: dict, data_dir: str, strategy_dir: str, broker_manager: Any
 ) -> dict:
     """Run one DISCONNECT (intent persisted, LIVE disarmed); return snapshot."""
-    broker_id = str(command.get("broker_id") or "fyers").strip()
+    broker_id = str(command.get("broker_id") or "").strip()
+    if not broker_id:
+        return {
+            "brokers": [],
+            "error": "disconnect_broker requires a broker id",
+            "status_raw": "ERROR",
+            "reason": "disconnect_broker requires a broker id",
+        }
     request_id = str(command.get("request_id", "") or "")
     revoke = bool(command.get("revoke", False))
     logger.info("disconnect_broker received for broker=%s", broker_id)
@@ -2412,6 +2642,14 @@ def run_headless_backend(args: argparse.Namespace) -> int:
 
                 elif cmd_type == "connect_broker":
                     snapshot = _handle_connect_broker(command, str(data_dir), broker_manager)
+                    result = {"type": "system_snapshot", "data": snapshot}
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "save_broker_credentials":
+                    snapshot = _handle_save_broker_credentials(
+                        command, str(data_dir), broker_manager
+                    )
                     result = {"type": "system_snapshot", "data": snapshot}
                     if not _emit(result):
                         break

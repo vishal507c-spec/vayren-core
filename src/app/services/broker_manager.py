@@ -351,6 +351,46 @@ class BrokerManager:
             "callback_url": self._callback_url(),
         }
 
+    def save_credentials(self, broker_id: str, values: dict[str, str]) -> tuple[bool, str]:
+        """Save credential fields WITHOUT connecting (partial saves allowed).
+
+        Used by the SYSTEM form's per-field save: it must never start an
+        authentication/browser login. Required-field completeness is enforced
+        only by ``configure``/``connect_broker``, never here, so typing the
+        first field does not fail with "missing configuration".
+        """
+        spec = self._specs.get(broker_id)
+        if spec is None:
+            return False, f"unknown broker: {broker_id}"
+        clean = {
+            str(k): str(v or "").strip()
+            for k, v in values.items()
+            if str(k).strip() and "•" not in str(v) and str(v).strip()
+        }
+        if not clean:
+            return False, "nothing to save"
+        try:
+            loaded = self._store.load(spec.config_service)
+            stored = dict(loaded) if isinstance(loaded, dict) else {}
+        except Exception:
+            stored = {}
+        stored.update({spec.config_key_map.get(k, k): v for k, v in clean.items()})
+        try:
+            self._store.save(spec.config_service, stored)
+        except Exception as exc:  # noqa: BLE001 - report, never raise into IPC
+            return False, f"secure storage refused: {type(exc).__name__}"
+        with self._lock:
+            state = self._states.get(broker_id)
+            if isinstance(state, dict):
+                state["configured"] = True
+                state["api_key_masked"] = self._mask(stored.get(spec.key_field, ""))
+                if state.get("status") is BrokerStatus.NOT_CONFIGURED:
+                    state["status"] = BrokerStatus.LOGIN_REQUIRED
+                    state["reason"] = "configured — session check pending"
+        self._note(broker_id, "configuration saved")
+        self._bump_version(broker_id)
+        return True, "configuration saved"
+
     def configure(self, broker_id: str, values: dict[str, str]) -> tuple[bool, str]:
         """Save required config (credentials store). Secret values never echoed.
 
@@ -780,11 +820,11 @@ class BrokerManager:
         configured = bool(state.get("configured", False))
         unified_state = map_broker_status(status_raw, configured)
         # Partial-leg failures degrade; rate-limit backoff wins over CONNECTED.
+        # Simple and explicit: a leg that reports a FAILED state means the
+        # unified session cannot be presented as fully CONNECTED.
         if unified_state == "CONNECTED" and any(
-            legs.get(leg, {}).get("status") not in ("READY", "CONNECTED", "UNKNOWN", "")
-            and legs.get(leg, {}).get("status") not in (None,)
+            str(legs.get(leg, {}).get("status", "")).startswith("FAILED")
             for leg in ("market_ws", "order_ws")
-            if str(legs.get(leg, {}).get("status", "")).startswith("FAILED")
         ):
             unified_state = "DEGRADED"
         if unified_state == "CONNECTED" and ws_reason:
@@ -867,10 +907,15 @@ class BrokerManager:
         snap["verified_age_s"] = round(verified_age, 1) if verified_age is not None else None
         snap["verification_stale"] = bool(stale)
         snap["health_refresh_interval_s"] = float(self.HEALTH_REFRESH_INTERVAL_S)
+        # Explicit parentheses: configured-and-connectable OR not-yet-configured.
+        # Without them `and` binds before `or` and the meaning was correct
+        # only by accident — a future edit could silently flip it.
         snap["can_connect"] = bool(
-            state.get("configured")
-            and raw_status
-            in (BrokerStatus.LOGIN_REQUIRED, BrokerStatus.DISCONNECTED, BrokerStatus.ERROR)
+            (
+                state.get("configured")
+                and raw_status
+                in (BrokerStatus.LOGIN_REQUIRED, BrokerStatus.DISCONNECTED, BrokerStatus.ERROR)
+            )
             or (not configured)
         )
         snap["can_disconnect"] = self.is_connected(broker_id) or raw_status in (

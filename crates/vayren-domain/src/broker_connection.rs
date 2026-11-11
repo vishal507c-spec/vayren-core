@@ -327,6 +327,18 @@ pub struct BrokerWorkspace {
 }
 
 impl BrokerWorkspace {
+    /// Which broker a credential/session operation must target: the open
+    /// detail panel when one is shown, else the persisted default. Never
+    /// falls back to an invented venue — an empty result means "no broker
+    /// loaded yet" and callers must fail closed, not pick a default broker.
+    pub fn operation_broker_id(&self) -> String {
+        if !self.panel_id.trim().is_empty() {
+            self.panel_id.clone()
+        } else {
+            self.selected_id.clone()
+        }
+    }
+
     /// Honest empty workspace (no selection, no facts invented).
     pub fn empty() -> Self {
         Self {
@@ -336,7 +348,9 @@ impl BrokerWorkspace {
             selected_id: String::new(),
             display_name: String::new(),
             venue_subtitle: String::new(),
-            env_label: "PAPER".to_string(),
+            // Unknown is never "PAPER" or "LIVE": the badge shows empty
+            // until the backend states its environment.
+            env_label: String::new(),
             status_raw: "NOT_CONFIGURED".to_string(),
             state: ConnectionState::NotConfigured,
             configured: false,
@@ -597,17 +611,16 @@ impl BrokerWorkspace {
             }
         }
 
+        // Unknown environment stays empty (never "PAPER" or "LIVE"): a badge
+        // must not invent an environment the backend never reported.
         let mut env_label = str_of("environment").to_uppercase();
         if env_label.trim().is_empty() {
             env_label = value
                 .get("selection")
                 .and_then(|s| s.get("environment"))
                 .and_then(|v| v.as_str())
-                .unwrap_or("paper")
+                .unwrap_or_default()
                 .to_uppercase();
-        }
-        if env_label.trim().is_empty() {
-            env_label = "PAPER".to_string();
         }
 
         let configured = bool_of("configured");
@@ -983,7 +996,8 @@ mod tests {
         assert_eq!(workspace.state, ConnectionState::NotConfigured);
         assert!(workspace.brokers.is_empty() && workspace.fields.is_empty());
         assert_eq!(workspace.display_name, "");
-        assert_eq!(workspace.env_label, "PAPER");
+        // Unknown environments stay empty — never PAPER or LIVE.
+        assert_eq!(workspace.env_label, "");
         assert_eq!(workspace.cta(), "Connect to Broker");
         // Legacy single-broker bridge shape keeps rendering.
         let legacy = BrokerWorkspace::from_json(&json!({
@@ -998,6 +1012,24 @@ mod tests {
         // Secrets never appear: the schema carries shapes, never values.
         let blob = serde_json::to_string(&workspace_json()).unwrap();
         assert!(!blob.contains("SECRET") || blob.contains("Secret ID"));
+    }
+
+    /// P0-1: an open non-default panel owns every credential/session action —
+    /// the persisted default must never be picked up as the target instead.
+    #[test]
+    fn operation_broker_id_targets_the_open_panel() {
+        let workspace = BrokerWorkspace::from_json(&json!({
+            "selected_id": "fyers",
+            "default_id": "fyers",
+            "panel_id": "zerodha",
+        }));
+        assert_eq!(workspace.operation_broker_id(), "zerodha");
+
+        let default_only = BrokerWorkspace::from_json(&json!({"selected_id": "fyers"}));
+        assert_eq!(default_only.operation_broker_id(), "fyers");
+
+        // Empty means "nothing loaded" — never an invented venue.
+        assert_eq!(BrokerWorkspace::empty().operation_broker_id(), "");
     }
 
     #[test]

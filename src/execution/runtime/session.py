@@ -13,6 +13,7 @@ registration, isolated state, shared deterministic clock sequence.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
@@ -262,6 +263,12 @@ class LiveSession:
         self._order_gate = order_gate
         self._mode = ExecutionMode.BACKTEST
         self._armed = LiveArm.DISARMED
+        # Dispatch guard: the final armed+submit sequence holds this lock so
+        # a concurrent disarm() cannot interleave between the pre-order
+        # check and the broker call. disarm() acquires the same lock — once
+        # it returns, no new dispatch can start (an already-handed broker
+        # call is accounted by the caller waiting on the lock).
+        self._dispatch_lock = threading.Lock()
         self._broker_calls = 0
         self._broker_stream_errors = 0
         self._lifecycle = StrategyLifecycle()
@@ -422,8 +429,16 @@ class LiveSession:
         from execution.broker.adapter import NotConfiguredError
 
         try:
+            # connect=False: the service proves the venue ONCE per run
+            # (_probe_live_venue). Resolving with connect=True here ran one
+            # forced profile REST + order-WS start per symbol (22x/START).
+            # The shared face keeps the probe's verified state; readiness
+            # still fails closed via health() + reconcile_now().
             broker, mode, notes = resolve_broker(
-                self._config.mode, self._config.gates, adapter_name=self._config.adapter_name
+                self._config.mode,
+                self._config.gates,
+                adapter_name=self._config.adapter_name,
+                connect=False,
             )
         except (NotConfiguredError, LiveModeError) as exc:
             self._journal.record("VENUE_REFUSED", reason=str(exc))
@@ -1209,7 +1224,13 @@ class LiveSession:
                 quantity=float(whole_shares),
             )
             plan = replace(plan, quantity=float(whole_shares))
-        blocked = self._pre_order_checks(intent, plan)
+        # The pre-order check and the broker call run as ONE atomic step
+        # under the dispatch lock: disarm() takes the same lock, so STOP
+        # cannot land between "checks passed" and "order handed to broker".
+        # The lock is held across the broker call on purpose — disarm waits
+        # for the in-flight call to finish, then guarantees no new one starts.
+        with self._dispatch_lock:
+            blocked = self._pre_order_checks(intent, plan)
         if blocked is not None:
             kind, reason = blocked
             self._journal.record(kind, intent_id=intent.intent_id, reason=reason)
@@ -1271,39 +1292,52 @@ class LiveSession:
         tracked = self._engine.transition(
             tracked.client_order_id, OrderState.VALIDATED, reason="risk approved"
         )
-        try:
-            broker_id = self._broker.place_order(plan, tracked.client_order_id)
-        except Exception as exc:
-            # Transport uncertainty (sent-but-unconfirmed) must NEVER be
-            # recorded as a rejection: the order becomes UNKNOWN and exits
-            # only via broker reconciliation. Deterministic refusals stay
-            # REJECTED with the venue's own reason.
-            kind, safe_reason = classify_exception(exc)
-            if (
-                kind in ("TIMEOUT", "NETWORK", "RATE_LIMITED")
-                or getattr(exc, "code", "")
-                in ("NETWORK_ERROR", "NETWORK", "TIMEOUT", "DISCONNECTED")
-                or isinstance(exc, (TimeoutError, ConnectionError, OSError))
-                or any(
-                    k in str(exc).lower()
-                    for k in ("timeout", "timed out", "unreachable", "network")
-                )
-            ):
-                self._engine.transition(
-                    tracked.client_order_id, OrderState.UNKNOWN, reason=safe_reason
-                )
+        # Final atomic gate: re-read arming under the dispatch lock
+        # immediately before the broker call. A STOP/disarm that landed
+        # during planning/gate evaluation aborts here — the order object is
+        # dropped before any broker handle is touched (no cleanup needed:
+        # the tracked order never left VALIDATED).
+        with self._dispatch_lock:
+            if self._mode == ExecutionMode.LIVE and self._armed != LiveArm.ARMED:
                 self._journal.record(
-                    "ORDER_UNKNOWN", client_order_id=client_order_id, reason=safe_reason
+                    "ORDER_BLOCKED_UNARMED",
+                    intent_id=intent.intent_id,
+                    reason="live not armed (disarm won the race)",
                 )
                 return
-            self._engine.transition(
-                tracked.client_order_id, OrderState.REJECTED, reason=safe_reason
-            )
-            self._journal.record(
-                "ORDER_REJECTED", client_order_id=client_order_id, reason=safe_reason
-            )
-            self._emit(OrderRejected(self._request_id, client_order_id, safe_reason))
-            return
+            try:
+                broker_id = self._broker.place_order(plan, tracked.client_order_id)
+            except Exception as exc:
+                # Transport uncertainty (sent-but-unconfirmed) must NEVER be
+                # recorded as a rejection: the order becomes UNKNOWN and exits
+                # only via broker reconciliation. Deterministic refusals stay
+                # REJECTED with the venue's own reason.
+                kind, safe_reason = classify_exception(exc)
+                if (
+                    kind in ("TIMEOUT", "NETWORK", "RATE_LIMITED")
+                    or getattr(exc, "code", "")
+                    in ("NETWORK_ERROR", "NETWORK", "TIMEOUT", "DISCONNECTED")
+                    or isinstance(exc, (TimeoutError, ConnectionError, OSError))
+                    or any(
+                        k in str(exc).lower()
+                        for k in ("timeout", "timed out", "unreachable", "network")
+                    )
+                ):
+                    self._engine.transition(
+                        tracked.client_order_id, OrderState.UNKNOWN, reason=safe_reason
+                    )
+                    self._journal.record(
+                        "ORDER_UNKNOWN", client_order_id=client_order_id, reason=safe_reason
+                    )
+                    return
+                self._engine.transition(
+                    tracked.client_order_id, OrderState.REJECTED, reason=safe_reason
+                )
+                self._journal.record(
+                    "ORDER_REJECTED", client_order_id=client_order_id, reason=safe_reason
+                )
+                self._emit(OrderRejected(self._request_id, client_order_id, safe_reason))
+                return
         self._broker_calls += 1
         tracked = self._engine.transition(
             tracked.client_order_id,
@@ -2221,10 +2255,18 @@ class LiveSession:
         return self._armed
 
     def disarm(self, reason: str = "") -> LiveArm:
-        """Release arming from any armed state. Journaled."""
-        if self._armed != LiveArm.DISARMED:
-            self._armed = arm_transition(self._armed, LiveArm.DISARMED)
-            self._journal.record("LIVE_DISARMED", reason=reason)
+        """Release arming from any armed state. Journaled.
+
+        Takes the dispatch lock: when this returns, any in-flight pre-order
+        check has finished and no NEW check can pass (it re-reads
+        ``_armed`` under the same lock). This is what makes
+        "disarm BEFORE timer shutdown" a hard guarantee rather than a
+        race the tick thread happens to lose.
+        """
+        with self._dispatch_lock:
+            if self._armed != LiveArm.DISARMED:
+                self._armed = arm_transition(self._armed, LiveArm.DISARMED)
+                self._journal.record("LIVE_DISARMED", reason=reason)
         return self._armed
 
     @property
@@ -2232,6 +2274,11 @@ class LiveSession:
         return self._armed
 
     def stop(self) -> None:
+        # Disarm FIRST, unconditionally: a direct session.stop() (teardown,
+        # build-failure path) must never leave an armed session behind.
+        # The service stops its timer only after every disarm has landed.
+        with suppress(Exception):
+            self.disarm("stop")
         with suppress(Exception):
             self._lifecycle.transition(LifecycleState.STOPPING, reason="stop requested")
         with suppress(Exception):

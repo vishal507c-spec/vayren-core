@@ -51,7 +51,7 @@ def _make_service(tmp_path: Path) -> tuple[LiveTradingService, _FakeSession]:
 
     fake_session = _FakeSession("NSE:RELIANCE")
 
-    def _fake_build_sessions():
+    def _fake_build_sessions(progress_cb=None, cancel_event=None, gen=None):  # noqa: ARG001
         srv._sessions = {"NSE:RELIANCE": fake_session}  # type: ignore[assignment]
 
     srv._build_sessions = _fake_build_sessions
@@ -161,7 +161,7 @@ def test_start_sets_starting_status_during_session_build(tmp_path: Path):
     srv, _ = _make_service(tmp_path)
     observed_status_during_build = []
 
-    def _intercept_build():
+    def _intercept_build(progress_cb=None, cancel_event=None, gen=None):  # noqa: ARG001
         observed_status_during_build.append(srv.status)
         # Verify duplicate start while starting is blocked
         ok_dup, dup_reasons = srv.start(confirmed=True)
@@ -178,7 +178,7 @@ def test_start_sets_starting_status_during_session_build(tmp_path: Path):
 def test_stop_during_starting_transitions_safely(tmp_path: Path):
     srv, _ = _make_service(tmp_path)
 
-    def _intercept_build():
+    def _intercept_build(progress_cb=None, cancel_event=None, gen=None):  # noqa: ARG001
         assert srv.status == "STARTING"
         srv.stop("operator stop during startup")
         assert srv.status == "STOPPED"

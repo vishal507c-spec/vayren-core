@@ -81,12 +81,22 @@ impl Platform for EmbedPlatform {
     }
 }
 
+static PLATFORM_OWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn ensure_platform() -> Result<(), i32> {
+    use std::sync::atomic::Ordering;
+    if PLATFORM_OWNED.load(Ordering::Relaxed) {
+        return Ok(());
+    }
     match slint::platform::set_platform(Box::new(EmbedPlatform)) {
-        Ok(()) => Ok(()),
-        // This process already runs Slint (e.g. hosts sharing one process):
-        // our stateless platform is interchangeable, proceed.
-        Err(_) => Ok(()),
+        Ok(()) => {
+            PLATFORM_OWNED.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+        // Another platform already owns the process: `SystemHostWindow::new()`
+        // would bind to THAT platform and never consume our pending window
+        // (the view would render to the wrong window). Fail closed.
+        Err(_) => Err(-7),
     }
 }
 
@@ -182,20 +192,40 @@ fn apply_view(ui: &SystemHostWindow, panel: &BrokerPanel, refresh_busy: bool) {
 /// must change with it. Returns the workspace field keys in render order so
 /// the action drain can zip connect values back onto schema keys.
 fn apply_connection_view(ui: &SystemHostWindow, workspace: &BrokerWorkspace) -> Vec<String> {
+    // Mirrors `shell::apply_connection` exactly: the selected row carries the
+    // workspace's live session verdict (state-derived label/tone/connected),
+    // never the row's own stale facts or the raw `selected` flag alone.
     ui.set_conn_brokers(
         Rc::new(VecModel::from(
             workspace
                 .brokers
                 .iter()
-                .map(|b| BrokerRowView {
-                    id: b.id.clone().into(),
-                    display_name: b.display_name.clone().into(),
-                    mark: b.mark().into(),
-                    venue_subtitle: b.venue_subtitle.clone().into(),
-                    status_label: b.status_label().into(),
-                    status_tone: b.status_tone(),
-                    selected: b.selected,
-                    connected: b.connected,
+                .map(|b| {
+                    let is_sel = b.selected || b.id == workspace.selected_id;
+                    let (status_label, status_tone, is_conn) = if is_sel {
+                        match workspace.state {
+                            ConnectionState::Connected => ("Connected", 1, true),
+                            ConnectionState::Authenticating
+                            | ConnectionState::GettingToken
+                            | ConnectionState::Verifying => ("Authenticating", 2, false),
+                            ConnectionState::Failed => ("Connection Failed", 3, false),
+                            ConnectionState::NotConfigured | ConnectionState::Ready => {
+                                ("Not Connected", 3, false)
+                            }
+                        }
+                    } else {
+                        (b.status_label(), b.status_tone(), b.connected)
+                    };
+                    BrokerRowView {
+                        id: b.id.clone().into(),
+                        display_name: b.display_name.clone().into(),
+                        mark: b.mark().into(),
+                        venue_subtitle: b.venue_subtitle.clone().into(),
+                        status_label: status_label.into(),
+                        status_tone,
+                        selected: is_sel,
+                        connected: is_conn,
+                    }
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -271,6 +301,11 @@ fn apply_connection_view(ui: &SystemHostWindow, workspace: &BrokerWorkspace) -> 
     });
     ui.set_conn_disconnect_visible(workspace.can_disconnect);
     ui.set_conn_disconnect_enabled(workspace.can_disconnect);
+    // Saved-field sentinel must match the shell: the workspace component
+    // compares field text against it for the SAVED indicator and the host
+    // drops bullet-only values on connect. Leaving this empty always showed
+    // "not saved" even when vault values existed.
+    ui.set_conn_saved_sentinel("••••••••".into());
     workspace.fields.iter().map(|f| f.key.clone()).collect()
 }
 
@@ -461,15 +496,21 @@ impl SystemView {
         let scale = scale_factor.clamp(MIN_SCALE, MAX_SCALE);
         let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
         PENDING_WINDOW.with(|slot| slot.borrow_mut().replace(window.clone()));
-        let ui = SystemHostWindow::new().map_err(|_| -7)?;
-        // Drain our own pending slot if codegen took another path (never
-        // silently leak a window into a later view).
+        let ui_result = SystemHostWindow::new();
+        // Verify our platform actually consumed the pending window. If the
+        // adapter never ran (wrong platform), `view.window` would be detached
+        // from the UI — fail closed instead of painting to the wrong window.
+        let consumed = PENDING_WINDOW.with(|slot| slot.borrow().is_none());
         PENDING_WINDOW.with(|slot| slot.borrow_mut().take());
+        let ui = ui_result.map_err(|_| -7)?;
+        if !consumed {
+            return Err(-7);
+        }
         // Honest empty state until the first backend snapshot arrives.
         let empty = BrokerPanel {
             broker_id: String::new(),
             display_name: "NOT CONFIGURED".to_string(),
-            environment: Environment::Live,
+            environment: Environment::Unknown,
             capabilities: Vec::new(),
             health: HealthState::Unknown,
             live_gates_ready: false,

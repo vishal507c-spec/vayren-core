@@ -187,9 +187,7 @@ export component AppWindow inherits Window {
     callback live-quantity-edited(string);
     callback live-start-requested();
     callback live-stop-requested();
-    callback live-confirm-requested();
-    callback live-confirm-open-requested();
-    callback live-confirm-cancel-requested();
+    callback live-arm-toggle-requested();
     callback live-event-filter-changed(string);
     callback live-event-type-picked(string);
     callback live-clear-events();
@@ -1061,9 +1059,7 @@ export component AppWindow inherits Window {
                     quantity-edited(t) => { root.live-quantity-edited(t); }
                     start-requested() => { root.live-start-requested(); }
                     stop-requested() => { root.live-stop-requested(); }
-                    confirm-requested() => { root.live-confirm-requested(); }
-                    confirm-open-requested() => { root.live-confirm-open-requested(); }
-                    confirm-cancel-requested() => { root.live-confirm-cancel-requested(); }
+                    arm-toggle-requested() => { root.live-arm-toggle-requested(); }
                     event-filter-changed(t) => { root.live-event-filter-changed(t); }
                     event-type-picked(i) => { root.live-event-type-picked(i); }
                     clear-events() => { root.live-clear-events(); }

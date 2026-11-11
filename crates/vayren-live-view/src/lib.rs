@@ -178,12 +178,15 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         can_stop: view.setup.can_stop,
         needs_live_confirm: view.setup.needs_live_confirm,
         confirmed_live: view.setup.confirmed_live,
-        confirm_dialog_open: view.setup.confirm_dialog_open,
         symbol_total: view.setup.symbol_total.into(),
         stock_universe: strings(view.setup.stock_universe),
         universe_exchange: view.setup.universe_exchange.into(),
         pending_start: view.setup.pending_start,
         pending_stop: view.setup.pending_stop,
+        lifecycle_stage: view.setup.lifecycle_stage.into(),
+        lifecycle_detail: view.setup.lifecycle_detail.into(),
+        lifecycle_done: view.setup.lifecycle_done,
+        lifecycle_total: view.setup.lifecycle_total,
     });
     let mut combo_names = vec!["— Select Strategy —".to_string()];
     combo_names.extend(view.setup.strategy_names.clone());
@@ -497,9 +500,25 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
     wire_unit!(on_refresh_stocks, LiveState::refresh_universe);
     wire_unit!(on_start_requested, LiveState::start);
     wire_unit!(on_stop_requested, LiveState::stop);
-    wire_unit!(on_confirm_requested, LiveState::confirm_live);
-    wire_unit!(on_confirm_open_requested, LiveState::open_confirm_dialog);
-    wire_unit!(on_confirm_cancel_requested, LiveState::close_confirm_dialog);
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        let refresh_flag = refresh.clone();
+        ui.on_arm_toggle_requested(move || {
+            {
+                let mut live = strong.borrow_mut();
+                if live.live_confirmed {
+                    live.disarm_live();
+                } else {
+                    live.confirm_live();
+                }
+            }
+            refresh_flag.set(true);
+            if let Some(ui) = handle.upgrade() {
+                apply_view(&ui, &strong.borrow());
+            }
+        });
+    }
     wire_unit!(on_inspector_toggled, LiveState::toggle_inspector);
     wire_unit!(on_broker_capital_refresh, LiveState::refresh_broker_capital);
     {

@@ -138,6 +138,12 @@ pub enum BackendCommand {
         broker_id: String,
         credentials: std::collections::HashMap<String, String>,
     },
+    /// Save-only: store credentials in the vault WITHOUT authenticating.
+    /// Connecting is a separate explicit action.
+    SaveBrokerCredentials {
+        broker_id: String,
+        credentials: std::collections::HashMap<String, String>,
+    },
     DisconnectBroker {
         broker_id: String,
     },

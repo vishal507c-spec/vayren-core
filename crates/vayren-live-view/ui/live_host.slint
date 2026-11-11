@@ -77,9 +77,7 @@ export component LiveHostWindow inherits Window {
     callback quantity-edited(string);
     callback start-requested();
     callback stop-requested();
-    callback confirm-requested();
-    callback confirm-open-requested();
-    callback confirm-cancel-requested();
+    callback arm-toggle-requested();
     callback event-filter-changed(string);
     callback event-type-picked(string);
     callback clear-events();
@@ -146,9 +144,7 @@ export component LiveHostWindow inherits Window {
         quantity-edited(t) => { root.quantity-edited(t); }
         start-requested() => { root.start-requested(); }
         stop-requested() => { root.stop-requested(); }
-        confirm-requested() => { root.confirm-requested(); }
-        confirm-open-requested() => { root.confirm-open-requested(); }
-        confirm-cancel-requested() => { root.confirm-cancel-requested(); }
+        arm-toggle-requested() => { root.arm-toggle-requested(); }
         event-filter-changed(t) => { root.event-filter-changed(t); }
         event-type-picked(v) => { root.event-type-picked(v); }
         clear-events() => { root.clear-events(); }

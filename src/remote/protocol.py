@@ -39,6 +39,8 @@ SERVER_MESSAGE_TYPES = (
     "snapshot",
     "state_update",
     "event",
+    "command_accepted",
+    "command_progress",
     "command_result",
     "error",
 )

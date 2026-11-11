@@ -26,6 +26,8 @@ pub const SERVER_MESSAGE_TYPES: &[&str] = &[
     "snapshot",
     "state_update",
     "event",
+    "command_accepted",
+    "command_progress",
     "command_result",
     "error",
 ];

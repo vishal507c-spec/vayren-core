@@ -29,6 +29,7 @@ import json
 import logging
 import math
 import os
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -417,6 +418,16 @@ class LiveTradingService:
         self._elapsed_seconds: int = 0
         self._signals_generated: int = 0
         self._timer = IntervalTimer(_TICK_MS, self.tick)
+        # Async lifecycle coordination (gateway worker thread + poll thread):
+        # _lifecycle_gen increments on EVERY start/stop transition so a
+        # STOP racing a START build wins deterministically (the loser sees a
+        # stale gen and aborts before RUNNING/timer-start). _state_lock
+        # guards the short _status/_sessions handoffs only — never held
+        # across network work, so snapshot() stays responsive.
+        self._lifecycle_gen: int = 0
+        self._state_lock = threading.Lock()
+        # Latest lifecycle progress (stage/detail) for snapshot readers.
+        self._lifecycle_progress: dict[str, Any] = {}
         self._restore_config()
 
     def select_symbol(self, symbol: str) -> None:
@@ -485,16 +496,53 @@ class LiveTradingService:
         self.state_changed.emit()
 
     def confirm_live_execution(self) -> None:
-        """Record explicit operator consent for LIVE execution."""
+        """Record explicit operator consent for LIVE execution.
+
+        This is the persistent LIVE ARMED state: it arms every live session
+        already built (so toggling ARM while a run is active re-permits new
+        orders), and START itself requires it. It never places an order.
+        """
         self._confirmed_live_at = _utcnow_iso()
+        self.armed = True
+        self._desired_armed = True
+        with self._state_lock:
+            sessions = list(self._sessions.values())
+        for session in sessions:
+            with contextlib.suppress(Exception):
+                session.arm(f"operator armed at {self._confirmed_live_at}")
         self.invalidate_validation_cache()
         self.state_changed.emit()
 
     def clear_live_confirmation(self) -> None:
-        """Clear operator consent (on stop, mode switch, or setup change)."""
+        """Clear operator consent AND disarm every live session.
+
+        Disarming is the safety-relevant half: a cleared consent flag that
+        left sessions armed would still let orders dispatch. Working orders
+        are never cancelled here — only new dispatch is blocked.
+        """
         self._confirmed_live_at = ""
+        self.armed = False
+        self._desired_armed = False
+        with self._state_lock:
+            sessions = list(self._sessions.values())
+        for session in sessions:
+            with contextlib.suppress(Exception):
+                session.disarm("operator consent cleared")
         self.invalidate_validation_cache()
         self.state_changed.emit()
+
+    def disarm_live_execution(self, reason: str = "operator disarmed") -> None:
+        """Persistent LIVE ARMED OFF: clear consent + disarm, persist intent."""
+        self.clear_live_confirmation()
+        with contextlib.suppress(Exception):
+            self._persist()
+        self._record_activity(
+            self._config.strategy_name or "session",
+            "",
+            f"LIVE DISARMED — {reason}",
+            "info",
+            "SYSTEM",
+        )
 
     def is_live_confirmed(self) -> bool:
         """Whether explicit operator consent has been given."""
@@ -1569,6 +1617,73 @@ class LiveTradingService:
             return ()
         return (f"{name} live session could not be verified: {reason}",)
 
+    def _emit_progress(
+        self,
+        progress_cb: Any,
+        stage: str,
+        detail: str = "",
+        done: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        """Record lifecycle progress for snapshot readers + worker callback.
+
+        ``progress_cb`` is the gateway worker's frame sender (may be None
+        on sync/local paths). Snapshot readers get the same facts via the
+        ``lifecycle_progress`` key, so progress survives a reconnect.
+        A faulty callback never breaks lifecycle execution.
+        """
+        record: dict[str, Any] = {"stage": stage, "detail": str(detail or "")}
+        if done is not None:
+            record["done"] = int(done)
+        if total is not None:
+            record["total"] = int(total)
+        self._lifecycle_progress = record
+        if callable(progress_cb):
+            with contextlib.suppress(Exception):
+                progress_cb(stage, str(detail or ""), done, total)
+
+    def _lifecycle_cancelled(self, cancel_event: Any, gen: int) -> bool:
+        """True when STOP has preempted this START (event or gen moved)."""
+        if cancel_event is not None and callable(getattr(cancel_event, "is_set", None)):
+            try:
+                if bool(cancel_event.is_set()):
+                    return True
+            except Exception:
+                pass
+        with self._state_lock:
+            return gen != self._lifecycle_gen
+
+    def _abort_start_as_stopped(
+        self, reason: str = "cancelled by STOP"
+    ) -> tuple[bool, tuple[str, ...]]:
+        """Tear down a preempted START and land in STOPPED (never RUNNING).
+
+        Used when STOP arrives mid-build. The partially built sessions are
+        torn down (disarm-first inside _teardown_sessions) and consent is
+        cleared so the next START needs a fresh ARM.
+        """
+        with contextlib.suppress(Exception):
+            self._teardown_sessions()
+        with self._state_lock:
+            self._status = "STOPPED"
+            self._status_reason = ""
+            self._blocked_start_reason = ""
+            self._desired_status = "STOPPED"
+            self._desired_armed = False
+        self._confirmed_live_at = ""
+        self.armed = False
+        self.invalidate_validation_cache()
+        self._set_recovery(
+            _RECOVERY_PHASE_NOT_REQUIRED,
+            reasons=(),
+            reconciliation="NOT_RUN",
+        )
+        self._emit_progress(None, "cancelled", reason)
+        with contextlib.suppress(Exception):
+            self._persist()
+        self.state_changed.emit()
+        return False, (reason,)
+
     def _ensure_live_venues(self) -> None:
         """Best-effort explicit activation (idempotent, no network, no orders).
 
@@ -1633,28 +1748,43 @@ class LiveTradingService:
 
     # ── lifecycle ───────────────────────────────────────────────────────
 
-    def start(self, confirmed: bool = False) -> tuple[bool, tuple[str, ...]]:
+    def start(
+        self,
+        confirmed: bool = False,
+        progress_cb: Any = None,
+        cancel_event: Any = None,
+    ) -> tuple[bool, tuple[str, ...]]:
         """Validate → build per-symbol sessions → RUNNING. Never auto-starts.
 
         Validation is forced fresh at START (config may have gone stale
         since the last UI poll); tick cadences reset for a clean cycle.
+
+        ``progress_cb(stage, detail, done, total)`` reports long phases
+        (venue probe, history fetch, per-session build) so the gateway can
+        stream ``command_progress`` frames and the UI never looks frozen.
+        ``cancel_event`` (``threading.Event``) lets a concurrent STOP
+        preempt this build: checked at every stage boundary and before
+        RUNNING is published — a cancelled START lands STOPPED and never
+        arms, never starts the timer.
         """
-        if self._status in ("RUNNING", "STARTING"):
-            return False, ("already running or start in progress",)
+        with self._state_lock:
+            if self._status in ("RUNNING", "STARTING"):
+                return False, ("already running or start in progress",)
+            self._lifecycle_gen += 1
+            gen = self._lifecycle_gen
+        self._emit_progress(progress_cb, "validating", "validating configuration and venue gates")
         was_pending = self.recovery_pending
         if self._config.mode == "LIVE" and confirmed:
             self.confirm_live_execution()
         self.invalidate_validation_cache()
-        # START is the one place a cached CONNECTED snapshot is not evidence.
-        # Only run the venue proof when the operator has consented; without
-        # consent no broker call is made and the existing consent gate below
-        # remains the blocker.
-        fresh_session_blockers: tuple[str, ...] = ()
-        if self._config.mode == "LIVE" and (confirmed or self.is_live_confirmed()):
-            fresh_session_blockers = self._verify_live_session_fresh()
+        # ONE broker proof per run: _build_sessions → _probe_live_venue
+        # (connect + health + order-stream + account). The old second proof
+        # here (_verify_live_session_fresh) duplicated the same profile +
+        # order-WS wait, back-to-back, doubling START latency for no gain.
+        # _verify_live_session_fresh is retained for direct callers/tests.
+        if self._lifecycle_cancelled(cancel_event, gen):
+            return self._abort_start_as_stopped()
         blockers = self.validate()
-        if fresh_session_blockers:
-            blockers = (*fresh_session_blockers, *blockers)
         if self._config.mode == "LIVE":
             if confirmed or self.is_live_confirmed():
                 # A confirmed start SATISFIES the consent requirement — the
@@ -1701,8 +1831,12 @@ class LiveTradingService:
             )
             self.state_changed.emit()
             return False, blockers
-        self._status = "STARTING"
-        self._status_reason = "initializing live engine and sessions"
+        self._emit_progress(progress_cb, "probing", "proving broker session and order stream")
+        if self._lifecycle_cancelled(cancel_event, gen):
+            return self._abort_start_as_stopped()
+        with self._state_lock:
+            self._status = "STARTING"
+            self._status_reason = "initializing live engine and sessions"
         self.state_changed.emit()
         if was_pending:
             # Durable in-progress marker: if the gateway dies while sessions
@@ -1715,9 +1849,13 @@ class LiveTradingService:
                 reconciliation="PENDING",
             )
             self._persist()
+        if self._lifecycle_cancelled(cancel_event, gen):
+            return self._abort_start_as_stopped()
         try:
-            self._build_sessions()
+            self._build_sessions(progress_cb=progress_cb, cancel_event=cancel_event, gen=gen)
         except LiveConfigError as exc:
+            if self._lifecycle_cancelled(cancel_event, gen) or "cancelled by STOP" in str(exc):
+                return self._abort_start_as_stopped()
             self._teardown_sessions()
             self._status = "ERROR"
             self._status_reason = str(exc)
@@ -1770,6 +1908,11 @@ class LiveTradingService:
             self._persist()
             self.state_changed.emit()
             return False, (str(exc),)
+        # STOP preempts even at the last boundary: if STOP moved the gen
+        # while sessions were building, this START must not publish RUNNING.
+        if self._lifecycle_cancelled(cancel_event, gen):
+            return self._abort_start_as_stopped()
+        self._emit_progress(progress_cb, "arming", "arming live sessions and starting worker")
         now = time.time()
         tz_ist = timezone(timedelta(hours=5, minutes=30))
         now_ist = datetime.fromtimestamp(now, tz=tz_ist)
@@ -1779,8 +1922,18 @@ class LiveTradingService:
         self._session_stop_epoch = None
         self._elapsed_seconds = 0
         self._signals_generated = 0
-        self._status = "RUNNING"
-        self._status_reason = ""
+        with self._state_lock:
+            # Atomic commit vs STOP: STOP bumps the gen under this same
+            # lock, so either STOP landed before this block (abort) or this
+            # START owns the transition. The timer starts only after the
+            # lock; the post-start re-check below catches a STOP that
+            # landed in between.
+            cancelled = gen != self._lifecycle_gen
+            if not cancelled:
+                self._status = "RUNNING"
+                self._status_reason = ""
+        if cancelled:
+            return self._abort_start_as_stopped()
         self._blocked_start_reason = ""
         self._desired_status = "RUNNING"
         self._desired_armed = True
@@ -1803,6 +1956,14 @@ class LiveTradingService:
             )
         self._timer.start()
         self._worker_started = True
+        # Final post-commit check: a STOP that landed between the lock and
+        # timer.start() has already disarmed and torn down; this START must
+        # not leave a RUNNING timer behind.
+        if self._lifecycle_cancelled(cancel_event, gen):
+            with contextlib.suppress(Exception):
+                self._timer.stop(timeout=1.0)
+            self._worker_started = False
+            return self._abort_start_as_stopped()
         self._record_session_start()
         self._persist()
         self.state_changed.emit()
@@ -1845,22 +2006,52 @@ class LiveTradingService:
         self._record_activity(name, "", f"market data connected ({feed})", "ok", "MARKET DATA")
         self._record_activity(name, "", "START", "ok", "SYSTEM")
 
-    def stop(self, reason: str = "operator stop") -> None:
-        """Halt immediately: no new signals; open orders stay tracked."""
-        had_sessions = bool(self._sessions)
-        self._status = "STOPPING" if had_sessions else self._status
-        self._timer.stop()
+    def stop(self, reason: str = "operator stop", progress_cb: Any = None) -> None:
+        """Halt immediately: no new signals; open orders stay tracked.
+
+        Safety order is fixed: (1) bump the lifecycle gen so any in-flight
+        START aborts before RUNNING, (2) DISARM every session + clear
+        consent — only then (3) stop the timer, (4) tear down. Disarm
+        precedes timer shutdown, so after STOP is requested not one new
+        order can be dispatched (session._pre_order_checks re-reads
+        disarm under the dispatch lock). Cleanup joins are bounded:
+        slow socket teardown lives on the gateway worker thread, never
+        on the connection/UI thread, and can never pin STOPPING.
+        """
+        with self._state_lock:
+            self._lifecycle_gen += 1
+            had_sessions = bool(self._sessions)
+            if self._status != "STOPPED":
+                self._status = (
+                    "STOPPING"
+                    if (had_sessions or self._status in ("RUNNING", "STARTING"))
+                    else self._status
+                )
+        self._emit_progress(progress_cb, "disarming", "disarming all live sessions")
+        # Consent is per start: STOP disarms so the NEXT start needs ARM.
+        self._confirmed_live_at = ""
+        self.armed = False
+        self._desired_armed = False
+        # DISARM FIRST — before the timer join. session.stop() also
+        # disarms, but the explicit pass guarantees the order on every
+        # path (including sessions built mid-START that _teardown owns).
+        with self._state_lock:
+            sessions_to_disarm = list(self._sessions.values())
+        for session in sessions_to_disarm:
+            with contextlib.suppress(Exception):
+                session.disarm(f"stop: {reason}")
+        self._emit_progress(progress_cb, "timer", "stopping strategy worker")
+        # Bounded join: the interval is 1s; never let a wedged timer
+        # thread keep the worker (or the result frame) hostage.
+        with contextlib.suppress(Exception):
+            self._timer.stop(timeout=1.0)
         self._worker_started = False
-        if had_sessions:
-            for session in list(self._sessions.values()):
-                with contextlib.suppress(Exception):
-                    session.disarm(f"stop: {reason}")
-                with contextlib.suppress(Exception):
-                    session.stop()
-            self._teardown_sessions()
-        else:
-            self._clear_marks()
-            self._feed_kind = "none"
+        self._emit_progress(progress_cb, "teardown", "stopping sessions and releasing feeds")
+        # Single teardown pass: _teardown_sessions stops each session
+        # ONCE (disarm is idempotent, so the explicit pass above costs
+        # nothing). The old stop() stopped every session here AND again
+        # inside _teardown_sessions (44 stops for 22 sessions).
+        self._teardown_sessions()
         self._drain_activity()
         halted = "halt" in str(reason).lower()
         self._status = "HALTED" if halted else "STOPPED"
@@ -1895,6 +2086,7 @@ class LiveTradingService:
             self._session_start_epoch = None
         elif self._started_at and not self._stopped_at:
             self._stopped_at = datetime.fromtimestamp(now, tz=tz_ist).isoformat(timespec="seconds")
+        self._emit_progress(progress_cb, "done", "live execution stopped")
         self._persist()
         self._record_activity(
             self._config.strategy_name or "session",
@@ -1916,7 +2108,14 @@ class LiveTradingService:
             return
         now = time.time()
         failures: list[str] = []
-        for symbol, session in self._sessions.items():
+        # Copy under the handoff lock: STOP swaps/clears _sessions on the
+        # worker thread while this timer thread steps — iterating a
+        # mutating dict would raise. The copy's sessions are already
+        # disarmed by then (disarm precedes teardown), so stepping them is
+        # a no-op for order flow.
+        with self._state_lock:
+            current = list(self._sessions.items())
+        for symbol, session in current:
             try:
                 session.step(now)
             except Exception as exc:  # noqa: BLE001 - fail closed, report it
@@ -2006,9 +2205,14 @@ class LiveTradingService:
         kill_halted = bool(self.is_halted())
         lifecycle = "STOPPED"
         strategy_state: dict[str, Any] | None = None
-        if self._sessions:
-            first_key = next(iter(self._sessions))
-            first = self._sessions[first_key]
+        # Copy under the handoff lock: STOP swaps _sessions on the worker
+        # thread while the poll thread snapshots — iterating a mutating
+        # dict would raise RuntimeError mid-read.
+        with self._state_lock:
+            sessions_snapshot: list[str] = list(self._sessions.keys())
+            sessions_first = self._sessions[next(iter(self._sessions))] if self._sessions else None
+        if sessions_first is not None:
+            first = sessions_first
             with contextlib.suppress(Exception):
                 broker = getattr(first, "_broker", None)
                 if broker is not None:
@@ -2017,7 +2221,11 @@ class LiveTradingService:
                 kill_halted = bool(first._risk.kill_switch.is_halted())
             with contextlib.suppress(Exception):
                 lifecycle = first._lifecycle.state.value
-            for symbol, session in self._sessions.items():
+            for symbol in sessions_snapshot:
+                with self._state_lock:
+                    session = self._sessions.get(symbol)
+                if session is None:
+                    continue
                 mark = self._marks.get(symbol, 0.0)
                 with contextlib.suppress(Exception):
                     for pos in session.ledger.all_positions():
@@ -2589,6 +2797,10 @@ class LiveTradingService:
         snap["eligibility"] = self.eligibility_snapshot(
             quotes=quotes, recon_blocks=recon_blocks, recon_reason=recon_status
         )
+        # Lifecycle progress mirror: the same stage/detail the async worker
+        # streams as command_progress frames, so a reconnected or late-
+        # joining client still sees where START/STOP stands.
+        snap["lifecycle_progress"] = dict(self._lifecycle_progress)
         return snap
 
     # ── session construction (same record, same engine, per-symbol) ─────
@@ -2603,12 +2815,20 @@ class LiveTradingService:
         self._compiled_cache[key] = (code, compiled)
         return compiled
 
-    def _build_sessions(self) -> None:
+    def _build_sessions(
+        self,
+        progress_cb: Any = None,
+        cancel_event: Any = None,
+        gen: int | None = None,
+    ) -> None:
         assert self._config.strategy_name and self._config.symbols and self._config.timeframe
         # Tear down the previous run *before* probing the venue. The probe
         # reuses the shared plugin face; tearing down afterwards would close
         # the face the new sessions just connected to.
         self._teardown_sessions()
+        self._emit_progress(progress_cb, "resolving", "resolving strategy")
+        if gen is not None and self._lifecycle_cancelled(cancel_event, gen):
+            raise LiveConfigError("cancelled by STOP")
         record = self._resolve_strategy_record(self._config.strategy_name)
         if record is None:
             available = list(self.available_strategies())
@@ -2639,6 +2859,7 @@ class LiveTradingService:
         self._live_venue_id = self._resolve_live_venue_id(self.broker_name()) or ""
         if not self._live_venue_id:
             raise LiveConfigError(f"no live trading venue for broker {self.broker_name()!r}")
+        self._emit_progress(progress_cb, "probing", "connecting to live broker venue")
         md_faces = self._probe_live_venue(self._live_venue_id)
         if md_faces:
             self._feed_kind = "live"
@@ -2681,14 +2902,34 @@ class LiveTradingService:
 
                 syms_list = list(self._config.symbols)
                 max_w = min(8, len(syms_list)) if syms_list else 1
+                self._emit_progress(
+                    progress_cb, "history", "fetching session history", 0, len(syms_list)
+                )
                 try:
                     with ThreadPoolExecutor(max_workers=max_w) as pool:
-                        for sym, bars in pool.map(_fetch_sym, syms_list):
+                        for history_done, (sym, bars) in enumerate(
+                            pool.map(_fetch_sym, syms_list), start=1
+                        ):
                             session_bars_by_symbol[sym] = bars
+                            self._emit_progress(
+                                progress_cb,
+                                "history",
+                                f"history {sym}",
+                                history_done,
+                                len(syms_list),
+                            )
                 except HistoricalRecoveryError as exc:
                     raise LiveConfigError(str(exc)) from exc
+                if gen is not None and self._lifecycle_cancelled(cancel_event, gen):
+                    raise LiveConfigError("cancelled by STOP")
 
-            for symbol in self._config.symbols:
+            total = len(self._config.symbols)
+            for index, symbol in enumerate(self._config.symbols, start=1):
+                if gen is not None and self._lifecycle_cancelled(cancel_event, gen):
+                    raise LiveConfigError("cancelled by STOP")
+                self._emit_progress(
+                    progress_cb, "sessions", f"building session {symbol}", index, total
+                )
                 session_bars: tuple[Bar, ...] = session_bars_by_symbol.get(symbol, ())
                 history = self._load_history(symbol, self._config.timeframe)
                 if not history and has_local_store and not session_bars:
@@ -2804,10 +3045,17 @@ class LiveTradingService:
                 # No silent downgrade is possible any more: resolve_broker
                 # raises instead of returning a simulated venue, so a session
                 # that reported ready already holds the requested mode.
-                with contextlib.suppress(Exception):
-                    session.reconcile_now()
+                # NOTE: session.start() already reconciled against broker
+                # truth (connect=False); the old explicit reconcile_now()
+                # here repeated that work per symbol (22x). Skipped.
                 if mode == ExecutionMode.LIVE:
-                    session.arm(f"operator confirmed at {self._confirmed_live_at}")
+                    # Consent may have been revoked while this build was in
+                    # flight (persistent ARM toggled OFF / STOP): never arm a
+                    # session the operator no longer authorized.
+                    if self.is_live_confirmed():
+                        session.arm(f"operator confirmed at {self._confirmed_live_at}")
+                    else:
+                        session.disarm("consent revoked during session build")
                 sessions[symbol] = session
                 self._session_dirs[symbol] = session_dir
                 self._journal_cursors[symbol] = len(session.journal.entries)
@@ -2818,7 +3066,8 @@ class LiveTradingService:
                 with contextlib.suppress(Exception):
                     session.stop()
             raise
-        self._sessions = sessions
+        with self._state_lock:
+            self._sessions = sessions
 
     def _probe_live_venue(self, venue_id: str) -> dict[str, Any]:
         """START-time venue truth: connect + health + account, read-only.
@@ -2939,19 +3188,32 @@ class LiveTradingService:
         return md_faces
 
     def _teardown_sessions(self) -> None:
-        for session in self._sessions.values():
+        """Stop every session ONCE, disarm-first, then release feeds.
+
+        The dict is swapped out under the state lock so a concurrent
+        tick()/snapshot() never iterates a mutating map. Each session's
+        stop() disarms first (session.stop guarantees it), then disconnects
+        the shared adapter — idempotent after the first, so 22 sessions
+        cost one real disconnect, not 22. Fan-out close is local socket
+        teardown (bounded, never a network call) and runs outside the
+        lock; slow cleanup stays on the worker thread.
+        """
+        with self._state_lock:
+            old, self._sessions = self._sessions, {}
+        for session in old.values():
             with contextlib.suppress(Exception):
                 session.stop()
-        self._sessions = {}
         # The fan-out does not own the venue face (StaticPlugin reuses it):
         # teardown releases this run's symbols and disconnects the shared
         # transport. The last session.stop() usually triggers it already;
         # close() is idempotent and also covers probe failures where no
         # session was ever constructed.
-        for fanout in self._market_fanouts:
+        with self._state_lock:
+            fanouts = list(self._market_fanouts)
+            self._market_fanouts = []
+        for fanout in fanouts:
             with contextlib.suppress(Exception):
                 fanout.close()
-        self._market_fanouts.clear()
         # Feed observations belong to the sessions just stopped: keeping the
         # old marks/kind would let a dead run keep quoting (and a stopped
         # service still report a live provider in eligibility diagnostics).
@@ -2973,7 +3235,9 @@ class LiveTradingService:
         rides the same new-entry slice instead of rescanning all entries
         every tick.
         """
-        for symbol, session in self._sessions.items():
+        with self._state_lock:
+            current = list(self._sessions.items())
+        for symbol, session in current:
             entries = session.journal.entries
             cursor = self._journal_cursors.get(symbol, 0)
             new = entries[cursor:]

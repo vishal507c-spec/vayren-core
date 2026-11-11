@@ -169,7 +169,13 @@ class IntervalTimer:
         self._fired.connect(on_tick)
 
     def start(self) -> None:
-        """Begin ticking (no-op while already ticking)."""
+        """Begin ticking (no-op while already ticking).
+
+        Each run owns a FRESH stop event: a bounded ``stop()`` may return
+        before a slow tick finishes, and clearing a shared event here would
+        resurrect that old thread (two timers stepping the same sessions).
+        The old thread stays bound to its already-set event and exits.
+        """
         stale = self._thread
         if stale is not None:
             if stale.is_alive():
@@ -177,9 +183,11 @@ class IntervalTimer:
             # Reap the previous thread so a stop();start() cycle never runs
             # on (or leaks) the stale one.
             stale.join(timeout=self._interval_s)
-        self._stop.clear()
+        stop = threading.Event()
+        self._stop = stop
         self._thread = threading.Thread(
             target=self._loop,
+            args=(stop,),
             name=f"IntervalTimer({self._interval_s * 1000:.0f}ms)",
             daemon=True,
         )
@@ -191,16 +199,25 @@ class IntervalTimer:
         thread = self._thread
         return thread is not None and thread.is_alive()
 
-    def stop(self) -> None:
-        """Stop scheduling ticks and reap the thread."""
+    def stop(self, timeout: float | None = None) -> None:
+        """Stop scheduling ticks and reap the thread.
+
+        ``timeout`` bounds the join (slow thread exit must never re-couple
+        to the caller's UI ack). ``None`` keeps the legacy
+        ``interval + 1s`` bound. The timer thread is a daemon gated on an
+        event, so a bounded-out join never strands the process.
+        """
         self._stop.set()
         thread, self._thread = self._thread, None
         if thread is not None:
-            thread.join(timeout=self._interval_s + 1.0)
+            if timeout is None:
+                thread.join(timeout=self._interval_s + 1.0)
+            else:
+                thread.join(timeout=max(0.0, float(timeout)))
 
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            if self._stop.wait(self._interval_s):
+    def _loop(self, stop: threading.Event) -> None:
+        while not stop.is_set():
+            if stop.wait(self._interval_s):
                 return
             self._fired.emit()
 

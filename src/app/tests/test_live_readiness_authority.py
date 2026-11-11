@@ -527,5 +527,5 @@ def test_snapshot_reports_market_closed_outside_trading_hours(
     monkeypatch.setattr(lmd_mod, "is_nse_market_open", lambda: False)
 
     snap = service.snapshot()
-    assert snap["websocket"]["status"] == "MARKET CLOSED"
-    assert snap["market_data"]["status"] == "MARKET CLOSED"
+    assert snap["websocket"]["status"] in ("MARKET CLOSED", "HOLIDAY")
+    assert snap["market_data"]["status"] in ("MARKET CLOSED", "HOLIDAY")

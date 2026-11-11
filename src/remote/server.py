@@ -67,9 +67,12 @@ MUTATING_ACTIONS = (
     "server_op",
     "confirm_account",
     "confirm_live",
+    "disarm_live",
     "connect_broker",
     "disconnect_broker",
     "revoke_session",
+    "broker_status",
+    "save_broker_credentials",
     "refresh_capital",
     "sync_candles",
     # Operator-authorized verification of the LIVE order path. Mutating by
@@ -105,6 +108,7 @@ EVENT_CHANNELS = (
     "system",
     "blockers",
     "gates",
+    "lifecycle_progress",
     "events",
     "available_strategies",
     "available_symbols",
@@ -359,6 +363,15 @@ class RemoteServer:
         self._event_ring: deque[tuple[int, dict[str, Any]]] = deque(maxlen=256)
         self._seen_commands: OrderedDict[str, _IdempotentResult] = OrderedDict()
         self._dropped_messages = 0
+        # Async lifecycle state (START/STOP run on workers so the
+        # connection thread never blocks behind a START build and STOP can
+        # preempt it). _start_cancel aborts the in-flight START build;
+        # _lifecycle_threads bounds concurrent workers (one START + one
+        # STOP max — STOP wins via the service lifecycle gen).
+        self._start_cancel = threading.Event()
+        self._start_inflight: threading.Thread | None = None
+        self._inflight_lifecycle: dict[str, threading.Event] = {}
+        self._lifecycle_workers: list[threading.Thread] = []
 
     # ── lifecycle ──
 
@@ -686,6 +699,13 @@ class RemoteServer:
                 request_id=message.request_id,
             )
             return
+        if action in ("start", "stop"):
+            # Async lifecycle: immediate ack, then a worker runs the backend
+            # so START builds never block this connection thread (and never
+            # queue STOP behind them). STOP sets the START cancel event
+            # first thing — preemption, not queuing.
+            self._dispatch_lifecycle(conn, action, headless_action, message.request_id)
+            return
         try:
             fresh = self._gateway.apply_command(headless_action)
         except Exception as exc:  # noqa: BLE001
@@ -698,6 +718,100 @@ class RemoteServer:
         self._remember_command(message.request_id, result)
         self._send(conn, make_envelope("command_result", result, request_id=message.request_id))
         conn.needs_resync = True
+
+    def _dispatch_lifecycle(
+        self, conn: _Connection, action: str, headless_action: dict[str, Any], request_id: str
+    ) -> None:
+        """Immediate-ack + worker for START/STOP (STOP preempts START)."""
+        if action == "stop":
+            # Highest priority: abort the in-flight START build before this
+            # STOP worker even starts. The service gen also aborts it.
+            self._start_cancel.set()
+        done_event = threading.Event()
+        with self._lock:
+            self._inflight_lifecycle[request_id] = done_event
+            if action == "start":
+                # Clear the cancel flag for the fresh START. A STOP that
+                # arrives afterwards sets it again (preemption).
+                self._start_cancel.clear()
+        self._send(
+            conn,
+            make_envelope(
+                "command_accepted",
+                {"action": action, "command_id": request_id, "status": "accepted"},
+                request_id=request_id,
+            ),
+        )
+        cancel_event = self._start_cancel if action == "start" else None
+
+        def _on_progress(stage: str, detail: str, done: Any, total: Any) -> None:
+            payload: dict[str, Any] = {
+                "action": action,
+                "command_id": request_id,
+                "stage": str(stage),
+                "detail": str(detail or ""),
+            }
+            if done is not None:
+                payload["done"] = int(done)
+            if total is not None:
+                payload["total"] = int(total)
+            self._send(conn, make_envelope("command_progress", payload, request_id=request_id))
+
+        worker_action = dict(headless_action)
+        worker_action["_progress_cb"] = _on_progress
+        worker_action["_cancel_event"] = cancel_event
+        worker = threading.Thread(
+            target=self._execute_lifecycle,
+            args=(conn, action, worker_action, request_id, done_event),
+            name=f"remote-lifecycle-{action}-{request_id}",
+            daemon=True,
+        )
+        with self._lock:
+            self._lifecycle_workers.append(worker)
+            if action == "start":
+                self._start_inflight = worker
+        worker.start()
+
+    def _execute_lifecycle(
+        self,
+        conn: _Connection,
+        action: str,
+        worker_action: dict[str, Any],
+        request_id: str,
+        done_event: threading.Event,
+    ) -> None:
+        """Run one lifecycle command on a worker; always emits a result."""
+        try:
+            fresh = self._gateway.apply_command(worker_action)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("remote: lifecycle backend failed: %s", exc)
+            result = {
+                "ok": False,
+                "action": action,
+                "cached": False,
+                "command_id": request_id,
+                "session_status": "STOPPED" if action == "stop" else "ERROR",
+                "status_reason": "backend command failed",
+                "start_blockers": [],
+                "detail": "backend command failed",
+            }
+            self._remember_command(request_id, result)
+            self._send(conn, make_envelope("command_result", result, request_id=request_id))
+            done_event.set()
+            with self._lock:
+                self._inflight_lifecycle.pop(request_id, None)
+            return
+        result = self._command_result(action, fresh, include_snapshot=False)
+        # Carry the command id so the client can correlate acks strictly.
+        result["command_id"] = request_id
+        if isinstance(fresh, dict) and isinstance(fresh.get("action_note"), str):
+            result.setdefault("detail", str(fresh["action_note"]))
+        self._remember_command(request_id, result)
+        self._send(conn, make_envelope("command_result", result, request_id=request_id))
+        conn.needs_resync = True
+        done_event.set()
+        with self._lock:
+            self._inflight_lifecycle.pop(request_id, None)
 
     def _translate_command(
         self, action: str, params: Any, request_id: str
@@ -717,7 +831,7 @@ class RemoteServer:
             if args.get("mode") not in ("BACKTEST", "LIVE"):
                 return None
             return {"action": "mode", "mode": args["mode"]}
-        if action in ("stop", "tick", "confirm_live"):
+        if action in ("stop", "tick", "confirm_live", "disarm_live"):
             return {"action": action}
         if action == "confirm_account":
             return {"action": "confirm_account", "account_id": args.get("account_id", "")}
@@ -736,8 +850,14 @@ class RemoteServer:
             if not isinstance(symbol, str) or not symbol.strip():
                 return None
             return {"action": "select_symbol", "symbol": symbol.strip()}
-        if action in ("connect_broker", "disconnect_broker", "revoke_session"):
-            broker = args.get("broker_id", args.get("broker", "fyers"))
+        if action in (
+            "connect_broker",
+            "disconnect_broker",
+            "revoke_session",
+            "broker_status",
+            "save_broker_credentials",
+        ):
+            broker = args.get("broker_id", args.get("broker", ""))
             if not isinstance(broker, str) or not broker.strip():
                 return None
             out: dict[str, Any] = {
@@ -778,8 +898,17 @@ class RemoteServer:
             }
         return None
 
-    def _command_result(self, action: str, fresh: dict[str, Any]) -> dict[str, Any]:
-        """Wrap the backend's own post-command snapshot as the result."""
+    def _command_result(
+        self, action: str, fresh: dict[str, Any], *, include_snapshot: bool = True
+    ) -> dict[str, Any]:
+        """Wrap the backend's own post-command snapshot as the result.
+
+        ``include_snapshot=False`` (async START/STOP): the result carries
+        only the ack fields. A full snapshot build here doubled backend
+        work per lifecycle command (plus the poll build it forced via
+        ``needs_resync``). The poll ``state_update`` delivers the truth
+        within one poll tick — the client never needs the embedded copy.
+        """
         if not isinstance(fresh, dict):
             return {"ok": False, "action": action, "detail": "backend gave no snapshot"}
         blockers = list(fresh.get("start_blockers", []) or [])
@@ -793,8 +922,17 @@ class RemoteServer:
             # headless `_live_unavailable`); its `action_note` carries the
             # real reason, so a failed funds read never reports success.
             ok = bool(fresh.get("action_ok", True))
-        elif action in ("connect_broker", "disconnect_broker", "revoke_session"):
+        elif action in (
+            "connect_broker",
+            "disconnect_broker",
+            "revoke_session",
+            "save_broker_credentials",
+        ):
             ok = bool(fresh.get("action_ok", True))
+        elif action == "broker_status":
+            # Read-only: the refresh succeeds when the snapshot carries the
+            # authoritative session; action_ok is not part of that command.
+            ok = "broker_session" in fresh
         else:
             ok = True
         out: dict[str, Any] = {
@@ -804,8 +942,9 @@ class RemoteServer:
             "session_status": str(fresh.get("session_status", "") or ""),
             "status_reason": str(fresh.get("status_reason", "") or ""),
             "start_blockers": blockers,
-            "snapshot": build_snapshot(fresh),
         }
+        if include_snapshot:
+            out["snapshot"] = build_snapshot(fresh)
         if isinstance(fresh.get("broker_session"), dict):
             out["broker_session"] = dict(fresh["broker_session"])
         if isinstance(fresh.get("action_note"), str):
@@ -978,17 +1117,26 @@ class RemoteServer:
             self._flush_outbox(conn)
 
     def _flush_outbox(self, conn: _Connection) -> None:
-        while True:
-            try:
-                raw = conn.outbox.get_nowait()
-            except queue.Empty:
-                return
-            try:
-                with conn.send_lock:
+        # Hold the send lock across the WHOLE drain. Lifecycle workers and
+        # the poll loop can both flush; taking one frame at a time let two
+        # flushers swap frames (progress/result arriving before the frame
+        # queued ahead of them). FIFO drain + one writer keeps the stream
+        # ordered without blocking the lifecycle worker any longer than the
+        # slow client's socket already does.
+        failed = False
+        with conn.send_lock:
+            while True:
+                try:
+                    raw = conn.outbox.get_nowait()
+                except queue.Empty:
+                    break
+                try:
                     send_text(conn.sock, raw)
-            except OSError:
-                self._close_connection(conn, _CLOSE_POLICY)
-                return
+                except OSError:
+                    failed = True
+                    break
+        if failed:
+            self._close_connection(conn, _CLOSE_POLICY)
 
     def _send_error(
         self, conn: _Connection, code: str, detail: str, *, request_id: str | None = None
