@@ -595,3 +595,76 @@ def test_invalidation_during_inflight_read_discards_the_publish() -> None:
     adapter.reconciliation_snapshot()  # must NOT be served by the stale window
     assert sum(url.endswith("/positions") for url in calls) == 2
     assert sum(url.endswith("/orders") for url in calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# 6. Auto-auth HTTP 429 arms the manager cooldown (CONNECT retry storm)
+# ---------------------------------------------------------------------------
+
+
+def test_auto_auth_429_arms_cooldown_and_blocks_duplicate_connect(
+    tmp_path: Any,
+) -> None:
+    """A venue 429 must arm a real cooldown, not leave LOGIN_REQUIRED.
+
+    Regression for the reported retry storm: every CONNECT click ran the FYERS
+    auto-auth again, the venue answered 429, and the state stayed
+    LOGIN_REQUIRED with ``retry_after_s == 0`` so the next click repeated it.
+    """
+    attempts: list[int] = []
+
+    def auto_auth(_config: dict[str, str], _store: Any) -> tuple[bool, str]:
+        attempts.append(1)
+        return (
+            False,
+            "FYERS login failed: rate limited by venue (HTTP 429, retry in 5s)",
+        )
+
+    def session_store(_store: Any, _service: str) -> Any:
+        return SimpleNamespace()
+
+    bm = BrokerManager(str(tmp_path), specs={}, session_store_factory=session_store)
+    spec = SimpleNamespace(
+        broker_id="fyers",
+        display_name="FYERS",
+        session_service="vayren:fyers:session",
+        config_service="vayren:fyers",
+        auto_authenticate=auto_auth,
+    )
+    bm._specs["fyers"] = spec  # type: ignore[assignment]
+    bm._states["fyers"] = {
+        "status": BrokerStatus.LOGIN_REQUIRED,
+        "reason": "no active session",
+        "checks": {},
+        "details": bm._empty_details(),
+        "last_sync": "",
+        "configured": True,
+        "adapter": None,
+        "market_data": None,
+        "api_key_masked": "AB",
+    }
+    bm._desired["fyers"] = "CONNECTED"
+    bm._unified["fyers"] = {"legs": {}, "version": 0}
+
+    assert bm._try_auto_auth(spec, {"app_id": "APP-100"}) is True  # type: ignore[arg-type]
+
+    snap = bm.get_session_snapshot("fyers")
+    assert snap["state"] == "RATE_LIMITED"
+    assert snap["last_error_kind"] == "RATE_LIMITED"
+    assert snap["retry_after_s"] >= 4.0
+    assert "rate limited" in snap["reason"].lower()
+    assert snap["can_connect"] is True
+
+    # A second click inside the cooldown is refused before any venue call.
+    ok, message, refused = bm.connect_broker("fyers")
+    assert ok is False
+    assert "retry in" in message.lower()
+    assert refused["state"] == "RATE_LIMITED"
+    assert len(attempts) == 1
+
+    # Consecutive 429s escalate (5s → 10s), never reset the same 5s window.
+    assert bm._try_auto_auth(spec, {"app_id": "APP-100"}) is True  # type: ignore[arg-type]
+    escalated = bm.get_session_snapshot("fyers")
+    assert escalated["retry_after_s"] >= 9.0
+
+    bm.stop_worker()

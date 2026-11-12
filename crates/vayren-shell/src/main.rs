@@ -59,20 +59,59 @@ fn apply_authoritative_broker_ui(
     use vayren_domain::broker_connection::{connection_state, progress_steps};
     use vayren_shell::remote_live::session_verdict;
     let verdict = session_verdict(auth);
-    ui.set_conn_pill_label(verdict.pill_label.clone().into());
-    ui.set_conn_pill_tone(verdict.pill_tone);
+    // Client-side venue cooldown: an HTTP 429 must never turn repeated
+    // CONNECT clicks into another burst against the venue. A current gateway
+    // sends RATE_LIMITED + retry_after_s; an older one sends LOGIN_REQUIRED
+    // with last_error_kind/last_error evidence — both are honoured here.
+    let retry_remaining = match form.try_borrow_mut() {
+        Ok(mut slot) => {
+            if slot.broker_id != auth.broker_id {
+                slot.retry_until = None;
+                slot.rate_limit_version = 0;
+                slot.rate_limit_streak = 0;
+            }
+            slot.observe_session(&auth.session)
+        }
+        Err(_) => 0,
+    };
+    let cooling = retry_remaining > 0;
+    let venue_label = if auth.display_name.is_empty() {
+        auth.broker_id.to_uppercase()
+    } else {
+        auth.display_name.clone()
+    };
+    let cooling_message =
+        format!("{venue_label} rate limited the login request — retry in {retry_remaining}s.");
+    ui.set_conn_pill_label(
+        if cooling {
+            format!("Rate Limited — {retry_remaining}s")
+        } else {
+            verdict.pill_label.clone()
+        }
+        .into(),
+    );
+    ui.set_conn_pill_tone(if cooling { 3 } else { verdict.pill_tone });
     ui.set_conn_is_connected(verdict.connected);
     ui.set_conn_is_degraded(verdict.is_degraded);
-    ui.set_conn_is_failed(verdict.failed);
+    ui.set_conn_is_failed(verdict.failed || cooling);
     ui.set_conn_error_message(
-        if verdict.failed {
+        if cooling {
+            cooling_message.clone()
+        } else if verdict.failed {
             verdict.status_message.clone()
         } else {
             String::new()
         }
         .into(),
     );
-    ui.set_conn_status_message(verdict.status_message.clone().into());
+    ui.set_conn_status_message(
+        if cooling {
+            cooling_message
+        } else {
+            verdict.status_message.clone()
+        }
+        .into(),
+    );
     ui.set_conn_description(verdict.description.clone().into());
     let state = connection_state(
         auth.session
@@ -164,12 +203,21 @@ fn apply_authoritative_broker_ui(
     // LOGIN_REQUIRED must offer a working "Connect to <venue>" control —
     // never the CONNECTED-only "Manage Connection", which cannot act.
     ui.set_conn_cta_label(
-        vayren_domain::broker_connection::cta_label(state, &auth.display_name).into(),
+        if cooling {
+            format!("Retry in {retry_remaining}s")
+        } else if verdict.failed {
+            "Retry".to_string()
+        } else {
+            vayren_domain::broker_connection::cta_label(state, &auth.display_name)
+        }
+        .into(),
     );
-    ui.set_conn_cta_arrow(!verdict.in_progress && !verdict.failed);
+    ui.set_conn_cta_arrow(!verdict.in_progress && !verdict.failed && !cooling);
     // Every disconnected, not-yet-failed state can be retried: the click
     // reaches EC2 through the gateway and reports loading, then the truth.
-    ui.set_conn_cta_enabled(!verdict.in_progress);
+    // While the venue cooldown is armed, a click would only burn quota, so
+    // the control stays disabled until the advertised delay elapses.
+    ui.set_conn_cta_enabled(!verdict.in_progress && !cooling);
     ui.set_conn_form_enabled(!verdict.in_progress);
     // DISCONNECT is only offered when there is a session to end.
     ui.set_conn_disconnect_visible(verdict.connected);
@@ -262,10 +310,10 @@ fn apply_authoritative_broker_ui(
         };
     ui.set_conn_brokers(Rc::new(slint::VecModel::from(brokers_list)).into());
     if let Ok(mut slot) = form.try_borrow_mut() {
-        *slot = vayren_shell::remote_live::RemoteBrokerForm {
-            broker_id: auth.broker_id.clone(),
-            keys: auth.field_keys.clone(),
-        };
+        // Preserve the cooldown fields observed above; only the target
+        // venue + credential schema are replaced by each projection.
+        slot.broker_id = auth.broker_id.clone();
+        slot.keys = auth.field_keys.clone();
     }
 }
 
@@ -2076,6 +2124,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                 }
+                if remote_retry_guard(&handle, &form_state) {
+                    return;
+                }
                 send_remote_broker_command(
                     &handle,
                     sender,
@@ -2226,6 +2277,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // No EC2 broker state yet — fail closed, never invent one.
                     String::new()
                 };
+                if remote_retry_guard(&handle, &form_state) {
+                    return;
+                }
                 send_remote_broker_command(
                     &handle,
                     sender,
@@ -3083,6 +3137,44 @@ fn wire_server_ops(
     });
 }
 
+/// Refuse a remote CONNECT while the venue cooldown is armed.
+///
+/// The updated gateway also refuses its own armed cooldown, but the packaged
+/// client may talk to an older server (and the click itself should never be
+/// sent). Returns true when the click was consumed and the panel painted the
+/// real countdown instead of another request.
+fn remote_retry_guard(
+    handle: &slint::Weak<vayren_shell::AppWindow>,
+    form: &Rc<RefCell<vayren_shell::remote_live::RemoteBrokerForm>>,
+) -> bool {
+    let (remaining, venue) = {
+        let state = form.borrow();
+        (
+            state.retry_remaining_s(),
+            if state.broker_id.is_empty() {
+                "Broker".to_string()
+            } else {
+                state.broker_id.to_uppercase()
+            },
+        )
+    };
+    if remaining == 0 {
+        return false;
+    }
+    if let Some(ui) = handle.upgrade() {
+        let note = format!("{venue} rate limited — retry in {remaining}s");
+        ui.set_conn_is_failed(true);
+        ui.set_conn_pill_label(format!("Rate Limited — {remaining}s").into());
+        ui.set_conn_pill_tone(3);
+        ui.set_conn_error_message(note.clone().into());
+        ui.set_conn_status_message(note.into());
+        ui.set_conn_cta_label(format!("Retry in {remaining}s").into());
+        ui.set_conn_cta_enabled(false);
+        ui.set_conn_form_enabled(true);
+    }
+    true
+}
+
 /// Send one broker-session command to the EC2 gateway with fail-closed
 /// gating: an unknown venue, a read-only/down link, or a closed channel
 /// paints an honest note and sends nothing. Credential values only leave
@@ -3274,6 +3366,9 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                     v4.as_str().to_string(),
                     v5.as_str().to_string(),
                 ];
+                if remote_retry_guard(&handle, &form_state) {
+                    return;
+                }
                 send_remote_broker_command(
                     &handle,
                     &cmd,
@@ -3296,6 +3391,9 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
         ui.on_broker_login_requested(move || {
             // Retry with the gateway's stored config (token reuse path):
             // no credential values cross at all.
+            if remote_retry_guard(&handle, &form_state) {
+                return;
+            }
             let broker_id = form_state.borrow().broker_id.clone();
             send_remote_broker_command(
                 &handle,

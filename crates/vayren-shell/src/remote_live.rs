@@ -32,7 +32,7 @@
 //!   plain `ws://` is accepted for loopback probes only.
 
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use vayren_domain::live::{Gate, GateStatus, LiveEvent, LiveState, RiskStatus};
 use vayren_remote_client::{
     launch::{bootstrap_backoff, enrollment_note, Enrollment},
@@ -134,10 +134,107 @@ pub struct BrokerAuthority {
 /// Pending CONNECT input: which EC2 venue the form targets plus the
 /// schema key order its values map onto. Values travel only inside the
 /// authenticated `connect_broker` command; nothing is stored client-side.
+/// The retry fields are a CLIENT-side guard: they stop repeated CONNECT
+/// clicks from hammering a venue that just answered HTTP 429, including
+/// against older gateways that report the 429 only as a login failure.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RemoteBrokerForm {
     pub broker_id: String,
     pub keys: Vec<String>,
+    pub retry_until: Option<Instant>,
+    pub rate_limit_version: u64,
+    pub rate_limit_streak: u32,
+}
+
+impl RemoteBrokerForm {
+    /// Remaining seconds on the client-side venue cooldown (0 = none).
+    pub fn retry_remaining_s(&self) -> u64 {
+        self.retry_until
+            .map(|until| {
+                let left = until.saturating_duration_since(Instant::now());
+                left.as_secs() + u64::from(left.subsec_nanos() > 0)
+            })
+            .unwrap_or(0)
+    }
+
+    /// Track the venue's rate-limit cooldown from one authoritative session.
+    ///
+    /// A current gateway reports `state: RATE_LIMITED` plus `retry_after_s`.
+    /// An older gateway may report the same HTTP 429 as `LOGIN_REQUIRED`
+    /// with only `last_error_kind` / `last_error` evidence, so both shapes
+    /// are honoured. Each new session version while rate-limited arms an
+    /// escalating delay (5s → 60s max); the same version counts down
+    /// locally instead of resetting the deadline on every snapshot.
+    pub fn observe_session(&mut self, session: &serde_json::Value) -> u64 {
+        let state = session_text(session, "state").to_uppercase();
+        if matches!(
+            state.as_str(),
+            "AUTHENTICATING"
+                | "CONNECTING"
+                | "CHECKING"
+                | "VALIDATING_SESSION"
+                | "FETCHING_TOKEN"
+                | "VERIFYING"
+                | "VERIFYING_CONNECTION"
+                | "RECONNECTING"
+        ) {
+            // A real attempt is running; keep any armed deadline, never re-arm.
+            return self.retry_remaining_s();
+        }
+        let kind = session_text(session, "last_error_kind").to_uppercase();
+        let last_error = session_text(session, "last_error").to_lowercase();
+        let reason = session_text(session, "reason").to_lowercase();
+        let rate_limited = matches!(state.as_str(), "RATE_LIMITED" | "RATE LIMITED")
+            || kind == "RATE_LIMITED"
+            || last_error.contains("rate limited")
+            || last_error.contains("http 429")
+            || reason.contains("rate limited")
+            || reason.contains("http 429");
+        if !rate_limited {
+            self.retry_until = None;
+            self.rate_limit_version = 0;
+            self.rate_limit_streak = 0;
+            return 0;
+        }
+        let version = session.get("version").and_then(|v| v.as_u64()).unwrap_or(0);
+        if self.retry_until.is_none() || version != self.rate_limit_version {
+            if version != self.rate_limit_version || self.rate_limit_streak == 0 {
+                self.rate_limit_streak = self.rate_limit_streak.saturating_add(1);
+            }
+            self.rate_limit_version = version;
+            let base = rate_limit_hint_seconds(session);
+            let shift = self.rate_limit_streak.saturating_sub(1).min(3);
+            let delay = base.saturating_mul(1u64 << shift).clamp(5, 60);
+            self.retry_until = Some(Instant::now() + Duration::from_secs(delay));
+        }
+        self.retry_remaining_s()
+    }
+}
+
+/// Venue-advertised cooldown, else the ``retry in Ns`` text, else 5s.
+fn rate_limit_hint_seconds(session: &serde_json::Value) -> u64 {
+    if let Some(value) = session.get("retry_after_s").and_then(|v| v.as_f64()) {
+        if value.is_finite() && value > 0.0 {
+            return (value.ceil() as u64).max(5);
+        }
+    }
+    let text = format!(
+        "{} {}",
+        session_text(session, "last_error"),
+        session_text(session, "reason")
+    )
+    .to_lowercase();
+    if let Some(position) = text.find("retry in") {
+        let digits: String = text[position + "retry in".len()..]
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if let Ok(seconds) = digits.parse::<u64>() {
+            return seconds.max(5);
+        }
+    }
+    5
 }
 
 fn session_text(session: &serde_json::Value, key: &str) -> String {
@@ -373,8 +470,35 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
                 next_action.clone()
             },
         },
-        "CHECKING" | "CONNECTING" | "VERIFYING" | "RECONNECTING" | "RATE_LIMITED"
-        | "AUTHENTICATING" | "CONFIGURING" | "CHECKING SESSION" | "RATE LIMITED" => {
+        "RATE_LIMITED" | "RATE LIMITED" => {
+            let retry_s = session
+                .get("retry_after_s")
+                .and_then(|v| v.as_f64())
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .map(|v| v.ceil() as u64)
+                .unwrap_or(0);
+            let base = status_or("Rate limited by the venue.");
+            BrokerVerdict {
+                connected: false,
+                is_degraded: false,
+                failed: true,
+                in_progress: false,
+                pill_label: "Rate Limited".to_string(),
+                pill_tone: 3,
+                status_message: if retry_s > 0 {
+                    format!("{base} Retry in {retry_s}s.")
+                } else {
+                    base
+                },
+                description: if next_action.is_empty() {
+                    format!("{venue} rate limited the request — wait before retrying.")
+                } else {
+                    next_action.clone()
+                },
+            }
+        }
+        "CHECKING" | "CONNECTING" | "VERIFYING" | "RECONNECTING" | "AUTHENTICATING"
+        | "CONFIGURING" | "CHECKING SESSION" => {
             let msg = {
                 let m = status_or("Authentication in progress…");
                 if m.to_lowercase().contains("all checks passed") {
@@ -405,15 +529,13 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
             in_progress: false,
             pill_label: "Login Required".to_string(),
             pill_tone: 2,
-            status_message: if !next_action.is_empty() {
-                next_action.clone()
-            } else {
-                status_or("Broker login required.")
-            },
-            description: if reason.is_empty() {
+            // The venue's actual reason wins over the generic next action:
+            // "Review error and RETRY" hid a real HTTP 429 from the operator.
+            status_message: status_or("Broker login required."),
+            description: if next_action.is_empty() {
                 format!("{venue} saved session is missing or expired.")
             } else {
-                reason.clone()
+                next_action.clone()
             },
         },
         "DISCONNECTED" => BrokerVerdict {
@@ -2223,8 +2345,12 @@ mod tests {
         assert!(!verdict.connected);
         assert!(!verdict.failed);
         assert_eq!(verdict.pill_label, "Login Required");
+        // The real failure is the headline; the generic next action is the
+        // description. Previously the panel replaced the reason with
+        // "Review error and RETRY", hiding the actual HTTP 429.
+        assert_eq!(verdict.status_message, "session expired — invalid token");
         assert_eq!(
-            verdict.status_message,
+            verdict.description,
             "Complete FYERS login from SYSTEM → BROKERS"
         );
     }
@@ -2262,17 +2388,14 @@ mod tests {
         assert_eq!(connected.pill_label, "Connected");
         let degraded = with_state("DEGRADED");
         assert!(degraded.connected && !degraded.failed);
-        for s in [
-            "CHECKING",
-            "CONNECTING",
-            "VERIFYING",
-            "RECONNECTING",
-            "RATE_LIMITED",
-        ] {
+        for s in ["CHECKING", "CONNECTING", "VERIFYING", "RECONNECTING"] {
             let v = with_state(s);
             assert!(!v.connected && !v.failed && v.in_progress, "{s}");
             assert_eq!(v.pill_label, "Connecting…");
         }
+        let limited = with_state("RATE_LIMITED");
+        assert!(!limited.connected && limited.failed && !limited.in_progress);
+        assert_eq!(limited.pill_label, "Rate Limited");
         let expired = with_state("LOGIN_REQUIRED");
         assert!(!expired.connected && !expired.failed);
         let down = with_state("DISCONNECTED");
@@ -2283,6 +2406,74 @@ mod tests {
         assert_eq!(broken.pill_label, "Connection Failed");
         let unknown = with_state("UNKNOWN");
         assert!(!unknown.connected && unknown.failed);
+    }
+
+    #[test]
+    fn rate_limited_verdict_shows_the_countdown() {
+        let base = authoritative_broker(&authoritative_sections()).expect("authority");
+        let mut auth = base;
+        auth.session["state"] = json!("RATE_LIMITED");
+        auth.session["reason"] = json!("FYERS login failed: rate limited by venue (HTTP 429)");
+        auth.session["retry_after_s"] = json!(12.0);
+        let verdict = session_verdict(&auth);
+        assert!(verdict.failed);
+        assert_eq!(verdict.pill_label, "Rate Limited");
+        assert!(verdict.status_message.contains("429"));
+        assert!(verdict.status_message.contains("12s"));
+    }
+
+    #[test]
+    fn rate_limit_cooldown_escalates_and_resets() {
+        let mut form = RemoteBrokerForm::default();
+        let session = json!({
+            "broker_id": "fyers",
+            "state": "RATE_LIMITED",
+            "reason": "FYERS login failed: rate limited by venue (HTTP 429, retry in 5s)",
+            "last_error": "FYERS login failed: rate limited by venue (HTTP 429, retry in 5s)",
+            "last_error_kind": "RATE_LIMITED",
+            "retry_after_s": 5.0,
+            "version": 7,
+        });
+        let first = form.observe_session(&session);
+        assert!((4..=5).contains(&first), "first cooldown was {first}s");
+        let deadline = form.retry_until;
+        // The same session version must not slide the deadline forwards.
+        let again = form.observe_session(&session);
+        assert_eq!(form.retry_until, deadline);
+        assert!(again <= first);
+        // A new rate-limited attempt escalates (5s → 10s).
+        let mut next = session.clone();
+        next["version"] = json!(9);
+        let escalated = form.observe_session(&next);
+        assert!((9..=10).contains(&escalated), "escalated to {escalated}s");
+        // A verified session clears the guard immediately.
+        assert_eq!(
+            form.observe_session(&json!({"state": "CONNECTED", "version": 10})),
+            0
+        );
+        assert!(form.retry_until.is_none());
+        assert_eq!(form.rate_limit_streak, 0);
+    }
+
+    #[test]
+    fn older_gateway_429_evidence_also_arms_the_client_cooldown() {
+        let mut form = RemoteBrokerForm::default();
+        // The deployed gateway reports the 429 as LOGIN_REQUIRED with only
+        // last_error_kind/last_error evidence and no retry_after_s.
+        let session = json!({
+            "broker_id": "fyers",
+            "state": "LOGIN_REQUIRED",
+            "last_error": "FYERS login failed: rate limited by venue (HTTP 429, retry in 5s)",
+            "last_error_kind": "RATE_LIMITED",
+            "version": 7,
+        });
+        assert!((4..=5).contains(&form.observe_session(&session)));
+        assert!(form.retry_until.is_some());
+        // An in-progress attempt keeps the remaining time but never re-arms.
+        let deadline = form.retry_until;
+        let connecting = json!({"state": "AUTHENTICATING", "version": 8});
+        form.observe_session(&connecting);
+        assert_eq!(form.retry_until, deadline);
     }
 
     #[test]

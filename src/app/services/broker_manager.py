@@ -36,6 +36,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import logging
+import re
 import secrets
 import threading
 import time
@@ -617,8 +618,24 @@ class BrokerManager:
         logging.getLogger(__name__).info(f"[Auth {attempt_id}] Connect initiated for {broker_id}")
         # Rate-limited: refuse a retry storm while backoff is armed.
         if self._retry_armed(broker_id):
+            remaining = self._retry_remaining_s(broker_id)
             snap = self.get_session_snapshot(broker_id)
-            return False, "rate limited — retrying automatically", snap
+            note = (
+                f"rate limited by venue — retry in {remaining:.0f}s"
+                if remaining > 0
+                else "rate limited by venue — retry shortly"
+            )
+            detail = str(snap.get("last_error") or "").strip()
+            if detail and detail.lower() not in note.lower():
+                note = f"{note} ({detail})"
+            self._audit.record(
+                request_id=request_id,
+                broker_id=broker_id,
+                action="CONNECT requested",
+                result="refused",
+                reason="rate-limit cooldown armed",
+            )
+            return False, note, snap
         credentials = credentials or {}
         clean = {str(k): str(v or "").strip() for k, v in credentials.items()}
         # Merge with stored config (sentinel •••• means "keep saved value").
@@ -807,8 +824,9 @@ class BrokerManager:
             last_verified_epoch = float(uni.get("last_verified_epoch", 0.0) or 0.0)
             last_error = str(uni.get("last_error", "") or "")
             last_error_kind = str(uni.get("last_error_kind", "") or "")
-            retry_after_s = float(uni.get("retry_after_s", 0.0) or 0.0)
+            retry_until = float(uni.get("retry_until", 0.0) or 0.0)
             token_reused = bool(uni.get("token_reused", False))
+        retry_after_s = max(0.0, retry_until - time.monotonic()) if retry_until > 0.0 else 0.0
         runtime = self._runtime_state()
         raw_details = state.get("details")
         details: dict[str, Any] = raw_details if isinstance(raw_details, dict) else {}
@@ -1322,10 +1340,11 @@ class BrokerManager:
         except Exception as exc:
             kind, safe = classify_exception(exc)
             if kind == "RATE_LIMITED":
-                delay = backoff_with_jitter(1, base_s=5.0)
-                self._arm_retry(spec.broker_id, delay)
+                delay = self._arm_rate_limit(spec.broker_id, safe)
                 self._set_status(
-                    spec.broker_id, BrokerStatus.ERROR, f"rate limited — retry in {delay:.0f}s"
+                    spec.broker_id,
+                    BrokerStatus.ERROR,
+                    f"rate limited by venue — retry in {delay:.0f}s: {redact(safe)}",
                 )
             else:
                 self._set_status(
@@ -1340,6 +1359,25 @@ class BrokerManager:
         if not ok:
             kind, safe = self._classify_validate_reason(message)
             safe_text = redact(safe)
+            if kind == "RATE_LIMITED":
+                # The venue answered HTTP 429. Auto-auth already stopped its
+                # own retries; arm the manager's cooldown so repeated CONNECT
+                # clicks cannot hammer the same quota again.
+                delay = self._arm_rate_limit(spec.broker_id, safe_text)
+                self._set_status(
+                    spec.broker_id,
+                    BrokerStatus.ERROR,
+                    f"rate limited by venue — retry in {delay:.0f}s: {safe_text}",
+                )
+                self._touch_error(spec.broker_id, kind, safe_text)
+                self._audit.record(
+                    broker_id=spec.broker_id,
+                    action="authorization required",
+                    result="RATE_LIMITED",
+                    reason=safe_text,
+                )
+                self._bump_version(spec.broker_id)
+                return True
             if "mismatch" in safe_text.lower() and "redirect" in safe_text.lower():
                 safe_text = (
                     "Redirect URI mismatch: Ensure the Redirect URI in VAYREN matches "
@@ -1777,6 +1815,7 @@ class BrokerManager:
             uni["last_error"] = ""
             uni["last_error_kind"] = ""
             uni["token_reused"] = bool(uni.get("token_reused", False))
+            uni["rate_limit_failures"] = 0
 
     def _touch_error(self, broker_id: str, kind: str, reason: str) -> None:
         with self._lock:
@@ -1791,6 +1830,37 @@ class BrokerManager:
             uni = self._unified.get(broker_id, {})
             return float(uni.get("retry_until", 0.0) or 0.0) > _time.monotonic()
 
+    def _retry_remaining_s(self, broker_id: str) -> float:
+        """Seconds left on the armed venue cooldown (0 = not cooling down)."""
+        with self._lock:
+            until = float(self._unified.get(broker_id, {}).get("retry_until", 0.0) or 0.0)
+        return max(0.0, until - time.monotonic()) if until > 0.0 else 0.0
+
+    @staticmethod
+    def _retry_hint_seconds(message: str) -> float:
+        """Honour the venue's own ``retry in Ns`` hint; floor at 5s."""
+        match = re.search(r"retry in\s*(\d+(?:\.\d+)?)\s*s", str(message or ""), re.I)
+        if match:
+            with contextlib.suppress(ValueError):
+                return max(5.0, float(match.group(1)))
+        return 5.0
+
+    def _arm_rate_limit(self, broker_id: str, message: str) -> float:
+        """Arm an escalating cooldown after a venue HTTP 429.
+
+        Consecutive rate-limited auth failures back off 5→10→20→40→60s so a
+        repeated CONNECT click cannot keep resetting the venue's quota window.
+        The streak resets on a verified session or an explicit retry clear.
+        """
+        with self._lock:
+            uni = self._unified.setdefault(broker_id, {})
+            failures = int(uni.get("rate_limit_failures", 0) or 0) + 1
+            uni["rate_limit_failures"] = failures
+        base = self._retry_hint_seconds(message)
+        delay = min(60.0, base * (2 ** min(failures - 1, 3)))
+        self._arm_retry(broker_id, delay)
+        return delay
+
     def _arm_retry(self, broker_id: str, delay_s: float) -> None:
         import time as _time
 
@@ -1804,6 +1874,7 @@ class BrokerManager:
             uni = self._unified.setdefault(broker_id, {})
             uni["retry_after_s"] = 0.0
             uni["retry_until"] = 0.0
+            uni["rate_limit_failures"] = 0
 
     def read_only_adapter(self, broker_id: str) -> Any | None:
         """A fresh adapter for READ-ONLY venue reads, or None if unavailable.
