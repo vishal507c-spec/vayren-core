@@ -104,6 +104,10 @@ def tree() -> Iterator[TreeEdit]:
     edit = TreeEdit()
     yield edit
     edit.restore()
+    try:
+        repo_index.ensure_fresh()
+    except (repo_index.IndexError, repo_index.IndexLockedError, Exception):
+        repo_index.refresh()
 
 
 @pytest.fixture()
