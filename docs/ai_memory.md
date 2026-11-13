@@ -1,5 +1,13 @@
 # AI Memory — Current State Only (compact, active path)
 
+**Latest update (ci-green-push-20261113):** Local changes pushed for CI green.
+- Fixed `vayren-system-view` null views under parallel tests: Slint platform context is thread-local, so `ensure_platform` now calls `slint::platform::set_platform` on every thread instead of a process-global atomic guard; pending-window consumption check still fails closed on a foreign platform. 3x stress with 8 threads passed.
+- Made `repo_index` publish robust on Windows by retrying atomic `os.replace` when the destination is briefly locked (fixes intermittent `PermissionError` on `docs/repo_graph.json` during `make check`).
+- Fixed idle snapshot hash churn in `LiveTradingService` by rounding `price_age_s` to whole seconds.
+- Healed test isolation: `test_validate_scope` tree fixture now refreshes the repo index after restore.
+- Full `make check` green: 1968 passed, 5 skipped; validators pass; `repo_graph` auto-rebuilt to 6654 entities.
+- Local commits `3a03e08` + system-view/index/test/perf fixes ready to push; EC2 sync not requested.
+
 **Latest update (fast-one-click-start-stop-20261110):** Permanent FAST one-click START/STOP architecture implemented locally —
 - **P0 command protocol/ack/progress/preemption:** `SERVER_MESSAGE_TYPES` + `ClientEvent` gained `command_accepted`/`command_progress`; gateway `_dispatch_lifecycle` sends immediate ack + progress frames on a worker; STOP sets `_start_cancel` before worker start; result carries `command_id` and omits snapshot. Service `start(confirmed, progress_cb, cancel_event)` with `_lifecycle_gen`, `_state_lock`, progress phases (validating/probing/history/sessions/arming/…). STOP bumps gen, disarms all sessions BEFORE `_timer.stop(timeout=1.0)`, then single `_teardown_sessions()`. `IntervalTimer` uses a fresh stop Event per run. `_dispatch_lock` guards dispatch; disarm-first. Snapshot cache 250ms coalescing + invalidation on `apply_command`; `lifecycle_progress` forwarded in snapshots.
 - **P1 backend optimization:** `start()` no longer calls `_verify_live_session_fresh`; `_build_sessions()` no longer per-symbol `reconcile_now()`; `resolve_broker(connect=False)` in session start. `_teardown_sessions()` swaps sessions/fanouts under lock, stops each once.
