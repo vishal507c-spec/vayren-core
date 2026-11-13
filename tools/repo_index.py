@@ -96,11 +96,31 @@ def _read_json(path: Path) -> dict | list | None:
     return data if isinstance(data, (dict, list)) else None
 
 
+def _atomic_replace(src: Path, dst: Path, attempts: int = 80, delay: float = 0.025) -> None:
+    """Replace `dst` with `src` atomically, tolerating Windows file locks.
+
+    On Windows `os.replace` can fail with PermissionError when an antivirus,
+    indexer, or another reader briefly holds the destination. The replacement
+    is retried rather than failing the whole refresh; the previous valid index
+    is only replaced once this succeeds.
+    """
+    last: BaseException | None = None
+    for _ in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except (PermissionError, OSError) as exc:
+            last = exc
+            time.sleep(delay)
+    if last is not None:
+        raise last
+
+
 def _write_json_atomic(path: Path, payload: dict | list) -> None:
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
     tmp.write_text(text, encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
+    _atomic_replace(tmp, path)
 
 
 def _manifest_paths(modules: list[str]) -> list[str]:
@@ -369,7 +389,7 @@ def _save_lookup(payload: dict) -> None:
     tmp = LOOKUP_FILE.with_name(f"{LOOKUP_FILE.name}.tmp-{os.getpid()}")
     with open(tmp, "wb") as handle:
         pickle.dump(payload, handle, protocol=PICKLE_PROTOCOL)
-    os.replace(tmp, LOOKUP_FILE)
+    _atomic_replace(tmp, LOOKUP_FILE)
 
 
 def _load_lookup() -> dict | None:
@@ -422,9 +442,9 @@ def _publish(graph: dict, manifest: dict, filemeta: dict, mode: str) -> dict:
         "status": "READY",
     }
     state["fingerprint"] = _state_fingerprint(state)
-    os.replace(graph_tmp, repo_graph.GRAPH_PATH)
-    os.replace(manifest_tmp, MANIFEST_FILE)
-    os.replace(filemeta_tmp, FILEMETA_FILE)
+    _atomic_replace(graph_tmp, repo_graph.GRAPH_PATH)
+    _atomic_replace(manifest_tmp, MANIFEST_FILE)
+    _atomic_replace(filemeta_tmp, FILEMETA_FILE)
     _write_json_atomic(STATE_FILE, state)
     # Post-publish verification: state attests exactly what is on disk.
     reread = _read_json(STATE_FILE)
