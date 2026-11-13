@@ -58979,7 +58979,7 @@
       "file": "crates/vayren-shell/src/python_bridge.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 644,
+      "line": 667,
       "module": "crates/vayren-shell",
       "name": "tests",
       "public": false,
