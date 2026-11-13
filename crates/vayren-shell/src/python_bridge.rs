@@ -289,9 +289,32 @@ impl PythonBackend {
             "execution",
             "broker",
         ];
+        // Dev/test fallback: when the binary has been relocated away from the
+        // source tree (some CI runners), resolve the chapters from the crate's
+        // compile-time manifest directory instead. This is never used by a
+        // shipped release binary (debug_assertions only).
+        #[cfg(debug_assertions)]
+        if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
+            let manifest_dir = std::path::PathBuf::from(manifest_dir);
+            for candidate in [manifest_dir.clone(), manifest_dir.join("../..")] {
+                let repo_root = candidate;
+                if repo_root.join("src").join("app").is_dir() {
+                    let src_dir = repo_root.join("src");
+                    let mut paths: Vec<std::path::PathBuf> = vec![src_dir.clone()];
+                    paths.extend(CHAPTERS.iter().map(|c| src_dir.join(c)));
+                    if let Some(existing) = std::env::var_os("PYTHONPATH") {
+                        paths.extend(std::env::split_paths(&existing));
+                    }
+                    if let Ok(joined) = std::env::join_paths(paths) {
+                        return Some(joined);
+                    }
+                }
+            }
+        }
+
         let mut dir = std::env::current_exe().ok()?;
         dir.pop();
-        for _ in 0..6 {
+        for _ in 0..12 {
             if dir.join("src").join("app").is_dir() {
                 let src_dir = dir.join("src");
                 let mut paths: Vec<std::path::PathBuf> = vec![src_dir.clone()];
