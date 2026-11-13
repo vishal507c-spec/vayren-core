@@ -81,23 +81,14 @@ impl Platform for EmbedPlatform {
     }
 }
 
-static PLATFORM_OWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 fn ensure_platform() -> Result<(), i32> {
-    use std::sync::atomic::Ordering;
-    if PLATFORM_OWNED.load(Ordering::Relaxed) {
-        return Ok(());
-    }
-    match slint::platform::set_platform(Box::new(EmbedPlatform)) {
-        Ok(()) => {
-            PLATFORM_OWNED.store(true, Ordering::Relaxed);
-            Ok(())
-        }
-        // Another platform already owns the process: `SystemHostWindow::new()`
-        // would bind to THAT platform and never consume our pending window
-        // (the view would render to the wrong window). Fail closed.
-        Err(_) => Err(-7),
-    }
+    // Slint keeps its platform context thread-local. Every thread that creates
+    // a view must install the embed platform for itself; a repeated call on the
+    // same thread returns `AlreadySet`, which is fine. A FOREIGN platform is
+    // still caught fail-closed by the pending-window consumption check in
+    // `create` (it never calls our adapter, so the slot stays populated).
+    let _ = slint::platform::set_platform(Box::new(EmbedPlatform));
+    Ok(())
 }
 
 /// One embedded System view: Slint component + view-model + pixels.
