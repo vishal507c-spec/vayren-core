@@ -3723,7 +3723,9 @@ class LiveTradingService:
                     last_update = raw_time[11:19]
                 else:
                     last_update = raw_time
-                price_age_s = round(mark_age_s, 1) if mark_age_s is not None else None
+                # Round to whole seconds so an idle snapshot taken moments later
+                # does not churn its hash on sub-second age drift.
+                price_age_s = round(mark_age_s) if mark_age_s is not None else None
                 if is_live:
                     price_source = "live_feed"
                     stale = False
