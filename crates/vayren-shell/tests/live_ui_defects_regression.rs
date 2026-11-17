@@ -9,11 +9,16 @@
 //! 8. Blotter tab comment indexing and footer status strip
 
 #[test]
-fn test_live_confirmation_banner_checks_mode_1() {
+fn test_arm_ui_removed_and_mode_2_legacy_eliminated() {
     let src = include_str!("../ui/live.slint");
+    // START is the single LIVE authorization: no ARM toggle/banner remains.
     assert!(
-        src.contains("root.bar.mode == 1"),
-        "LIVE confirmation banner must check mode 1 (ExecMode::Live)"
+        !src.contains("arm-toggle-requested"),
+        "ARM toggle callback must be removed from the UI"
+    );
+    assert!(
+        !src.contains("LIVE ARMED") && !src.contains("ARM LIVE") && !src.contains("NOT ARMED"),
+        "No ARM label or banner may remain on screen"
     );
     assert!(
         !src.contains("root.bar.mode == 2"),

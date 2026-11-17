@@ -833,7 +833,6 @@ export component LiveScreen inherits Rectangle {
     callback quantity-edited(string);
     callback start-requested();
     callback stop-requested();
-    callback arm-toggle-requested();
     callback event-filter-changed(string);
     callback event-type-picked(string);
     callback clear-events();
@@ -923,42 +922,6 @@ export component LiveScreen inherits Rectangle {
                     // prints: an action note carries its own tone, a blocker
                     // banner carries the blocker severity.
                     tone: root.bar.note != "" ? root.bar.note-tone : root.start-reason-tone;
-                }
-            }
-        }
-
-        // ══ 0c. PERSISTENT LIVE ARMED STATE (authorization, not a modal) ════
-        // The operator arms ONCE with the LIVE ARMED toggle; START then
-        // executes on a single click. STOP always disarms, so the next START
-        // needs a fresh ARM. Nothing here starts execution by itself.
-        if root.bar.mode == 1 && !root.setup.confirmed-live: Rectangle {
-            height: 24px;
-            background: VayrenPalette.bg;
-            VerticalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                alignment: center;
-                VBanner {
-                    height: 20px;
-                    width: 100%;
-                    message: "LIVE is NOT ARMED — no order can be dispatched. Toggle LIVE ARMED to authorize.";
-                    tone: 2;
-                }
-            }
-        }
-
-        if root.setup.confirmed-live && root.bar.mode == 1: Rectangle {
-            height: 24px;
-            background: VayrenPalette.bg;
-            VerticalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                alignment: center;
-                VBanner {
-                    height: 20px;
-                    width: 100%;
-                    message: "✓ LIVE ARMED — START executes immediately. STOP disarms.";
-                    tone: 1;
                 }
             }
         }
@@ -1158,24 +1121,13 @@ export component LiveScreen inherits Rectangle {
                 }
 
                 // ── Group 3: Execution Controls & Clock ──
-                // Persistent LIVE ARMED authorization: arm once, then every
-                // START is one click. STOP disarms automatically.
-                VButton {
-                    width: 120px;
-                    height: 34px;
-                    label: root.setup.confirmed-live ? "🔒 LIVE ARMED" : "🔓 ARM LIVE";
-                    variant: root.setup.confirmed-live ? 1 : 2;
-                    enabled: root.bar.mode == 1 && !root.setup.pending-stop;
-                    clicked => { root.arm-toggle-requested(); }
-                }
-
                 VButton {
                     width: 104px;
                     height: 34px;
                     label: root.setup.pending-start ? "⏳ STARTING…" : (root.bar.note != "" && root.bar.note-tone == 3 ? "⛔ BLOCKED" : "▶ START");
                     busy: root.setup.pending-start;
                     variant: root.bar.note != "" && root.bar.note-tone == 3 ? 3 : 0;
-                    enabled: root.setup.start-clickable && (root.bar.mode != 1 || root.setup.confirmed-live);
+                    enabled: root.setup.start-clickable;
                     clicked => { root.start-requested(); }
                 }
 
@@ -1342,21 +1294,12 @@ export component LiveScreen inherits Rectangle {
                     Rectangle { horizontal-stretch: 1; background: transparent; }
 
                     VButton {
-                        width: 120px;
-                        height: 34px;
-                        label: root.setup.confirmed-live ? "🔒 LIVE ARMED" : "🔓 ARM LIVE";
-                        variant: root.setup.confirmed-live ? 1 : 2;
-                        enabled: root.bar.mode == 1 && !root.setup.pending-stop;
-                        clicked => { root.arm-toggle-requested(); }
-                    }
-
-                    VButton {
                         width: 104px;
                         height: 34px;
                         label: root.setup.pending-start ? "⏳ STARTING…" : (root.bar.note != "" && root.bar.note-tone == 3 ? "⛔ BLOCKED" : "▶ START");
                         busy: root.setup.pending-start;
                         variant: root.bar.note != "" && root.bar.note-tone == 3 ? 3 : 0;
-                        enabled: root.setup.start-clickable && (root.bar.mode != 1 || root.setup.confirmed-live);
+                        enabled: root.setup.start-clickable;
                         clicked => { root.start-requested(); }
                     }
 

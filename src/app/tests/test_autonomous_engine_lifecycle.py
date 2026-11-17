@@ -298,10 +298,18 @@ def test_11_application_restart_safe_recovery(tmp_path: Path) -> None:
         mode="LIVE",
     )
 
-    # Fresh restart
+    # Successful START, then fresh restart: consent and ARM never survive it.
+    with (
+        patch.object(svc1, "validate", return_value=()),
+        patch.object(svc1, "_build_sessions", return_value=None),
+    ):
+        ok, reasons = svc1.start(confirmed=True)
+    assert ok, reasons
+    assert svc1.is_live_confirmed() is True
     svc2 = LiveTradingService(data_dir=data_dir, strategy_dir=strat_dir)
     assert svc2.status == "STOPPED"
     assert svc2.is_live_confirmed() is False  # Never carry unconfirmed consent across restarts
+    assert svc2.armed is False
 
 
 # 12. Duplicate signal deduplication

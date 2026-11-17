@@ -768,6 +768,9 @@ def test_healthy_path_submits_exactly_one_order_per_signal() -> None:
     # And every planned order must be risk-approved.
     approved = session.journal.of_kind("RISK_APPROVED")
     assert len(approved) >= len(submitted), "Submitted orders must all be risk-approved"
+    assert not session.journal.of_kind("ORDER_BLOCKED_UNARMED"), (
+        "An armed paper session must never be blocked by the UNARMED gate"
+    )
 
 
 # ── Safety Snapshot visibility (§9) ───────────────────────────────────────

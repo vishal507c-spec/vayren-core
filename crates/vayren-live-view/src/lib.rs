@@ -500,25 +500,6 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
     wire_unit!(on_refresh_stocks, LiveState::refresh_universe);
     wire_unit!(on_start_requested, LiveState::start);
     wire_unit!(on_stop_requested, LiveState::stop);
-    {
-        let strong = state.clone();
-        let handle = ui.as_weak();
-        let refresh_flag = refresh.clone();
-        ui.on_arm_toggle_requested(move || {
-            {
-                let mut live = strong.borrow_mut();
-                if live.live_confirmed {
-                    live.disarm_live();
-                } else {
-                    live.confirm_live();
-                }
-            }
-            refresh_flag.set(true);
-            if let Some(ui) = handle.upgrade() {
-                apply_view(&ui, &strong.borrow());
-            }
-        });
-    }
     wire_unit!(on_inspector_toggled, LiveState::toggle_inspector);
     wire_unit!(on_broker_capital_refresh, LiveState::refresh_broker_capital);
     {

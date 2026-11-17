@@ -209,6 +209,29 @@ def test_stop_clears_recorded_consent(dirs: tuple[str, str]) -> None:
     assert service._confirmed_live_at == ""
 
 
+def test_successful_start_keeps_consent_and_never_disarms(dirs: tuple[str, str]) -> None:
+    """START is the single LIVE authorization: nothing may disarm after it.
+
+    Regression for b90a68df: headless used to call clear_live_confirmation()
+    right after a successful start, which disarmed every live session ~10 s
+    later and silently blocked all dispatch until operator re-arm.
+    """
+    service = _service(dirs)
+    service.configure(mode="LIVE")
+    service._confirmed_live_at = "2026-11-17T02:20:46+00:00"
+    service.armed = True
+    with (
+        patch.object(service, "validate", return_value=()),
+        patch.object(service, "_build_sessions", return_value=None),
+        patch.object(service, "start", return_value=(True, ())) as start_mock,
+        patch.object(service, "clear_live_confirmation") as clear_mock,
+    ):
+        headless._live_action(dirs[0], dirs[1], {"action": "start", "confirmed": True})
+    start_mock.assert_called_once()
+    clear_mock.assert_not_called()
+    assert service.is_live_confirmed() is True
+
+
 def test_start_records_timing_and_stop_freezes_runtime(dirs: tuple[str, str]) -> None:
     service = _service(dirs)
     with (

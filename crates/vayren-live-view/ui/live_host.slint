@@ -77,7 +77,6 @@ export component LiveHostWindow inherits Window {
     callback quantity-edited(string);
     callback start-requested();
     callback stop-requested();
-    callback arm-toggle-requested();
     callback event-filter-changed(string);
     callback event-type-picked(string);
     callback clear-events();
@@ -144,7 +143,6 @@ export component LiveHostWindow inherits Window {
         quantity-edited(t) => { root.quantity-edited(t); }
         start-requested() => { root.start-requested(); }
         stop-requested() => { root.stop-requested(); }
-        arm-toggle-requested() => { root.arm-toggle-requested(); }
         event-filter-changed(t) => { root.event-filter-changed(t); }
         event-type-picked(v) => { root.event-type-picked(v); }
         clear-events() => { root.clear-events(); }

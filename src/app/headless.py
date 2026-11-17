@@ -716,8 +716,10 @@ def _live_action(
                 cancel_event=_cancel_event,
             )
             if ok:
-                if hasattr(service, "clear_live_confirmation"):
-                    service.clear_live_confirmation()
+                # START itself is the single LIVE authorization: keep consent
+                # and every session ARMED until STOP. clear_live_confirmation()
+                # also disarms sessions, so calling it here silently killed
+                # dispatch seconds after a successful START (b90a68df).
                 _LIVE_ACTION_ERRORS.pop("start", None)
                 if getattr(service, "status", "") == "STARTING":
                     note = "strategy start in progress"

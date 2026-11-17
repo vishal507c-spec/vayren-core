@@ -1645,10 +1645,9 @@ impl LiveState {
             // a second request — the backend must never see two starts.
             return;
         }
-        // Mandatory LIVE authorization gate: never auto-arm LIVE on start.
-        // The persistent LIVE ARMED toggle is the consent control; an
-        // unarmed START refuses with an exact reason instead of opening a
-        // modal (one click when armed, zero hidden steps).
+        // START is the single LIVE authorization click — no separate ARM step.
+        // Venue safety gates still refuse an unready venue; once ready we arm
+        // (host mode queues confirm_live) and START carries confirmed=true.
         if self.mode == ExecMode::Live && !self.live_confirmed {
             if !self.venue_gates_ready() {
                 let unready = self.venue_unready_blockers();
@@ -1670,9 +1669,7 @@ impl LiveState {
                 self.action_note = Some(note);
                 return;
             }
-            self.action_note =
-                Some("START BLOCKED: LIVE not armed — enable LIVE ARMED first".into());
-            return;
+            self.confirm_live();
         }
         // Start safety check: consult can_start() and backend blockers
         if !self.can_start() {
@@ -6744,7 +6741,7 @@ mod tests {
     }
 
     #[test]
-    fn host_mode_live_start_refuses_unarmed_and_dispatches_when_armed() {
+    fn host_mode_live_start_self_arms_and_dispatches() {
         let mut st = configured(LiveState::default());
         st.apply_snapshot(&serde_json::json!({
             "mode": "LIVE",
@@ -6760,32 +6757,19 @@ mod tests {
         assert!(view.setup.needs_live_confirm);
         assert!(!view.setup.confirmed_live);
 
-        // Unarmed START refuses with the exact reason: no modal, no dispatch.
+        // Unarmed START is the single authorization click: it arms first,
+        // then dispatches a confirmed start. No separate ARM step is needed.
         st.start();
-        assert!(!st.live_confirmed);
-        assert_eq!(st.session, SessionStatus::Stopped);
-        assert!(st.take_action().is_none());
-        assert_eq!(
-            st.action_note.as_deref(),
-            Some("START BLOCKED: LIVE not armed — enable LIVE ARMED first")
-        );
-
-        // ARM is the separate, explicit consent step; it never starts a run.
-        st.confirm_live();
         assert!(st.live_confirmed);
-        assert_eq!(st.session, SessionStatus::Stopped);
+        assert_eq!(st.session, SessionStatus::Starting);
         let arm: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(arm["action"], "confirm_live");
-        let armed_view = project(&st);
-        assert!(!armed_view.setup.needs_live_confirm);
-        assert!(armed_view.setup.confirmed_live);
-
-        // Armed START is one click and dispatches the confirmed start.
-        st.start();
-        assert_eq!(st.session, SessionStatus::Starting);
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["action"], "start");
         assert_eq!(action["confirmed"], true);
+        let armed_view = project(&st);
+        assert!(!armed_view.setup.needs_live_confirm);
+        assert!(armed_view.setup.confirmed_live);
     }
 
     // ── START control: the button must be usable, must reach the backend, and
@@ -7986,22 +7970,13 @@ mod tests {
         assert_eq!(st.mode, ExecMode::Live);
         assert!(!st.live_confirmed);
 
-        // Unarmed START refuses without a modal and without dispatching.
+        // Unarmed START self-authorizes: confirm_live then start(confirmed=true).
         st.start();
-        assert!(!st.live_confirmed);
-        assert!(st.take_action().is_none());
-
-        // ARM alone never starts execution; it persists operator consent.
-        st.confirm_live();
         assert!(st.live_confirmed);
-        assert_eq!(st.session, SessionStatus::Stopped);
+        assert_eq!(st.session, SessionStatus::Starting);
         let arm = st.take_action();
         assert!(arm.is_some());
         assert!(arm.unwrap().contains("confirm_live"));
-
-        // Armed START is a single click.
-        st.start();
-        assert_eq!(st.session, SessionStatus::Starting);
         let action = st.take_action();
         assert!(action.is_some());
         let val: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();
@@ -8135,22 +8110,15 @@ mod tests {
         st.live_confirmed = false;
         st.gates = all_ready_gates();
 
-        // Unarmed START refuses (no modal, no dispatch).
+        // Unarmed START self-authorizes: consent is queued before the start.
         st.start();
-        assert!(!st.live_confirmed);
-        assert!(st.take_action().is_none());
-
-        // ARM persists consent, then START dispatches in one click.
-        st.confirm_live();
         assert!(st.live_confirmed);
-        assert_eq!(st.session, SessionStatus::Stopped);
+        assert_eq!(st.session, SessionStatus::Starting);
         let arm = st.take_action();
         assert!(arm.is_some());
         let arm_val: serde_json::Value = serde_json::from_str(&arm.unwrap()).unwrap();
         assert_eq!(arm_val["action"], "confirm_live");
 
-        st.start();
-        assert_eq!(st.session, SessionStatus::Starting);
         let action = st.take_action();
         assert!(action.is_some());
         let val: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();

@@ -3890,26 +3890,6 @@ where
     }
     wire_unit!(on_live_start_requested, LiveState::start);
     wire_unit!(on_live_stop_requested, LiveState::stop);
-    {
-        // Persistent LIVE ARMED toggle: one control, two intents. Arming is
-        // explicit operator consent; disarming immediately blocks new order
-        // dispatch (sessions are disarmed) without cancelling working orders.
-        let strong = state.clone();
-        let handle = ui.as_weak();
-        let cb = on_action.clone();
-        ui.on_live_arm_toggle_requested(move || {
-            {
-                let mut live = strong.borrow_mut();
-                if live.live_confirmed {
-                    live.disarm_live();
-                } else {
-                    live.confirm_live();
-                }
-                (cb.borrow_mut())(&mut live);
-            }
-            refresh_live(&handle, &strong);
-        });
-    }
     wire_unit!(on_live_inspector_toggled, LiveState::toggle_inspector);
     {
         // CLEAR EVENTS is UI-hygiene only: it drops the rendered event
