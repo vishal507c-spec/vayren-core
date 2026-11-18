@@ -22,9 +22,11 @@
 // ── vocabularies (backend-authoritative strings) ───────────────────────────
 
 /// How long a dispatched control action may stay pending before the model
-/// clears it. Generous enough for a broker round-trip, short enough that a
-/// dropped answer does not leave the operator staring at `STARTING…`.
-pub const PENDING_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
+/// clears it. Generous enough for a broker round-trip + venue re-auth + socket
+/// setup (each `command_progress` also resets this window — see
+/// `touch_pending`), short enough that a truly dropped answer does not leave
+/// the operator staring at `STARTING…` forever.
+pub const PENDING_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Note shown when a control is pressed with no execution backend attached.
 /// Named once so the UI, the arm panel and the tests agree on the wording.
@@ -1722,6 +1724,16 @@ impl LiveState {
         self.pending_since = Some(std::time::Instant::now());
     }
 
+    /// Restart the pending-action timeout window while the backend is still
+    /// answering with progress (broker auth, socket setup, per-session build).
+    /// The timeout must only fire when the gateway goes genuinely silent — a
+    /// slow START must never be reported as "backend did not answer".
+    pub fn touch_pending(&mut self) {
+        if self.pending_action.is_some() {
+            self.pending_since = Some(std::time::Instant::now());
+        }
+    }
+
     /// Drop a pending action whose backend never answered. Returns `true` when
     /// something was actually cleared, so the host can repaint.
     ///
@@ -1739,7 +1751,7 @@ impl LiveState {
             if self.session == SessionStatus::Starting {
                 self.session = SessionStatus::Error;
                 self.action_note = Some(
-                    "START timed out after 25s — backend did not answer (check connection / gateway)".into(),
+                    "START timed out — backend did not answer (check connection / gateway)".into(),
                 );
             } else if self.session == SessionStatus::Stopping {
                 self.session = SessionStatus::Error;
@@ -6896,6 +6908,26 @@ mod tests {
             st.action_note.is_some(),
             "the cleared request must say what happened"
         );
+    }
+
+    #[test]
+    fn progress_frames_reset_the_pending_timeout() {
+        let mut st = start_ready_state();
+        st.start();
+        assert_eq!(st.pending_action.as_deref(), Some("start"));
+        // Simulate a START that is slow (broker auth + socket setup): the
+        // window elapses once, but a progress frame keeps it alive.
+        st.pending_since = Some(std::time::Instant::now() - PENDING_ACTION_TIMEOUT);
+        st.touch_pending(); // a command_progress frame arrives
+        assert!(
+            !st.expire_pending_action(),
+            "a progress frame must reset the window"
+        );
+        assert_eq!(st.pending_action.as_deref(), Some("start"));
+        assert_eq!(st.session, SessionStatus::Starting);
+        // Once the gateway goes genuinely silent, the timeout still fires.
+        st.pending_since = Some(std::time::Instant::now() - PENDING_ACTION_TIMEOUT);
+        assert!(st.expire_pending_action());
     }
 
     #[test]

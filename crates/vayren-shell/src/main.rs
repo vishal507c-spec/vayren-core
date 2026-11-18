@@ -2729,6 +2729,10 @@ fn apply_lifecycle_progress(
         .to_string();
     state.lifecycle_done = payload.get("done").and_then(|d| d.as_i64()).unwrap_or(0);
     state.lifecycle_total = payload.get("total").and_then(|d| d.as_i64()).unwrap_or(0);
+    // The gateway is actively answering (broker auth / socket setup / session
+    // build). Keep the pending-action timeout at bay so a slow START is never
+    // mislabelled "backend did not answer" while progress is still arriving.
+    state.touch_pending();
     match action {
         "start" => state.session = live::SessionStatus::Starting,
         "stop" => state.session = live::SessionStatus::Stopping,

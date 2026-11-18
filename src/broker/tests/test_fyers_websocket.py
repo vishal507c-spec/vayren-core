@@ -1286,31 +1286,33 @@ def test_safe_close_order_ws_does_not_suppress_unrelated_attribute_error() -> No
 
 
 def test_order_ws_flap_threshold_tuned_to_production_cycle() -> None:
-    """Production investigation showed competing reconnect loops last 40-65s.
+    """A connection longer than ORDER_WS_STABLE_SECONDS is stable and resets
+    the flap counter; shorter ones count as flaps.
 
-    ORDER_WS_STABLE_SECONDS is 120s so connections lasting 40s or 65s do NOT
-    prematurely reset the flap counter, while true 120s+ connections do.
+    The threshold was reduced 120s -> 60s (with FLAP_LIMIT 3 -> 5 and a 300s
+    cooldown) so a venue that repeatedly drops the socket is detected sooner
+    without lingering in a degraded state for 15 minutes.
     """
     adapter, _created = _vendor_adapter(None)
     adapter.connect()
-    assert ORDER_WS_STABLE_SECONDS == 120.0
+    assert ORDER_WS_STABLE_SECONDS == 60.0
 
-    # 1. Connection lasting 65s (typical production knock-off time) does NOT reset flaps
-    adapter._order_ws_connected_at = time.monotonic() - 65.0
+    # 1. Connection lasting 45s does NOT reset flaps
+    adapter._order_ws_connected_at = time.monotonic() - 45.0
     adapter._on_ws_close({"code": 1006})
-    assert adapter._order_ws_flaps == 1, "65s connection must not reset flap count"
+    assert adapter._order_ws_flaps == 1, "45s connection must not reset flap count"
 
-    # 2. Connection lasting 40s (typical production medium time) does NOT reset flaps
+    # 2. Connection lasting 30s does NOT reset flaps
     adapter._on_ws_connect()
-    adapter._order_ws_connected_at = time.monotonic() - 40.0
+    adapter._order_ws_connected_at = time.monotonic() - 30.0
     adapter._on_ws_close({"code": 1006})
-    assert adapter._order_ws_flaps == 2, "40s connection must not reset flap count"
+    assert adapter._order_ws_flaps == 2, "30s connection must not reset flap count"
 
-    # 3. Connection lasting 121s (stable) DOES reset flaps
+    # 3. Connection lasting 61s (stable) DOES reset flaps
     adapter._on_ws_connect()
-    adapter._order_ws_connected_at = time.monotonic() - 121.0
+    adapter._order_ws_connected_at = time.monotonic() - 61.0
     adapter._on_ws_close({"code": 1006})
-    assert adapter._order_ws_flaps == 0, "121s connection is stable and resets flap count"
+    assert adapter._order_ws_flaps == 0, "61s connection is stable and resets flap count"
     adapter.disconnect()
 
 

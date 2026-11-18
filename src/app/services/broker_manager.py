@@ -800,12 +800,27 @@ class BrokerManager:
             row = uni.setdefault("legs", {}).setdefault("order_ws", {})
             changed = str(row.get("status", "")) != new_status
         if changed:
+            old_status = str(row.get("status", ""))
+            new_status = "READY" if ws_ok else "FAILED"
+            # Structured state-change log (observability): every leg transition
+            # carries timestamp + old/new state + reason, with no token leakage.
+            _LOGGER.info(
+                "ORDER_WS_STATE_CHANGE broker=%s old=%s new=%s reason=%s",
+                broker_id,
+                old_status,
+                new_status,
+                redact(ws_reason)[:200],
+            )
+            # Passive snapshot health reads must NOT inflate the failure
+            # counter — only real connect/verify failures do (count_failure=True
+            # default at those call sites).
             self._set_leg(
                 broker_id,
                 "order_ws",
-                "READY" if ws_ok else "FAILED",
+                new_status,
                 "" if ws_ok else ws_reason,
                 success=ws_ok,
+                count_failure=False,
             )
         return "" if ws_ok else ws_reason
 
@@ -1780,7 +1795,14 @@ class BrokerManager:
             return str(self._desired.get(broker_id, "DISCONNECTED"))
 
     def _set_leg(
-        self, broker_id: str, leg: str, status: str, error: str = "", *, success: bool = False
+        self,
+        broker_id: str,
+        leg: str,
+        status: str,
+        error: str = "",
+        *,
+        success: bool = False,
+        count_failure: bool = True,
     ) -> None:
         with self._lock:
             uni = self._unified.setdefault(broker_id, {})
@@ -1802,10 +1824,17 @@ class BrokerManager:
                     row["last_error"] = ""
             elif error:
                 row["last_error"] = redact(str(error))[:300]
-                try:
-                    row["consecutive_failures"] = int(row.get("consecutive_failures", 0) or 0) + 1
-                except (TypeError, ValueError):
-                    row["consecutive_failures"] = 1
+                # Only count REAL verification/connect failures — never a
+                # passive snapshot health read. The old code incremented on
+                # every polling read whose reason string changed, producing a
+                # bogus 1,87,935 "failures" artifact while nothing retried.
+                if count_failure:
+                    try:
+                        row["consecutive_failures"] = (
+                            int(row.get("consecutive_failures", 0) or 0) + 1
+                        )
+                    except (TypeError, ValueError):
+                        row["consecutive_failures"] = 1
 
     def _touch_verified(self, broker_id: str) -> None:
         with self._lock:

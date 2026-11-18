@@ -192,13 +192,14 @@ _ORDER_INTENT_MEMORY_LIMIT = 2000
 ORDER_WS_SUBSCRIPTION = "OnOrders,OnTrades"
 
 #: A connection shorter than this never carried an order update.
-ORDER_WS_STABLE_SECONDS = 120.0
+ORDER_WS_STABLE_SECONDS = 60.0
 #: Consecutive short-lived connections before the socket is abandoned.
-ORDER_WS_FLAP_LIMIT = 3
+ORDER_WS_FLAP_LIMIT = 5
 #: After abandoning the socket, wait this long before a cold start again.
 #: Without it, health() would immediately recreate the socket and the cycle
-#: would simply repeat at a slower cadence.
-ORDER_WS_COOLDOWN_SECONDS = 900.0
+#: would simply repeat at a slower cadence. Reduced from 900s to 300s so a
+#: transient venue hiccup does not leave the leg degraded for 15 minutes.
+ORDER_WS_COOLDOWN_SECONDS = 300.0
 #: A stream that WAS delivering updates and then goes quiet this long is
 #: stale. A socket that never delivered (no orders in flight) is not stale —
 #: that is a different, honest state.
