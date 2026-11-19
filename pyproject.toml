@@ -34,7 +34,7 @@ ui = [
 # ── Data Domain Extras (historical downloader) ─────────────────
 data = [
     "kiteconnect>=4.1",
-    "pyotp>=2.9",
+    "pyotp>=2.9,<2.10",
     "selenium>=4.0",
     "chromedriver-autoinstaller>=0.4",
 ]
