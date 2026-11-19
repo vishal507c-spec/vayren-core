@@ -362,11 +362,22 @@ def test_execute_op_deploy_requires_confirm(tmp_path):
     assert "requires confirmed=True" in res["error"]
 
 
-def test_execute_op_check_code(tmp_path):
+def test_execute_op_check_code(tmp_path, monkeypatch):
     d = tmp_path / "data"
     d.mkdir()
     s = tmp_path / "strategies"
     s.mkdir()
+
+    # The dispatcher test owns only the ok/shape contract. Keep the three SHA
+    # reads hermetic: a CI runner may have no git remote / no EC2 checkout,
+    # which makes the real reads environment-dependent even though the
+    # dispatcher itself is fine.
+    from remote import server_code_status as scs
+
+    sha = "a" * 40
+    monkeypatch.setattr(scs, "fetch_github_origin_sha", lambda _repo: sha)
+    monkeypatch.setattr(scs, "_read_head_commit_sha", lambda _repo: sha)
+    monkeypatch.setattr(scs, "get_running_sha", lambda _repo=None: sha)
 
     res = execute_server_op(
         op_name="check_code",
