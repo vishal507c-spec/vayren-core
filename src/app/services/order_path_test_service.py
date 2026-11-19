@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from broker.order_tag import to_broker_tag
 from broker.vocab import BrokerError, ErrorCode
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,8 @@ def _order_by_tag(adapter: Any, tag: str) -> dict[str, Any]:
         # Normalized venue rows carry ``client_order_id``; raw venue rows
         # carry ``orderTag``. FYERS prefixes a user tag with "1:".
         venue_tag = str(row.get("client_order_id") or row.get("orderTag", "") or "")
-        if venue_tag.removeprefix("1:") == tag.removeprefix("1:"):
+        # Also accept the venue-safe hash tag sent since the orderTag fix.
+        if venue_tag.removeprefix("1:") in (tag.removeprefix("1:"), to_broker_tag(tag)):
             return row
     return {}
 

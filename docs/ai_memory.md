@@ -1,5 +1,10 @@
 # AI Memory — Current State Only (compact, active path)
 
+**Latest update (fyers-ordertag-hash-fix-20261118):** LOCAL ONLY — venue-safe FYERS `orderTag`.
+- Root cause 18 Nov: IFCI order rejected `orderTag: Only alphanumeric characters allowed (HTTP 400)` — internal `client_order_id` (`obr-c1c4:1.0:4:1:o1`) was sent verbatim to FYERS.
+- Fix: new `src/broker/order_tag.py` (`to_broker_tag` = `OBR` + sha256[:16] = 19 chars, regex `^[A-Za-z0-9]{1,30}$` validated; persisted tag↔id map + deterministic-hash reverse fallback). FYERS adapter validates before submit (clear `BrokerError` → journal `ORDER_REJECTED`), sends hashed tag, decodes via map/fallback at WS order, WS trade and order-book paths. `order_path_test_service` accepts the hash tag. Internal ids, Zerodha, sizing/risk/arming untouched.
+- Verified: 6 new tests + broker suite + order-path + paper e2e green; ruff/format/pyright clean; `validate_authority.py` PASS after naming the tag-map singleton `_TAG_MAP_STORE` (avoids the reserved `*_REGISTRY` shadow-map shape). Committed/pushed/deployed 19 Nov 2026 after full pytest green. The earlier START-path disarm fix was already in `18c4136` (17 Nov) — no new change needed there.
+
 **Latest update (ci-green-push-20261113):** Local changes pushed for CI green.
 - Fixed `vayren-system-view` null views under parallel tests: Slint platform context is thread-local, so `ensure_platform` now calls `slint::platform::set_platform` on every thread instead of a process-global atomic guard; pending-window consumption check still fails closed on a foreign platform. 3x stress with 8 threads passed.
 - Made `repo_index` publish robust on Windows by retrying atomic `os.replace` when the destination is briefly locked (fixes intermittent `PermissionError` on `docs/repo_graph.json` during `make check`).

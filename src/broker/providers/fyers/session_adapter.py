@@ -15,7 +15,7 @@ import re
 import threading
 import time
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -23,6 +23,7 @@ from typing import Any
 
 from broker.capabilities import CapabilitySet, Caps, Domain, capability_set
 from broker.common.api_governance import APIGovernor, BrokerGateway, CallClass, CircuitOpenError
+from broker.order_tag import from_broker_tag, tag_registry, to_broker_tag
 from broker.providers.fyers.live_auth import (
     API_BASE,
     MARKET_DATA_BASE,
@@ -119,13 +120,14 @@ _TERMINAL_STATUS_NAMES = frozenset(_ORDER_STATUS_BY_CODE[code] for code in _TERM
 _VENUE_TAG_PREFIXES = ("1:", "2:")
 
 
-def _client_order_id(venue_tag: Any) -> str:
-    """Our client order id behind a venue order tag (``1:tag`` -> ``tag``)."""
-    text = str(venue_tag or "")
-    for prefix in _VENUE_TAG_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix) :]
-    return text
+def _client_order_id(venue_tag: Any, candidates: Iterable[str] = ()) -> str:
+    """Our client order id behind a venue order tag (``1:tag`` -> ``tag``).
+
+    ``candidates`` are known internal ids (engine intents / this adapter's
+    open orders); they let a deterministic hash tag be reverse-matched even
+    when the persisted map file is missing.
+    """
+    return from_broker_tag(venue_tag, candidates)
 
 
 def _order_status(raw: Any) -> str:
@@ -871,7 +873,9 @@ class FyersSessionAdapter:
     def _parse_ws_order_event(self, order: dict[str, Any]) -> list[dict[str, Any]]:
         """Parse FYERS WebSocket order dict into VAYREN events."""
         events: list[dict[str, Any]] = []
-        tag = _client_order_id(order.get("orderTag") or order.get("ordertag") or "")
+        tag = _client_order_id(
+            order.get("orderTag") or order.get("ordertag") or "", self._tag_candidates()
+        )
         order_id = str(order.get("id") or order.get("id_fyers") or "")
         if not tag and order_id in self._seen_client_ids.values():
             # Invert lookup
@@ -971,7 +975,9 @@ class FyersSessionAdapter:
         """Parse FYERS WebSocket trade/execution print into a VAYREN fill event."""
         order_id = str(trade.get("orderNumber") or trade.get("id") or "")
         trade_id = str(trade.get("tradeNumber") or trade.get("id_fill") or "")
-        tag = _client_order_id(trade.get("orderTag") or trade.get("ordertag") or "")
+        tag = _client_order_id(
+            trade.get("orderTag") or trade.get("ordertag") or "", self._tag_candidates()
+        )
 
         if not tag and order_id in self._seen_client_ids.values():
             for k, v in self._seen_client_ids.items():
@@ -1352,7 +1358,9 @@ class FyersSessionAdapter:
         """One venue order row in the broker-neutral shape."""
         venue_status = row.get("status")
         return {
-            "client_order_id": _client_order_id(row.get("orderTag") or row.get("ordertag") or ""),
+            "client_order_id": _client_order_id(
+                row.get("orderTag") or row.get("ordertag") or "", self._tag_candidates()
+            ),
             "broker_order_id": str(row.get("id") or row.get("id_fyers") or ""),
             "status": _order_status(venue_status),
             "venue_status": venue_status,
@@ -1590,6 +1598,17 @@ class FyersSessionAdapter:
         if not client_order_id:
             raise BrokerError("client order id required", code=ErrorCode.INVALID_REQUEST)
 
+        try:
+            broker_tag = to_broker_tag(client_order_id)
+        except ValueError as exc:
+            logger.error("ORDER_REJECTED_LOCAL broker=FYERS reason=%s", exc)
+            raise BrokerError(
+                f"invalid FYERS orderTag: {exc}", code=ErrorCode.INVALID_REQUEST
+            ) from None
+        # Persist before submit: adoption and restart reconcile must be able to
+        # decode the tag even if the POST fails or the process restarts.
+        tag_registry().remember(broker_tag, str(client_order_id))
+
         protective = self._is_protective_exit(plan, client_order_id)
         call_class = CallClass.RISK_REDUCING if protective else CallClass.ENTRY
 
@@ -1638,7 +1657,7 @@ class FyersSessionAdapter:
             "validity": validity,
             "disclosedQty": 0,
             "offlineOrder": False,
-            "orderTag": str(client_order_id),
+            "orderTag": broker_tag,
         }
 
         try:
@@ -2016,6 +2035,10 @@ class FyersSessionAdapter:
         body = self._get("orders", bypass_circuit=bypass_circuit)
         rows = self._required_rows(body, "orderBook", "orders")
         return [self._normalized_order(row) for row in rows if isinstance(row, dict)]
+
+    def _tag_candidates(self) -> tuple[str, ...]:
+        """Internal ids this adapter knows, for hash-tag reverse matching."""
+        return tuple(self._seen_client_ids.keys())
 
     def _find_by_tag(
         self, tag: str, *, bypass_circuit: bool = False, terminal_ok: bool = False
