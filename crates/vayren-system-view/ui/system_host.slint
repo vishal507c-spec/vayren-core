@@ -79,6 +79,12 @@ export component SystemHostWindow inherits Window {
     in-out property <[LogRow]> log-rows;
     callback health-toggle();
     callback log-toggle();
+    // EC2 gateway actions — forwarded to the same server_op command the
+    // native shell uses. Never leave these callbacks unbound (no-op).
+    callback server-op-health();
+    callback server-op-restart();
+    callback server-op-logs();
+    callback refresh-server-code();
 
     callback login-requested();
     callback refresh-requested();
@@ -256,6 +262,10 @@ export component SystemHostWindow inherits Window {
                 refresh-requested() => { root.refresh-requested(); }
                 add-broker-requested() => { root.add-requested(); }
                 set-default-requested(id) => { root.set-default-requested(id); }
+                server-op-health() => { root.server-op-health(); }
+                server-op-restart() => { root.server-op-restart(); }
+                server-op-logs() => { root.server-op-logs(); }
+                refresh-server-code() => { root.refresh-server-code(); }
             }
         }
     }

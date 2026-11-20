@@ -2975,9 +2975,9 @@ fn apply_server_op_ack(
             }
         }
         "restart" => {
-            ui.set_server_op_tone(1);
+            ui.set_server_op_tone(2);
             ui.set_server_op_feedback(slint::SharedString::from(
-                "✓ Gateway service restart initiated.",
+                "↻ Gateway restart accepted — verifying gateway + worker health…",
             ));
         }
         _ => {
@@ -3234,6 +3234,35 @@ fn send_remote_broker_command(
         ui.set_conn_pill_tone(2);
         ui.set_conn_is_failed(false);
         ui.set_conn_status_message(progress_note.into());
+
+        // Optimistic paint is time-boxed. A command that is sent but never
+        // acked must never leave the pill spinning forever — the gateway
+        // gets a read-only status probe and the UI states the exact failure.
+        let timeout_handle = handle.clone();
+        let timeout_cmd = cmd.clone();
+        let timeout_broker = broker_id.to_string();
+        slint::Timer::single_shot(std::time::Duration::from_secs(8), move || {
+            let Some(ui) = timeout_handle.upgrade() else {
+                return;
+            };
+            if ui.get_conn_pill_label().as_str() != "Connecting…" {
+                return; // authoritative ack already repainted
+            }
+            ui.set_conn_pill_label("UNKNOWN".into());
+            ui.set_conn_pill_tone(3);
+            ui.set_conn_status_message(
+                "✕ No gateway response within 8s — run Gateway Health or Retry".into(),
+            );
+            let mut params = serde_json::Map::new();
+            params.insert(
+                "broker_id".to_string(),
+                serde_json::Value::String(timeout_broker),
+            );
+            let _ = timeout_cmd.send(vayren_shell::remote_live::RemoteCommand {
+                action: "broker_status".to_string(),
+                params: serde_json::Value::Object(params),
+            });
+        });
     }
 }
 
@@ -3600,6 +3629,11 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             payload,
                         } => {
                             if action == "server_op" {
+                                let restart = payload
+                                    .get("op")
+                                    .and_then(|v| v.as_str())
+                                    .map(|op| op == "restart")
+                                    .unwrap_or(false);
                                 apply_server_op_ack(
                                     &ui,
                                     ok,
@@ -3607,6 +3641,15 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                     &payload,
                                     &server_op_timer_pending,
                                 );
+                                // A restart request is not proof of recovery:
+                                // immediately ask for real gateway/worker health.
+                                if ok && restart {
+                                    let _ =
+                                        command_tx.send(vayren_shell::remote_live::RemoteCommand {
+                                            action: "server_op".to_string(),
+                                            params: serde_json::json!({"op": "health"}),
+                                        });
+                                }
                             }
                             if action == "select_broker" {
                                 ui.set_conn_default_saving(false);

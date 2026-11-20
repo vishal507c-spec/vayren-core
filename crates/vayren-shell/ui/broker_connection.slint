@@ -526,7 +526,11 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                         VButton {
                             label: "RESTART";
                             variant: 3;
-                            enabled: !root.server-op-busy && root.worker-status != "RUNNING";
+                            // Server-side op_restart_gateway already refuses while a
+                            // LIVE session is RUNNING. Gating on the *worker* status
+                            // here made the button permanently disabled after any
+                            // health snapshot reported RUNNING.
+                            enabled: !root.server-op-busy;
                             clicked => { root.server-op-restart(); }
                         }
                     }

@@ -394,11 +394,49 @@ fn wire_view(
     // CONNECT on an unconfigured-but-unknown broker opens the inline form
     // (Slint-local); the emitted events carry manager-validated payloads.
     wire_action!(on_login_requested, serde_json::json!({"action": "login"}));
+    // Use the authoritative gateway command name. The legacy "disconnect"
+    // action is not in the server allowlist, so it could never complete.
     wire_action!(
         on_disconnect_requested,
-        serde_json::json!({"action": "disconnect"})
+        serde_json::json!({"action": "disconnect_broker"})
     );
     wire_action!(on_add_requested, serde_json::json!({"action": "add"}));
+    wire_action!(
+        on_server_op_health,
+        serde_json::json!({"action": "server_op", "op": "health"})
+    );
+    wire_action!(
+        on_server_op_logs,
+        serde_json::json!({
+            "action": "server_op",
+            "op": "logs",
+            "params": {"lines": 20}
+        })
+    );
+    wire_action!(
+        on_refresh_server_code,
+        serde_json::json!({
+            "action": "server_op",
+            "op": "check_code",
+            "params": {"force": true}
+        })
+    );
+    {
+        let queue = actions.clone();
+        let refresh_flag = refresh.clone();
+        let busy_flag = busy.clone();
+        ui.on_server_op_restart(move || {
+            if let Ok(text) = serde_json::to_string(&serde_json::json!({
+                "action": "server_op",
+                "op": "restart",
+                "params": {"confirmed": true}
+            })) {
+                queue.borrow_mut().push_back(text);
+            }
+            busy_flag.set(true);
+            refresh_flag.set(true);
+        });
+    }
     {
         let queue = actions.clone();
         let refresh_flag = refresh.clone();

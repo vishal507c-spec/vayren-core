@@ -41,9 +41,11 @@ import secrets
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from app.observable import Signal, WorkerThread
 from broker import BrokerStatus
@@ -58,6 +60,7 @@ _LOGGER = logging.getLogger(__name__)
 _SESSION_JOB = "session-check"
 _LOGIN_JOB = "interactive-login"
 _HEALTH_JOB = "health-check"
+_RECOVERY_JOB = "order-stream-recovery"
 
 
 def _accepts_keyword(func: Any, name: str) -> bool:
@@ -120,6 +123,11 @@ class BrokerManager:
     AUTH_TIMEOUT_S: float = 30.0
     #: Bounded proof window for the START-time order-stream check.
     ORDER_STREAM_VERIFY_TIMEOUT_S: float = 8.0
+    #: Operator disconnect must never hang the single command thread.
+    DISCONNECT_TIMEOUT_S: float = 10.0
+    #: Bounded, single-owner stale order-stream recovery (never an endless loop).
+    ORDER_WS_RECOVERY_COOLDOWN_S: float = 60.0
+    ORDER_WS_RECOVERY_MAX_BACKOFF_S: float = 300.0
     #: Low-noise SYSTEM freshness cadence (one queued check per window).
     HEALTH_REFRESH_INTERVAL_S: float = 60.0
     #: Beyond this the verified snapshot is reported stale, never LIVE-ready.
@@ -160,6 +168,9 @@ class BrokerManager:
         self._io_locks: dict[str, threading.RLock] = {}
         #: Last time a freshness check was QUEUED (not executed).
         self._health_requested: dict[str, float] = {}
+        #: Bounded order-stream recovery scheduling (one attempt per window).
+        self._order_ws_recovery_next: dict[str, float] = {}
+        self._order_ws_recovery_attempts: dict[str, int] = {}
         # ── unified EC2 session lifecycle (one authoritative manager) ──
         # desired: operator intent (CONNECT vs DISCONNECT), persisted.
         # generation: monotonic per-broker epoch; a late auth completion from
@@ -472,6 +483,16 @@ class BrokerManager:
             except Exception:
                 self._worker.submit(_SESSION_JOB, broker_id)
 
+    def _teardown_broker_resources(self, broker_id: str) -> None:
+        """Close adapter + market-data sockets; called on a bounded thread."""
+        state = self._states.get(broker_id, {})
+        adapter = state.get("adapter")
+        if adapter is not None and hasattr(adapter, "disconnect"):
+            adapter.disconnect()
+        md = state.get("market_data")
+        if md is not None and hasattr(md, "disconnect"):
+            md.disconnect()
+
     def disconnect_broker(
         self, broker_id: str, request_id: str = "", *, revoke: bool = False
     ) -> tuple[bool, str]:
@@ -505,15 +526,37 @@ class BrokerManager:
             result="accepted",
             reason=f"generation {generation}",
         )
-        # Stop reconnect-relevant resources; keep token unless revoked.
-        with contextlib.suppress(Exception):
-            state = self._states.get(broker_id, {})
-            adapter = state.get("adapter")
-            if adapter is not None and hasattr(adapter, "disconnect"):
-                adapter.disconnect()
-            md = state.get("market_data")
-            if md is not None and hasattr(md, "disconnect"):
-                md.disconnect()
+        # Stop reconnect-relevant resources with a HARD bound. A vendor close
+        # that wedges must never freeze the single command thread or produce a
+        # false DISCONNECTED while sockets are still alive.
+        teardown_error = ""
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vayren-disconnect")
+        try:
+            future = executor.submit(self._teardown_broker_resources, broker_id)
+            future.result(timeout=self.DISCONNECT_TIMEOUT_S)
+        except FutureTimeout:
+            teardown_error = (
+                f"disconnect timed out after {self.DISCONNECT_TIMEOUT_S:.0f}s; "
+                "broker sockets may still be alive — retry Disconnect or use Gateway Health"
+            )
+        except Exception as exc:  # noqa: BLE001 - report the exact failure
+            teardown_error = f"disconnect failed: {type(exc).__name__}: {exc}"
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        if teardown_error:
+            self._set_status(broker_id, BrokerStatus.ERROR, teardown_error)
+            self._touch_error(broker_id, "DISCONNECT_INCOMPLETE", teardown_error)
+            self._bump_version(broker_id)
+            self._audit.record(
+                request_id=request_id,
+                broker_id=broker_id,
+                action="state changed",
+                result="DEGRADED",
+                reason=teardown_error[:300],
+            )
+            return False, teardown_error
+
         if revoke:
             with contextlib.suppress(Exception):
                 self._session_store(spec).clear()
@@ -777,8 +820,9 @@ class BrokerManager:
 
         The adapter exposes delivery/transport state directly, so a dropped
         order socket should degrade SYSTEM on the next snapshot instead of
-        waiting for the slower REST health cycle. Returns the failure reason
-        (empty when healthy/unknown).
+        waiting for the slower REST health cycle. Stale streams schedule one
+        bounded background recovery attempt; the leg is reported RECOVERING
+        until the new socket is actually verified (never a false READY).
         """
         with self._lock:
             state = self._states.get(broker_id, {})
@@ -794,16 +838,32 @@ class BrokerManager:
             ws_reason = str(result[1] if len(result) > 1 else "")
         except Exception as exc:  # noqa: BLE001 - reporting must never raise
             ws_ok, ws_reason = False, f"unreadable ({type(exc).__name__})"
-        new_status = "READY" if ws_ok else f"FAILED: {ws_reason}"
+
+        recovery_note = ""
+        if not ws_ok:
+            recovery_note = self._maybe_recover_order_stream(broker_id, adapter, ws_reason)
+            if recovery_note == "scheduled":
+                ws_reason = "order stream recovery in progress (verification pending)"
+            elif recovery_note.startswith("recovered:"):
+                ws_ok = True
+                ws_reason = recovery_note.split(":", 1)[1]
+            elif recovery_note:
+                ws_reason = f"{ws_reason} ({recovery_note})"
+
+        if ws_ok:
+            new_status = "READY"
+        elif recovery_note == "scheduled":
+            new_status = "RECONNECTING"
+        else:
+            new_status = "FAILED"
         with self._lock:
             uni = self._unified.setdefault(broker_id, {})
             row = uni.setdefault("legs", {}).setdefault("order_ws", {})
-            changed = str(row.get("status", "")) != new_status
-        if changed:
             old_status = str(row.get("status", ""))
-            new_status = "READY" if ws_ok else "FAILED"
-            # Structured state-change log (observability): every leg transition
-            # carries timestamp + old/new state + reason, with no token leakage.
+            changed = old_status != new_status
+        if changed:
+            # Structured state-change log: every REAL leg transition carries a
+            # timestamp + old/new state + reason, with no token leakage.
             _LOGGER.info(
                 "ORDER_WS_STATE_CHANGE broker=%s old=%s new=%s reason=%s",
                 broker_id,
@@ -811,18 +871,87 @@ class BrokerManager:
                 new_status,
                 redact(ws_reason)[:200],
             )
-            # Passive snapshot health reads must NOT inflate the failure
-            # counter — only real connect/verify failures do (count_failure=True
-            # default at those call sites).
-            self._set_leg(
-                broker_id,
-                "order_ws",
-                new_status,
-                "" if ws_ok else ws_reason,
-                success=ws_ok,
-                count_failure=False,
-            )
+        # Passive snapshot health reads must NOT inflate the failure counter —
+        # only real connect/verify failures do (count_failure=True elsewhere).
+        self._set_leg(
+            broker_id,
+            "order_ws",
+            new_status,
+            "" if ws_ok else ws_reason,
+            success=ws_ok,
+            count_failure=False,
+        )
         return "" if ws_ok else ws_reason
+
+    def _maybe_recover_order_stream(self, broker_id: str, adapter: Any, reason: str) -> str:
+        """Schedule at most one bounded order-stream recovery per window.
+
+        Returns "scheduled", "recovered: <detail>", "cooldown", "failed: ..."
+        or "" when this adapter has no recovery entry point. The background
+        job owns the socket; snapshot threads never block on venue I/O.
+        """
+        restart = getattr(adapter, "restart_order_stream", None)
+        if not callable(restart):
+            return ""
+        now = time.monotonic()
+        with self._lock:
+            next_at = float(self._order_ws_recovery_next.get(broker_id, 0.0))
+            already = next_at > now
+            if not already:
+                self._order_ws_recovery_next[broker_id] = now + self.ORDER_WS_RECOVERY_COOLDOWN_S
+        if already:
+            return "cooldown"
+        _LOGGER.info(
+            "ORDER_WS_RECOVERY_SCHEDULED broker=%s reason=%s",
+            broker_id,
+            redact(reason)[:200],
+        )
+        self._worker.submit(_RECOVERY_JOB, broker_id)
+        return "scheduled"
+
+    def _job_recover_order_stream(self, spec: Any) -> None:
+        """Background, serialized recovery: cold start + verified proof only."""
+        broker_id = str(getattr(spec, "broker_id", "") or "")
+        with self._lock:
+            state = self._states.get(broker_id, {})
+            adapter = state.get("adapter")
+            desired = str(self._desired.get(broker_id, ""))
+        if adapter is None or desired != "CONNECTED":
+            return
+        restart = getattr(adapter, "restart_order_stream", None)
+        if not callable(restart):
+            return
+        try:
+            ok, detail = cast(Any, restart)(timeout_s=self.ORDER_STREAM_VERIFY_TIMEOUT_S)
+        except Exception as exc:  # noqa: BLE001 — recovery must never kill the worker
+            ok, detail = False, f"recovery error: {type(exc).__name__}: {exc}"
+        if ok:
+            with self._lock:
+                self._order_ws_recovery_attempts[broker_id] = 0
+                self._order_ws_recovery_next[broker_id] = 0.0
+            self._set_leg(broker_id, "order_ws", "READY", "", success=True, count_failure=False)
+            self._bump_version(broker_id)
+            _LOGGER.info("ORDER_WS_RECOVERED broker=%s detail=%s", broker_id, detail)
+        else:
+            with self._lock:
+                attempts = int(self._order_ws_recovery_attempts.get(broker_id, 0)) + 1
+                self._order_ws_recovery_attempts[broker_id] = attempts
+                delay = min(
+                    self.ORDER_WS_RECOVERY_COOLDOWN_S * (2 ** min(attempts, 3)),
+                    self.ORDER_WS_RECOVERY_MAX_BACKOFF_S,
+                )
+                self._order_ws_recovery_next[broker_id] = time.monotonic() + delay
+            self._set_leg(
+                broker_id, "order_ws", "FAILED", str(detail), success=False, count_failure=False
+            )
+            self._bump_version(broker_id)
+            _LOGGER.warning(
+                "ORDER_WS_RECOVERY_FAILED broker=%s attempts=%d next_delay_s=%.0f detail=%s",
+                broker_id,
+                attempts,
+                delay,
+                detail,
+            )
 
     def get_session_snapshot(self, broker_id: str) -> dict[str, Any]:
         """One authoritative backend snapshot for SYSTEM/LIVE/dashboard/health."""
@@ -1193,7 +1322,7 @@ class BrokerManager:
         spec = self._specs.get(broker_id)
         if spec is None:
             return
-        if kind in (_SESSION_JOB, _LOGIN_JOB, _HEALTH_JOB):
+        if kind in (_SESSION_JOB, _LOGIN_JOB, _HEALTH_JOB, _RECOVERY_JOB):
             # Serialize with a START-time verification on the calling thread:
             # both mutate/read the same adapter and must never overlap.
             with self._io_lock(broker_id):
@@ -1201,6 +1330,8 @@ class BrokerManager:
                     self._job_session_check(spec)
                 elif kind == _LOGIN_JOB:
                     self._job_login(spec)
+                elif kind == _RECOVERY_JOB:
+                    self._job_recover_order_stream(spec)
                 else:
                     self._job_health(spec)
             return

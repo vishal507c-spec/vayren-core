@@ -382,6 +382,8 @@ class FyersSessionAdapter:
         # Order-update delivery evidence, tracked apart from socket state.
         self._order_ws_messages_received = 0
         self._order_ws_last_message_at: float | None = None
+        #: One recovery owner at a time; snapshot reads never own the socket.
+        self._order_ws_recovery_in_flight = False
         # Epoch until which the order socket stays abandoned (venue not
         # serving the stream). Cleared by an explicit connect().
         self._order_ws_suspended_until = 0.0
@@ -581,6 +583,34 @@ class FyersSessionAdapter:
             return False, (
                 f"order stream not connected within {timeout:.1f}s (state: {self._order_ws_state})"
             )
+
+    def restart_order_stream(self, *, timeout_s: float = 8.0) -> tuple[bool, str]:
+        """Single-owner, bounded cold start for a stale/dead order socket.
+
+        Detach the old object FIRST (no competing reconnect drivers), reset the
+        staleness clock so a quiet-but-healthy stream is not judged by the
+        previous socket's silence, then prove the new socket with the same
+        bounded verification used by START. No order is placed here.
+        """
+        if not self._enable_order_ws:
+            return True, "order socket disabled (REST polling fallback active)"
+        with self._order_ws_guard:
+            if self._order_ws_recovery_in_flight:
+                return False, "order stream recovery already in progress"
+            self._order_ws_recovery_in_flight = True
+            old_ws, self._order_ws = self._order_ws, None
+        try:
+            if old_ws is not None:
+                with contextlib.suppress(Exception):
+                    _safe_close_order_ws(old_ws)
+            # Reset staleness at reconnect time: the previous socket's last
+            # message must not make the fresh stream instantly "stale" again.
+            self._order_ws_last_message_at = time.monotonic()
+            self._start_order_ws()
+            return self.verify_order_stream(timeout_s=timeout_s)
+        finally:
+            with self._order_ws_guard:
+                self._order_ws_recovery_in_flight = False
 
     @property
     def order_stream_messages_received(self) -> int:
