@@ -93,6 +93,7 @@ class ExecutionEngine:
                 broker_order_id=str(broker_order_id),
                 reason=advanced.reason,
                 history=advanced.history,
+                session_date=advanced.session_date,
             )
         self._orders[client_order_id] = advanced
         return advanced
@@ -126,6 +127,7 @@ class ExecutionEngine:
             broker_order_id=fill.broker_order_id or stored.broker_order_id,
             reason=stored.reason,
             history=stored.history,
+            session_date=stored.session_date,
         )
         self._orders[updated.client_order_id] = updated
         return updated
@@ -196,6 +198,7 @@ class ExecutionEngine:
                     "broker_order_id": order.broker_order_id,
                     "reason": order.reason,
                     "history": [list(pair) for pair in order.history],
+                    "session_date": order.session_date,
                 }
                 for order in self._orders.values()
             ]
@@ -236,6 +239,7 @@ class ExecutionEngine:
                     broker_order_id=item.get("broker_order_id"),
                     reason=str(item.get("reason", "")),
                     history=tuple((str(s), str(t)) for s, t in item.get("history", [])),
+                    session_date=str(item.get("session_date", "") or ""),
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 raise IllegalTransitionError(f"invalid engine snapshot order: {exc}") from exc

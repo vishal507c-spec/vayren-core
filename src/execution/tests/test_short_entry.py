@@ -20,10 +20,11 @@ from typing import Any
 
 from execution.events import CandleEvent
 from execution.models.contract import StrategyRuntimeContract
+from execution.models.intent import make_session_intent_id
 from execution.models.order import Fill, OrderPlan
 from execution.modes import ExecutionMode, LiveArm
 from execution.runtime.lifecycle import LifecycleState
-from execution.runtime.session import LiveSession, SessionConfig
+from execution.runtime.session import LiveSession, SessionConfig, ist_session_date
 from execution.runtime.strategy_runtime import StrategyContext
 from risk import RiskPolicy
 from strategy import StrategyParameters
@@ -360,7 +361,7 @@ def test_short_position_lifecycle_protective_stop_and_exit() -> None:
 
     entry_plan = venue.placed[0]
     entry_qty = entry_plan.quantity
-    entry_cid = "obr-c1c4:1:1:1:o1"
+    entry_cid = f"{make_session_intent_id('obr-c1c4', '1', ist_session_date(), 1, 1)}:o1"
 
     # Fill the short entry order: sell entry_qty shares
     venue.emit_fill(entry_cid, "SELL", entry_qty, ENTRY_PRICE)

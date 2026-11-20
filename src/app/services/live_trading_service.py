@@ -308,6 +308,26 @@ def _utcnow_iso() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
+def _ist_session_date() -> str:
+    """Current IST trading-session date, matching the session checkpoint."""
+    return datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+
+
+def _current_session_order(engine: Any, symbol: str, session_date: str) -> Any | None:
+    """Latest order of ``symbol`` created in the given IST session.
+
+    Orders restored from older checkpoints carry an empty session_date and
+    are deliberately excluded: they are history, not today's status.
+    """
+    orders = [
+        order
+        for order in getattr(engine, "_orders", {}).values()
+        if getattr(order, "symbol", "") == symbol
+        and str(getattr(order, "session_date", "") or "") == session_date
+    ]
+    return orders[-1] if orders else None
+
+
 class LiveTradingService:
     """Owns UI-driven sessions. Pure composition — no strategy math here."""
 
@@ -2276,6 +2296,7 @@ class LiveTradingService:
                             "type": str(item.get("order_type", "")),
                             "price": float(item.get("avg_fill_price") or 0.0),
                             "status": str(item.get("state", "")),
+                            "session_date": str(item.get("session_date", "") or ""),
                             "time": self._history_time(item),
                             "broker": broker_name,
                             "reason": str(item.get("reason", "") or ""),
@@ -3800,15 +3821,11 @@ class LiveTradingService:
                 except Exception:
                     pass
                 try:
-                    # Look up latest tracked order for this symbol
-                    # (including terminal states like REJECTED)
-                    tracked = [
-                        o
-                        for o in getattr(session.engine, "_orders", {}).values()
-                        if getattr(o, "symbol", "") == symbol
-                    ]
-                    if tracked:
-                        latest_ord = tracked[-1]
+                    # Watchlist status belongs to the CURRENT IST session only.
+                    # Prior-session terminal orders stay in Order History but
+                    # must not label today's watchlist row as REJECTED.
+                    latest_ord = _current_session_order(session.engine, symbol, _ist_session_date())
+                    if latest_ord is not None:
                         st = str(getattr(latest_ord, "state", "")).upper()
                         if "REJECT" in st or "DENIED" in st:
                             sym_order = "REJECTED"
@@ -3825,8 +3842,12 @@ class LiveTradingService:
                             sym_order = st
                     else:
                         snap_orders = session.engine.open_orders()
+                        session_today = _ist_session_date()
                         for o in snap_orders:
-                            if getattr(o, "symbol", "") == symbol:
+                            if (
+                                getattr(o, "symbol", "") == symbol
+                                and str(getattr(o, "session_date", "") or "") == session_today
+                            ):
                                 sym_order = str(getattr(o, "state", "WORKING"))
                                 break
                 except Exception:
@@ -4443,8 +4464,14 @@ class LiveTradingService:
     def _history_time(item: dict[str, Any]) -> str:
         history = item.get("history", ())
         if history:
-            return str(history[-1][1]) if len(history[-1]) > 1 else ""
-        return ""
+            timestamp = str(history[-1][1]) if len(history[-1]) > 1 else ""
+            # Orders restored from older checkpoints have the engine's 1970
+            # placeholder. Show the persisted session date instead of a fake
+            # epoch; current orders carry a real ISO timestamp.
+            if timestamp.startswith("1970-01-01"):
+                return str(item.get("session_date", "") or "")
+            return timestamp
+        return str(item.get("session_date", "") or "")
 
     # ── persistence (config always; checkpoints per symbol) ─────────────
 

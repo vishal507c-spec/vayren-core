@@ -151,6 +151,7 @@ from execution.models import (
     StrategyRuntimeContract,
     StrategySignal,
     make_intent_id,
+    make_session_intent_id,
 )
 from execution.modes import (
     RETIRED_MODE_LABELS,
@@ -253,6 +254,7 @@ __all__ = [
     "StrategySignal",
     "ExecutionIntent",
     "make_intent_id",
+    "make_session_intent_id",
     "OrderState",
     "TERMINAL_STATES",
     "TRANSITIONS",

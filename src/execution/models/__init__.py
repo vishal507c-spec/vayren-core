@@ -7,7 +7,12 @@ are tracked debt (see `docs/language_retention.json`).
 """
 
 from execution.models.contract import StrategyRuntimeContract
-from execution.models.intent import ExecutionIntent, StrategySignal, make_intent_id
+from execution.models.intent import (
+    ExecutionIntent,
+    StrategySignal,
+    make_intent_id,
+    make_session_intent_id,
+)
 from execution.models.order import (
     TERMINAL_STATES,
     TRANSITIONS,
@@ -22,6 +27,7 @@ __all__ = [
     "StrategySignal",
     "ExecutionIntent",
     "make_intent_id",
+    "make_session_intent_id",
     "OrderState",
     "TERMINAL_STATES",
     "TRANSITIONS",

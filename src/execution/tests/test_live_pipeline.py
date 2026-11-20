@@ -23,10 +23,11 @@ if str(ROOT / "src") not in sys.path:
 from execution.broker.adapter import BrokerError  # noqa: E402
 from execution.events import CandleEvent  # noqa: E402
 from execution.models.contract import StrategyRuntimeContract  # noqa: E402
+from execution.models.intent import make_session_intent_id  # noqa: E402
 from execution.models.order import Fill, OrderPlan, OrderState  # noqa: E402
 from execution.modes import ExecutionMode, LiveArm  # noqa: E402
 from execution.runtime.lifecycle import LifecycleState  # noqa: E402
-from execution.runtime.session import LiveSession, SessionConfig  # noqa: E402
+from execution.runtime.session import LiveSession, SessionConfig, ist_session_date  # noqa: E402
 from execution.runtime.strategy_runtime import StrategyContext  # noqa: E402
 from risk import RiskPolicy  # noqa: E402
 from strategy import StrategyParameters  # noqa: E402
@@ -46,6 +47,11 @@ ORDER_QTY = 21.0
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
+
+
+def _cid() -> str:
+    """Current-session client id for the stub OBR C1C4 signal (seq 1/1)."""
+    return f"{make_session_intent_id('OBR C1C4', '1', ist_session_date(), 1, 1)}:o1"
 
 
 class _Venue:
@@ -272,7 +278,7 @@ def test_full_entry_path_tick_to_working_order() -> None:
 
     # Venue ack drains on the next step: SENT → ACKNOWLEDGED (WORKING).
     session.step(time.time())
-    tracked = session.engine.get("OBR C1C4:1:1:1:o1")
+    tracked = session.engine.get(_cid())
     assert tracked is not None
     assert tracked.state == OrderState.ACKNOWLEDGED
     assert "ORDER_ACK" in _kinds(session)
@@ -297,7 +303,7 @@ def test_partial_then_full_fill_positions_filled_qty_only() -> None:
     session = _session(venue, provider)
     provider.feed(_candle(1))
     session.step(time.time())
-    cid = "OBR C1C4:1:1:1:o1"
+    cid = _cid()
 
     venue.emit_fill(cid, 10.0, ENTRY, partial=True)
     session._process_broker_stream()
@@ -334,7 +340,7 @@ def test_rejection_creates_no_position() -> None:
     session = _session(venue, provider)
     provider.feed(_candle(1))
     session.step(time.time())
-    cid = "OBR C1C4:1:1:1:o1"
+    cid = _cid()
     venue._events.clear()  # drop the queued ack; venue rejects instead
     venue.emit_reject(cid, "insufficient margin")
     session._process_broker_stream()
@@ -364,7 +370,7 @@ def test_duplicate_fill_event_folds_once() -> None:
     session = _session(venue, provider)
     provider.feed(_candle(1))
     session.step(time.time())
-    cid = "OBR C1C4:1:1:1:o1"
+    cid = _cid()
     fill_kwargs = {"client_order_id": cid, "qty": 11.0, "price": ENTRY, "partial": True}
     venue.emit_fill(**fill_kwargs)  # noqa: ARG002
     venue.emit_fill(**fill_kwargs)  # retransmission
@@ -384,7 +390,7 @@ def test_transport_timeout_marks_unknown_not_rejected() -> None:
     session.step(time.time())
 
     assert "ORDER_UNKNOWN" in _kinds(session)
-    tracked = session.engine.get("OBR C1C4:1:1:1:o1")
+    tracked = session.engine.get(_cid())
     assert tracked is not None and tracked.state == OrderState.UNKNOWN
     assert session.ledger.position(SYMBOL).flat
 
@@ -400,7 +406,7 @@ def test_deterministic_refusal_stays_rejected() -> None:
     session = _session(venue, provider)
     provider.feed(_candle(1))
     session.step(time.time())
-    tracked = session.engine.get("OBR C1C4:1:1:1:o1")
+    tracked = session.engine.get(_cid())
     assert tracked is not None and tracked.state == OrderState.REJECTED
 
 
@@ -412,7 +418,7 @@ def test_sl_armed_on_filled_qty_and_rests_until_touched() -> None:
     session = _session(venue, provider)
     provider.feed(_candle(1))
     session.step(time.time())
-    cid = "OBR C1C4:1:1:1:o1"
+    cid = _cid()
 
     venue.emit_fill(cid, 6.0, ENTRY, partial=True)
     session._process_broker_stream()
@@ -434,7 +440,7 @@ def test_sl_trigger_closes_position_and_marks_safe() -> None:
     session = _session(venue, provider)
     provider.feed(_candle(1))
     session.step(time.time())
-    cid = "OBR C1C4:1:1:1:o1"
+    cid = _cid()
     venue.emit_fill(cid, ORDER_QTY, ENTRY, partial=False)
     session._process_broker_stream()
     session._process_broker_stream()  # SL ack
@@ -469,7 +475,7 @@ def test_sl_reject_marks_failed_and_attention() -> None:
     session = _session(venue, provider)
     provider.feed(_candle(1))
     session.step(time.time())
-    cid = "OBR C1C4:1:1:1:o1"
+    cid = _cid()
     venue.emit_fill(cid, ORDER_QTY, ENTRY, partial=False)
     session._process_broker_stream()
 

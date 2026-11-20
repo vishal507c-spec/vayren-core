@@ -38,6 +38,25 @@ def make_intent_id(strategy_id: str, strategy_version: str, event_seq: int, inte
     return native_intent_id(strategy_id, strategy_version, event_seq, intent_seq)
 
 
+def make_session_intent_id(
+    strategy_id: str,
+    strategy_version: str,
+    session_date: str,
+    event_seq: int,
+    intent_seq: int,
+) -> str:
+    """Session-qualified idempotency key for a strategy intent.
+
+    The session tag is a SUFFIX so the first ``:``-segment remains the
+    strategy id (``strategy_of_intent`` in Python and Rust both read it).
+    An empty ``session_date`` returns the legacy id, keeping restored orders
+    and older checkpoints valid.
+    """
+    base = make_intent_id(strategy_id, strategy_version, event_seq, intent_seq)
+    stamp = str(session_date or "").replace("-", "").strip()
+    return f"{base}:{stamp}" if stamp else base
+
+
 @dataclass(frozen=True)
 class ExecutionIntent:
     """What the strategy wants, before risk has spoken. Never an order yet."""

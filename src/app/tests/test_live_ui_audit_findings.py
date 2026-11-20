@@ -13,7 +13,7 @@ if str(ROOT / "src") not in sys.path:
 import pytest  # noqa: E402
 
 import app.headless as headless  # noqa: E402
-from app.services.live_trading_service import LiveTradingService  # noqa: E402
+from app.services.live_trading_service import LiveTradingService, _ist_session_date  # noqa: E402
 from execution.engine import ExecutionEngine  # noqa: E402
 from execution.models.order import BrokerOrder  # noqa: E402
 from execution.models.order_state import OrderState  # noqa: E402
@@ -81,6 +81,7 @@ def test_finding_4_rejected_orders_reflected_in_universe_quotes(dirs: tuple[str,
         order_type="MARKET",
         limit_price=None,
         state=OrderState.CREATED,
+        session_date=_ist_session_date(),
     )
     created = engine.create(order)
     engine.transition(created.client_order_id, OrderState.REJECTED, reason="Margin insufficient")

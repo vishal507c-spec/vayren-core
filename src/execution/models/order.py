@@ -63,6 +63,9 @@ class BrokerOrder:
     broker_order_id: str | None = None
     reason: str = ""
     history: tuple[tuple[str, str], ...] = field(default_factory=tuple)  # (state, timestamp)
+    #: IST trading session (YYYY-MM-DD) that created this order. Empty on
+    #: orders restored from older checkpoints, which are historical only.
+    session_date: str = ""
 
     def with_state(self, state: OrderState, timestamp: str, reason: str = "") -> BrokerOrder:
         """Return a copy advanced to `state` with the transition appended."""
@@ -80,6 +83,7 @@ class BrokerOrder:
             broker_order_id=self.broker_order_id,
             reason=reason or self.reason,
             history=self.history + ((state.value, timestamp),),
+            session_date=self.session_date,
         )
 
 

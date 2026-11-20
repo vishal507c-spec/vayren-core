@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from math import floor
 from pathlib import Path
 from typing import Any, cast
@@ -49,7 +49,11 @@ from execution.market_data.health_policy import MarketDataHealthPolicy
 from execution.market_data.normalizer import NormalizerConfig, StreamNormalizer
 from execution.market_data.provider import MarketDataProvider
 from execution.models.contract import StrategyRuntimeContract
-from execution.models.intent import ExecutionIntent, StrategySignal, make_intent_id
+from execution.models.intent import (
+    ExecutionIntent,
+    StrategySignal,
+    make_session_intent_id,
+)
 from execution.models.order import BrokerOrder, Fill, OrderPlan, OrderState
 from execution.modes import ExecutionMode, LiveArm, LiveModeError, ModeGates, arm_transition
 from execution.native_execution import (
@@ -90,6 +94,20 @@ from risk.sizing import (
 from strategy import StrategyDefinition, StrategyLogic, StrategyParameters, StrategyState
 
 VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def ist_session_date() -> str:
+    """Current NSE/IST trading-session date (YYYY-MM-DD)."""
+    return datetime.now(VENUE_TZ).strftime("%Y-%m-%d")
+
+
+class _RealClock:
+    """Real UTC timestamps for order history (no synthetic 1970 epochs)."""
+
+    @staticmethod
+    def now_iso() -> str:
+        return datetime.now(UTC).isoformat()
+
 
 #: Broker-reported order states that mean the order is FINISHED at the venue.
 #: A row with any other (or no) status is still worked by the venue and
@@ -241,7 +259,7 @@ class LiveSession:
         self._kill_switch = KillSwitch(config.kill_switch_path)
         self._risk = RiskEngine(risk_policy, self._kill_switch)
         self._planner = OrderPlanner()
-        self._engine = ExecutionEngine()
+        self._engine = ExecutionEngine(clock=_RealClock())
         self._journal = ExecutionJournal(config.journal_path)
         self._latency = LatencyTracker()
         self._normalizer = StreamNormalizer(NormalizerConfig())
@@ -857,8 +875,12 @@ class LiveSession:
             return
 
         context.intent_seq += 1
-        intent_id = make_intent_id(
-            signal.strategy_id, signal.strategy_version, signal.event_seq, context.intent_seq
+        intent_id = make_session_intent_id(
+            signal.strategy_id,
+            signal.strategy_version,
+            ist_session_date(),
+            signal.event_seq,
+            context.intent_seq,
         )
 
         if is_entry:
@@ -1242,6 +1264,7 @@ class LiveSession:
             symbol=plan.symbol,
             side=plan.side,
             quantity=plan.quantity,
+            session_date=ist_session_date(),
             order_type=plan.order_type,
             limit_price=plan.limit_price,
         )
@@ -1517,6 +1540,7 @@ class LiveSession:
             symbol=symbol,
             side=side,
             quantity=required_qty,
+            session_date=ist_session_date(),
             order_type="STOP_MARKET",
         )
         try:
@@ -1952,7 +1976,7 @@ class LiveSession:
                 ]
                 for key, ctx in self._contexts.items()
             },
-            "session_date": datetime.now(VENUE_TZ).strftime("%Y-%m-%d"),
+            "session_date": ist_session_date(),
             "seen_candle_stamps": dict(self._seen_candle_stamps),
             "seen_candle_keys": [list(k) for k in self._seen_candle_keys],
             "orders_today": self._orders_today,
@@ -2003,7 +2027,7 @@ class LiveSession:
                 for b in raw
             )
             LiveStrategyDriver(ctx).restore_window(bars)
-        today_date_str = datetime.now(VENUE_TZ).strftime("%Y-%m-%d")
+        today_date_str = ist_session_date()
         cp_date = str(checkpoint.get("session_date") or "")
         is_same_day = cp_date == today_date_str
 
