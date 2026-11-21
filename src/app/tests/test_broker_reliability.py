@@ -92,7 +92,7 @@ def test_disconnect_failure_reports_error_instead_of_false_disconnected(tmp_path
     manager = BrokerManager(str(tmp_path), specs={})
     slow_spec = SimpleNamespace(broker_id="fyers", venue_unregister=None)
     manager._specs = {"fyers": slow_spec}  # type: ignore[attr-defined]
-    state = manager._fresh_state(slow_spec)
+    state = manager._fresh_state(slow_spec)  # type: ignore[arg-type]
     state["adapter"] = SimpleNamespace(disconnect=lambda: time.sleep(0.3))
     manager._states = {"fyers": state}
     manager.DISCONNECT_TIMEOUT_S = 0.01
@@ -108,7 +108,7 @@ def test_duplicate_disconnect_request_replays_cached_failure(tmp_path) -> None:
     manager = BrokerManager(str(tmp_path), specs={})
     slow_spec = SimpleNamespace(broker_id="fyers", venue_unregister=None)
     manager._specs = {"fyers": slow_spec}  # type: ignore[attr-defined]
-    state = manager._fresh_state(slow_spec)
+    state = manager._fresh_state(slow_spec)  # type: ignore[arg-type]
     state["adapter"] = SimpleNamespace(disconnect=lambda: time.sleep(0.3))
     manager._states = {"fyers": state}
     manager.DISCONNECT_TIMEOUT_S = 0.01
