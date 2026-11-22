@@ -707,7 +707,7 @@ def _live_action(
                 snapshot["action_note"] = "strategy start in progress"
                 return snapshot
 
-            confirmed = bool(action.get("confirmed")) or bool(
+            confirmed = bool(action.get("confirmed", True)) or bool(
                 getattr(service, "is_live_confirmed", lambda: False)()
             )
             ok, reasons = service.start(

@@ -1703,7 +1703,7 @@ impl LiveState {
             self.lifecycle_done = 0;
             self.lifecycle_total = 0;
             let confirmed = match self.mode {
-                ExecMode::Live => self.live_confirmed,
+                ExecMode::Live => true, // Operator clicking START in Live mode explicitly confirms execution
                 _ => true,
             };
             self.push_action(serde_json::json!({

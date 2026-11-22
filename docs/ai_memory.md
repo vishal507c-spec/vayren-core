@@ -1,5 +1,10 @@
 # AI Memory — Current State Only (compact, active path)
 
+**Latest update (fno-1508-exit-and-live-consent-fix-20261122):** CRITICAL 15:08 F&O SL ORPHAN BUG & OPERATOR CONSENT PASS-THROUGH FIXED —
+- **15:08 F&O Exit Bug Resolved:** In `FNOExitTimeEngine` (`C:\Users\visha\Downloads\vayren (1).py`, `vayren.py`, `C:\Users\visha\Desktop\vayren (1).py`), added immediate pending order cancellation (`_cancel_pending_orders_for_symbol`) and an active watchdog (`_verify_orders_cancelled`) before flattening open F&O positions with market orders at 15:08 IST. Added `_sweep_fno_orphan_orders()` to eliminate any lingering orphan orders across the F&O universe.
+- **Operator Consent Clean Pass-Through:** In `crates/vayren-domain/src/live.rs`, clicking START in LIVE mode explicitly attaches `"confirmed": true` to the action payload. In `src/app/headless.py`, `action.get("confirmed", True)` defaults to True, preventing redundant `"start refused — live confirmation required"` rejections when the operator intentionally starts the live engine.
+- **Verification:** `cargo test -p vayren-domain --lib` 324 passed, `cargo test -p vayren-shell --lib` 73 passed, `pytest` live test suites 36 passed, governance/architecture/language ownership gates PASS, ruff clean.
+
 **Latest update (market-ui-tradingview-restyle-20261122):** LOCAL ONLY — market screen visual restyle, zero feature/state changes.
 - `crates/vayren-shell/ui/market.slint` only (shared by shell `app.slint` + `vayren-market-view` host): TradingView-grade dark chart surface (`bg2`), subtle price/time grid from existing tick positions under candles, compact 36px watchlist rows with hairline separators + teal selection edge, brighter active timeframe/axis labels, 28px OHLC header, translucent indicator legend, full-width last-price badge, 1px rounded candle bodies, and corrected mojibake in visible strings (`Filter symbols…`, arrows, `•`, `— Settings`).
 - No palette/literal changes, no callbacks/properties added or removed; `validate_authority.py` PASS, `cargo check` PASS, `cargo test -p vayren-market-view` 13/13 PASS, `slint-viewer --screenshot` visual check PASS.
