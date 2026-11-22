@@ -474,6 +474,38 @@ OBR_C1C4_SPECS: tuple[ParameterSpec, ...] = (
         key="refIndex", label="REF Candle Index", default=3, minimum=1, maximum=10, decimals=0
     ),
     ParameterSpec(
+        key="c1ThresholdPct",
+        label="C1 Threshold %",
+        default=0.35,
+        minimum=0.0,
+        maximum=5.0,
+        decimals=3,
+    ),
+    ParameterSpec(
+        key="c4ThresholdPct",
+        label="C4 Threshold %",
+        default=0.45,
+        minimum=0.0,
+        maximum=5.0,
+        decimals=3,
+    ),
+    ParameterSpec(
+        key="exitHour",
+        label="Exit Hour (IST)",
+        default=15,
+        minimum=9,
+        maximum=15,
+        decimals=0,
+    ),
+    ParameterSpec(
+        key="exitMinute",
+        label="Exit Minute",
+        default=15,
+        minimum=0,
+        maximum=59,
+        decimals=0,
+    ),
+    ParameterSpec(
         key="buySlippagePct",
         label="Buy Slippage %",
         default=0.0,

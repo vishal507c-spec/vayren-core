@@ -2945,12 +2945,9 @@ class LiveTradingService:
                     raise LiveConfigError("cancelled by STOP")
 
             total = len(self._config.symbols)
-            for index, symbol in enumerate(self._config.symbols, start=1):
-                if gen is not None and self._lifecycle_cancelled(cancel_event, gen):
-                    raise LiveConfigError("cancelled by STOP")
-                self._emit_progress(
-                    progress_cb, "sessions", f"building session {symbol}", index, total
-                )
+            max_workers = min(8, total) if total else 1
+
+            def _build_one(symbol: str) -> tuple[str, LiveSession, Path, int]:
                 session_bars: tuple[Bar, ...] = session_bars_by_symbol.get(symbol, ())
                 history = self._load_history(symbol, self._config.timeframe)
                 if not history and has_local_store and not session_bars:
@@ -3063,25 +3060,29 @@ class LiveTradingService:
                         f"recovered {len(session_bars)} session candles from 09:15",
                         "info",
                     )
-                # No silent downgrade is possible any more: resolve_broker
-                # raises instead of returning a simulated venue, so a session
-                # that reported ready already holds the requested mode.
-                # NOTE: session.start() already reconciled against broker
-                # truth (connect=False); the old explicit reconcile_now()
-                # here repeated that work per symbol (22x). Skipped.
                 if mode == ExecutionMode.LIVE:
-                    # Consent may have been revoked while this build was in
-                    # flight (persistent ARM toggled OFF / STOP): never arm a
-                    # session the operator no longer authorized.
                     if self.is_live_confirmed():
                         session.arm(f"operator confirmed at {self._confirmed_live_at}")
                     else:
                         session.disarm("consent revoked during session build")
-                sessions[symbol] = session
-                self._session_dirs[symbol] = session_dir
-                self._journal_cursors[symbol] = len(session.journal.entries)
-                self._last_signal[symbol] = "no signal yet"
-                self._strategy_version = record.version
+                return symbol, session, session_dir, len(session.journal.entries)
+
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {pool.submit(_build_one, sym): sym for sym in self._config.symbols}
+                for done_count, future in enumerate(as_completed(futures), start=1):
+                    if gen is not None and self._lifecycle_cancelled(cancel_event, gen):
+                        raise LiveConfigError("cancelled by STOP")
+                    sym, session, session_dir, cursor = future.result()
+                    sessions[sym] = session
+                    self._session_dirs[sym] = session_dir
+                    self._journal_cursors[sym] = cursor
+                    self._last_signal[sym] = "no signal yet"
+                    self._strategy_version = record.version
+                    self._emit_progress(
+                        progress_cb, "sessions", f"building session {sym}", done_count, total
+                    )
         except Exception:
             for session in sessions.values():
                 with contextlib.suppress(Exception):
@@ -3204,8 +3205,9 @@ class LiveTradingService:
             # with a permanently closed StaticPlugin adapter.
             fanout = MarketDataFanout(face)
             self._market_fanouts.append(fanout)
-            for symbol in grouped_symbols:
-                md_faces[symbol] = fanout.subscription(symbol, (symbol,))
+            specs = [(symbol, (symbol,)) for symbol in grouped_symbols]
+            batch = fanout.subscriptions_batch(specs)
+            md_faces.update(batch)
         return md_faces
 
     def _teardown_sessions(self) -> None:
@@ -3234,7 +3236,7 @@ class LiveTradingService:
             self._market_fanouts = []
         for fanout in fanouts:
             with contextlib.suppress(Exception):
-                fanout.close()
+                fanout.close(disconnect_upstream=False)
         # Feed observations belong to the sessions just stopped: keeping the
         # old marks/kind would let a dead run keep quoting (and a stopped
         # service still report a live provider in eligibility diagnostics).

@@ -199,7 +199,10 @@ def _sync_desktop_shortcut(release_bin: Path) -> None:
     if not lnk.parent.is_dir():
         return
     try:
-        from launch_native import default_data_dir, default_strategy_dir
+        try:
+            from tools.launch_native import default_data_dir, default_strategy_dir
+        except ImportError:
+            from launch_native import default_data_dir, default_strategy_dir
 
         canonical = f"--data-dir {default_data_dir()} --strategy-dir {default_strategy_dir()}"
     except Exception:

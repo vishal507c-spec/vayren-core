@@ -2297,7 +2297,7 @@ class LiveSession:
     def armed(self) -> LiveArm:
         return self._armed
 
-    def stop(self) -> None:
+    def stop(self, disconnect_broker: bool = False) -> None:
         # Disarm FIRST, unconditionally: a direct session.stop() (teardown,
         # build-failure path) must never leave an armed session behind.
         # The service stops its timer only after every disarm has landed.
@@ -2305,9 +2305,10 @@ class LiveSession:
             self.disarm("stop")
         with suppress(Exception):
             self._lifecycle.transition(LifecycleState.STOPPING, reason="stop requested")
-        with suppress(Exception):
-            if self._broker is not None:
-                self._broker.disconnect()
+        if disconnect_broker:
+            with suppress(Exception):
+                if self._broker is not None:
+                    self._broker.disconnect()
         with suppress(Exception):
             self._lifecycle.transition(LifecycleState.STOPPED, reason="stopped")
 

@@ -249,7 +249,7 @@ component MTimeButton inherits Rectangle {
             padding-right: VayrenDesign.sp-md;
             Text {
                 text: root.label;
-                color: root.active ? VayrenPalette.text : VayrenPalette.muted;
+                color: root.active ? VayrenPalette.text-bright : VayrenPalette.muted;
                 font-size: VayrenDesign.fs-label;
                 font-weight: 700;
                 horizontal-alignment: center;
@@ -889,6 +889,7 @@ component CandleGlyph inherits Rectangle {
         y: parent.c.top * parent.grid-h;
         width: parent.width;
         height: Math.max(1px, parent.c.body * parent.grid-h);
+        border-radius: VayrenDesign.radius-sm;
         background: MarketTone.brush(parent.c.tone);
     }
     // volume pane removed: bars hidden, zone reclaimed by the price grid.
@@ -996,7 +997,7 @@ component IndicatorSettingsPopup inherits Rectangle {
         spacing: VayrenDesign.sp-sm;
         padding: VayrenDesign.sp-md;
         Text {
-            text: root.name + " â€” Settings";
+            text: root.name + " — Settings";
             color: VayrenPalette.text;
             font-size: VayrenDesign.fs-small;
             font-weight: 700;
@@ -1341,7 +1342,7 @@ component CredentialsModal inherits Rectangle {
                 reveal() => { root.reveal(f.key); }
             }
             SmallButton {
-                label: root.test-running ? "Testingâ€¦" : "Test Connection";
+                label: root.test-running ? "Testing…" : "Test Connection";
                 enabled: !root.test-running;
                 picked => { root.test(); }
             }
@@ -2031,7 +2032,7 @@ export component MarketScreen inherits Rectangle {
 
     property <length> price-strip: 96px;
     property <length> time-axis-h: 24px;
-    property <length> header-h: 24px;
+    property <length> header-h: 28px;
 
     background: VayrenPalette.bg;
 
@@ -2048,7 +2049,7 @@ export component MarketScreen inherits Rectangle {
             // â”€â”€ tools rail (legacy: exactly the watchlist toggle) â”€â”€
             Rectangle {
                 width: 40px;
-                background: VayrenPalette.surface;
+                background: VayrenPalette.bg1;
                 VerticalLayout {
                     padding: 5px;
                     spacing: 2px;
@@ -2122,7 +2123,7 @@ export component MarketScreen inherits Rectangle {
                         padding-right: 6px;
                         Text {
                             text: "SYMBOL";
-                            color: VayrenPalette.faint;
+                            color: VayrenPalette.muted;
                             font-size: VayrenDesign.fs-label;
                             font-weight: 600;
                             vertical-alignment: center;
@@ -2143,7 +2144,7 @@ export component MarketScreen inherits Rectangle {
                     LineEdit {
                         height: 28px;
                         text: root.filter;
-                        placeholder-text: "Filter symbolsâ€¦";
+                        placeholder-text: "Filter symbols…";
                         edited(t) => { root.filter-changed(t); }
                     }
                     ScrollView {
@@ -2153,19 +2154,19 @@ export component MarketScreen inherits Rectangle {
                         VerticalLayout {
                             spacing: 0;
                             for row in root.watch-rows: Rectangle {
-                                height: 40px;
+                                height: 36px;
                                 background: row.selected ? VayrenPalette.selected
-                                    : wta.has-hover ? VayrenPalette.hover : transparent;
+                                    : wta.has-hover ? VayrenPalette.row-hover : transparent;
                                 wta := TouchArea {
                                     mouse-cursor: pointer;
                                     clicked => { root.symbol-selected(row.symbol); }
                                 }
                                 VerticalLayout {
-                                    padding-left: 8px;
-                                    padding-right: 8px;
+                                    padding-left: 10px;
+                                    padding-right: 10px;
                                     spacing: 0;
                                     HorizontalLayout {
-                                        height: 20px;
+                                        height: 18px;
                                         Text {
                                             text: row.symbol;
                                             color: VayrenPalette.text;
@@ -2177,7 +2178,7 @@ export component MarketScreen inherits Rectangle {
                                         Rectangle { horizontal-stretch: 1; background: transparent; }
                                         Text {
                                             text: row.price;
-                                            color: VayrenPalette.text;
+                                            color: VayrenPalette.text-bright;
                                             font-size: VayrenDesign.fs-small;
                                             font-weight: 600;
                                             horizontal-alignment: right;
@@ -2189,10 +2190,27 @@ export component MarketScreen inherits Rectangle {
                                         text: row.change;
                                         color: MarketTone.brush(row.tone);
                                         font-size: VayrenDesign.fs-label;
+                                        font-weight: 600;
                                         horizontal-alignment: right;
                                         vertical-alignment: center;
                                         overflow: elide;
                                     }
+                                }
+                                // TradingView-style row rhythm: a teal selection
+                                // edge and a hairline separator between symbols.
+                                if row.selected: Rectangle {
+                                    x: 0;
+                                    y: 0;
+                                    width: 2px;
+                                    height: parent.height;
+                                    background: VayrenPalette.accent;
+                                }
+                                Rectangle {
+                                    x: 0;
+                                    y: parent.height - 1px;
+                                    width: parent.width;
+                                    height: 1px;
+                                    background: VayrenPalette.hairline-soft;
                                 }
                             }
                             // Honest empty list: an unfiltered watchlist and a
@@ -2315,10 +2333,10 @@ export component MarketScreen inherits Rectangle {
                                 overflow: elide;
                             }
                             Rectangle { horizontal-stretch: 1; background: transparent; }
-                            SmallButton { label: "â† PREV"; picked => { root.trade-prev(); } }
-                            SmallButton { label: "NEXT â†’"; picked => { root.trade-next(); } }
+                            SmallButton { label: "← PREV"; picked => { root.trade-prev(); } }
+                            SmallButton { label: "NEXT →"; picked => { root.trade-next(); } }
                             SmallButton {
-                                label: "OPEN IN MARKET â†—";
+                                label: "OPEN IN MARKET ↗";
                                 primary: true;
                                 picked => { root.trade-open(); }
                             }
@@ -2333,13 +2351,31 @@ export component MarketScreen inherits Rectangle {
                         plot := Rectangle {
                             horizontal-stretch: 1;
                             clip: true;
-                            background: VayrenPalette.bg;
+                            background: VayrenPalette.bg2;
                             property <length> grid-h: self.height;
                             property <length> vol-h: 0px;
                             property <int> n: Math.max(
                                 Math.max(root.plot-slots, root.candles.length), 1
                             );
                             property <length> slot: self.width / n;
+
+                            // TradingView-grade chart grid: hairline guides
+                            // sit UNDER candles and overlays and derive from
+                            // the same tick positions as the two axes.
+                            for t in root.price-ticks: Rectangle {
+                                x: 0;
+                                y: t.pos * plot.grid-h;
+                                width: plot.width;
+                                height: 1px;
+                                background: VayrenPalette.hairline-soft;
+                            }
+                            for t in root.time-ticks: Rectangle {
+                                x: t.pos * plot.width;
+                                y: 0;
+                                width: 1px;
+                                height: plot.height;
+                                background: VayrenPalette.hairline-soft;
+                            }
 
                             // candles + volume (absolute, clipped)
                             Rectangle {
@@ -2401,7 +2437,7 @@ export component MarketScreen inherits Rectangle {
                                 y: 0;
                                 width: plot.width;
                                 height: root.header-h;
-                                background: VayrenPalette.surface;
+                                background: VayrenPalette.bg1;
                                 Rectangle {
                                     y: root.header-h - 1px;
                                     height: 1px;
@@ -2421,13 +2457,13 @@ export component MarketScreen inherits Rectangle {
                                     Text {
                                         text: root.symbol-title;
                                         color: VayrenPalette.text-bright;
-                                        font-size: VayrenDesign.fs-label;
+                                        font-size: VayrenDesign.fs-small;
                                         font-weight: 700;
                                         vertical-alignment: center;
                                     }
                                     Text {
                                         text: root.timeframe-label
-                                            + (root.exchange-label != "" ? "  â€¢  " + root.exchange-label : "");
+                                            + (root.exchange-label != "" ? "  •  " + root.exchange-label : "");
                                         color: VayrenPalette.accent;
                                         font-size: VayrenDesign.fs-label;
                                         vertical-alignment: center;
@@ -2548,6 +2584,10 @@ export component MarketScreen inherits Rectangle {
                                 y: root.header-h + 6px;
                                 width: 260px;
                                 height: root.indicator-rows.length * 30px;
+                                border-radius: VayrenDesign.radius-sm;
+                                border-width: 1px;
+                                border-color: VayrenPalette.hairline;
+                                background: VayrenPalette.surface;
                                 VerticalLayout {
                                     spacing: 2px;
                                     for ir in root.indicator-rows: IndicatorBarRow {
@@ -2579,7 +2619,7 @@ export component MarketScreen inherits Rectangle {
                                 alignment: center;
                                 Text {
                                     text: root.status-message;
-                                    color: VayrenPalette.faint;
+                                    color: VayrenPalette.muted;
                                     font-size: VayrenDesign.fs-small;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
@@ -2602,7 +2642,7 @@ export component MarketScreen inherits Rectangle {
                                     LineEdit {
                                         height: 28px;
                                         text: root.popup-query;
-                                        placeholder-text: "Search indicators & strategiesâ€¦";
+                                        placeholder-text: "Search indicators & strategies…";
                                         edited(t) => { root.indicator-query(t); }
                                     }
                                     ScrollView {
@@ -2634,7 +2674,7 @@ export component MarketScreen inherits Rectangle {
                         // price scale strip (labels + manual scale target)
                         Rectangle {
                             width: root.price-strip;
-                            background: VayrenPalette.bg;
+                            background: VayrenPalette.bg1;
                             property <length> grid-h: self.height;
 
                             // 1px subtle vertical separator line between plot and price axis
@@ -2653,7 +2693,7 @@ export component MarketScreen inherits Rectangle {
                                 x: 6px;
                                 width: parent.width - 14px;
                                 text: t.label;
-                                color: VayrenPalette.faint;
+                                color: VayrenPalette.muted;
                                 font-size: VayrenDesign.fs-label;
                                 horizontal-alignment: right;
                                 vertical-alignment: center;
@@ -2671,7 +2711,7 @@ export component MarketScreen inherits Rectangle {
                                 background: VayrenPalette.crosshair-bg;
                                 border-width: 1px;
                                 border-color: VayrenPalette.crosshair-border;
-                                border-radius: 4px;
+                                border-radius: VayrenDesign.radius-sm;
                                 clip: true;
 
                                 Text {
@@ -2688,15 +2728,15 @@ export component MarketScreen inherits Rectangle {
                             // direction-colored, painted after (above) the
                             // crosshair badge so it is never hidden by it.
                             if root.has-data && root.has-last-price: Rectangle {
-                                property <length> lbl-w: 80px;
+                                property <length> lbl-w: parent.width - 12px;
                                 property <length> lbl-h: 20px;
-                                x: (parent.width - self.lbl-w) / 2;
+                                x: 6px;
                                 y: Math.max(2px, Math.min(root.last-price-pos * parent.grid-h - self.lbl-h / 2, parent.grid-h - self.lbl-h - 2px));
                                 width: self.lbl-w;
                                 height: self.lbl-h;
                                 background: root.last-price-up
                                     ? VayrenPalette.pos : VayrenPalette.neg;
-                                border-radius: 4px;
+                                border-radius: VayrenDesign.radius-sm;
                                 clip: true;
 
                                 Text {
@@ -2813,7 +2853,7 @@ export component MarketScreen inherits Rectangle {
                     // time axis row
                     Rectangle {
                         height: root.time-axis-h;
-                        background: VayrenPalette.bg;
+                        background: VayrenPalette.bg1;
                         Rectangle {
                             y: 0;
                             height: 1px;
@@ -2825,7 +2865,7 @@ export component MarketScreen inherits Rectangle {
                             width: 80px;
                             height: parent.height;
                             text: t.label;
-                            color: VayrenPalette.faint;
+                            color: VayrenPalette.muted;
                             font-size: VayrenDesign.fs-label;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -3008,12 +3048,12 @@ export component MarketScreen inherits Rectangle {
         VerticalLayout {
             spacing: 0;
             MenuRow {
-                label: "Name A â†’ Z";
+                label: "Name A → Z";
                 selected: root.sort-ascending;
                 picked => { root.sort-asc(); root.open-menu = "none"; }
             }
             MenuRow {
-                label: "Name Z â†’ A";
+                label: "Name Z → A";
                 selected: !root.sort-ascending;
                 picked => { root.sort-desc(); root.open-menu = "none"; }
             }

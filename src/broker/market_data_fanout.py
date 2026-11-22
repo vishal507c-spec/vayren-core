@@ -123,6 +123,31 @@ class MarketDataFanout:
             self.subscribe(consumer_id, symbols)
         return MarketDataSubscription(self, consumer_id)
 
+    def subscriptions_batch(
+        self, consumer_specs: list[tuple[str, tuple[str, ...]]]
+    ) -> dict[str, MarketDataSubscription]:
+        """Create multiple subscriptions and issue AT MOST ONE upstream subscribe call."""
+        result: dict[str, MarketDataSubscription] = {}
+        with self._state_lock:
+            if self._closed:
+                raise RuntimeError("fan-out is closed")
+            before = set().union(*(c.symbols for c in self._consumers.values()))
+            for consumer_id, symbols in consumer_specs:
+                if not consumer_id:
+                    raise ValueError("consumer_id must be non-empty")
+                if consumer_id not in self._consumers:
+                    self._consumers[consumer_id] = ConsumerState(
+                        consumer_id=consumer_id,
+                        cursor=self._seq,
+                    )
+                self._consumers[consumer_id].symbols.update(symbols)
+                result[consumer_id] = MarketDataSubscription(self, consumer_id)
+            after = set().union(*(c.symbols for c in self._consumers.values()))
+            needed = tuple(sorted(after - before))
+        if needed:
+            self._call_upstream("subscribe", needed)
+        return result
+
     def consumer(self, consumer_id: str) -> ConsumerState:
         with self._state_lock:
             try:
@@ -224,12 +249,14 @@ class MarketDataFanout:
             self._connected = True
             self._last_error = ""
 
-    def close(self) -> None:
-        """Release every cursor and stop the shared transport.
+    def close(self, disconnect_upstream: bool = True) -> None:
+        """Release every cursor and optionally stop the shared transport.
 
         Symbols this fan-out subscribed are released first, so a venue-owned
         face is clean for the next run. By default the face is disconnected,
         not closed: a StaticPlugin hands the same object to the next START.
+        Pass disconnect_upstream=False to release consumer subscriptions while
+        leaving the upstream transport connected for immediate reuse.
         """
         with self._state_lock:
             if self._closed:
@@ -247,7 +274,7 @@ class MarketDataFanout:
             self._call_upstream("unsubscribe", tuple(symbols))
         if self._close_upstream_when_empty:
             self._call_upstream("close")
-        else:
+        elif disconnect_upstream:
             self._call_upstream("disconnect")
 
     # ── subscriptions ───────────────────────────────────────────────────

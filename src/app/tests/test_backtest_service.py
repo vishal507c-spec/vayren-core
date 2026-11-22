@@ -142,6 +142,10 @@ def test_describe_strategy_reports_params(tmp_path: Path) -> None:
     assert detail["kind"] == "obr_c1c4"
     assert {p["key"] for p in detail["params"]} == {
         "refIndex",
+        "c1ThresholdPct",
+        "c4ThresholdPct",
+        "exitHour",
+        "exitMinute",
         "buySlippagePct",
         "sellSlippagePct",
         "slSlippagePct",

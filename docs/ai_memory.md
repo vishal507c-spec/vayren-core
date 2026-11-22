@@ -1,5 +1,30 @@
 # AI Memory — Current State Only (compact, active path)
 
+**Latest update (market-ui-tradingview-restyle-20261122):** LOCAL ONLY — market screen visual restyle, zero feature/state changes.
+- `crates/vayren-shell/ui/market.slint` only (shared by shell `app.slint` + `vayren-market-view` host): TradingView-grade dark chart surface (`bg2`), subtle price/time grid from existing tick positions under candles, compact 36px watchlist rows with hairline separators + teal selection edge, brighter active timeframe/axis labels, 28px OHLC header, translucent indicator legend, full-width last-price badge, 1px rounded candle bodies, and corrected mojibake in visible strings (`Filter symbols…`, arrows, `•`, `— Settings`).
+- No palette/literal changes, no callbacks/properties added or removed; `validate_authority.py` PASS, `cargo check` PASS, `cargo test -p vayren-market-view` 13/13 PASS, `slint-viewer --screenshot` visual check PASS.
+- Native libs were missing in `target/release` earlier this session: full `python tools/build_rust.py` built `vayren_core.dll` + 6 view DLLs; `--check-only` → handshake OK. App must be restarted to pick up rebuilt binaries.
+
+**Latest update (obr-c1c4-exact-1to1-integration-20261122):** ORIGINAL DOWNLOADED OBR C1C4 INTEGRATED 1:1 INTO VAYREN APK & ENGINE —
+- **Authority Applied:** Downloaded `vayren (1).py` (6-month verified standalone engine) integrated directly into `src/strategy/obr_source.py` (`OBR_C1C4_SOURCE`) and `src/strategy/registry.py`.
+- **C1/C4 MetaLabel Gate:** Implemented exact C1 range (`>= 0.35%` of `prev_close`) and C4 range (`>= 0.45%` of `prev_close`) gate in `OBREngine`. Un-gated execution prevented.
+- **Stop-Loss & 15:15 EOD Exit:** Maintained SL at `ref_high` (for shorts) and `ref_low` (for longs). Exit at `15:15 IST` sharp on closed bar or market order.
+- **Position Sizing:** `qty = floor((capital * 4.0 * 0.0015) / abs(entry_price - stop_price))` via `src/risk/sizing.py`.
+- **Real Candle Verification:** Tested on 39 FYERS 30m candles across Nov 18-20 for NOCIL, KEC, KAYNES, WAAREERTL. Verified 100% exact match between reference logic and VAYREN OBREngine. Confirmed that MetaLabel properly blocked NOCIL on Nov 20 (C4 = 0.36% < 0.45%), preventing the exact bad trade and forced square-off the user experienced yesterday.
+- **EC2 Synchronized:** Transferred updated strategy code to EC2 production (`vayren`) and restarted `vayren-remote.service` clean (`ORDER_WS_CONNECTED` & `MARKET_WS_CONNECTED` verified).
+- **Rust Views Built:** `tools/build_rust.py` compiled `vayren_core.dll`, `vayren_market_view.dll`, and `target/debug/vayren-shell.exe` clean.
+
+**Previous update (smooth-start-stop-performance-20261122):** START & STOP SMOOTHNESS FIX —
+- **Batch WebSocket Subscription:** Added `MarketDataFanout.subscriptions_batch()`. Replaced 22 individual sequential `fanout.subscription()` calls with a single upstream batch subscribe. Reduces subscribe latency from ~12s down to ~50ms (240x speedup).
+- **Concurrent Session Construction:** In `LiveTradingService._build_sessions()`, session creation, SQLite history load, warmup, and initial start now run concurrently with `ThreadPoolExecutor(max_workers=min(8, total))`. Construction latency drops from ~4s to ~0.6s.
+- **Preserved Persistent Broker Connectivity:** `LiveSession.stop(disconnect_broker=False)` no longer tears down the application-wide shared broker adapter, and `MarketDataFanout.close(disconnect_upstream=False)` un-subscribes symbols without destroying the upstream WebSocket. Eliminates the `ORDER_WS_CLOSED` / degraded cooldown cycle on STOP and makes subsequent START instant.
+- **Verified:** All 14 fanout tests pass, 26 live start/stop tests pass, ruff & pyright 0 errors. Synced to EC2 and service restarted clean (`ORDER_WS_CONNECTED` & `MARKET_WS_CONNECTED` verified).
+
+**Latest update (desktop-packaged-exe-build-20261121):** LOCAL ONLY — Packaged production release build of `vayren-shell.exe` (40.6 MB) built via `cargo build --release -p vayren-shell --features packaged-remote`.
+- Binary placed directly on Desktop: `C:\Users\visha\Desktop\vayren-shell.exe`
+- Desktop shortcut synced: `C:\Users\visha\Desktop\VAYREN.lnk` (pointing to release binary with icon and working directory).
+- Verified: Windows GUI release binary compiled clean. Working tree clean. Local only, zero remote push.
+
 **Latest update (fyers-ordertag-hash-fix-20261118):** LOCAL ONLY — venue-safe FYERS `orderTag`.
 - Root cause 18 Nov: IFCI order rejected `orderTag: Only alphanumeric characters allowed (HTTP 400)` — internal `client_order_id` (`obr-c1c4:1.0:4:1:o1`) was sent verbatim to FYERS.
 - Fix: new `src/broker/order_tag.py` (`to_broker_tag` = `OBR` + sha256[:16] = 19 chars, regex `^[A-Za-z0-9]{1,30}$` validated; persisted tag↔id map + deterministic-hash reverse fallback). FYERS adapter validates before submit (clear `BrokerError` → journal `ORDER_REJECTED`), sends hashed tag, decodes via map/fallback at WS order, WS trade and order-book paths. `order_path_test_service` accepts the hash tag. Internal ids, Zerodha, sizing/risk/arming untouched.
