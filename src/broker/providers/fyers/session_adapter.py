@@ -9,6 +9,7 @@ order execution: ``place_order``, ``cancel_order``, ``modify_order``,
 from __future__ import annotations
 
 import contextlib
+import importlib
 import logging
 import queue
 import re
@@ -1231,6 +1232,46 @@ class FyersSessionAdapter:
         venue still works are "open".
         """
         return [row for row in self._read_orders() if row["status"] == STATUS_OPEN]
+
+    def fno_underlyings(self, symbols: tuple[str, ...]) -> set[str] | None:
+        """FYERS-native F&O classification (original v5.3.0 FNOUniverseEngine).
+
+        A symbol is F&O-eligible iff the venue serves an option chain for it.
+        Returns the eligible subset, or ``None`` when classification could not
+        be proven (caller must then fall back to the standard 15:15 EOD exit
+        for every symbol — never silently treat everyone as non-F&O).
+        """
+        try:
+            # Dynamic vendor import: the SDK is an optional runtime dependency
+            # and is never declared as a static third-party import (the
+            # architecture gate requires the same pattern used by the WS
+            # bridges in this package). Absent SDK = classification unproven.
+            fyers_model_mod = importlib.import_module("fyers_apiv3.fyersModel")
+        except Exception:  # noqa: BLE001 - SDK optional; fail closed
+            return None
+        try:
+            client = fyers_model_mod.FyersModel(
+                client_id=self._app_id,
+                token=self._token,
+                log_path="",
+                log_level="ERROR",
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        eligible: set[str] = set()
+        for sym in symbols:
+            underlying = sym.split(":")[-1].replace("-EQ", "")
+            payload = {"symbol": f"NSE:{underlying}-EQ", "strikecount": 1}
+            try:
+                resp = self._gateway.call("optionchain", client.optionchain, data=payload)
+            except Exception:  # noqa: BLE001 - any failure => unproven
+                return None
+            if not isinstance(resp, dict) or resp.get("s") != "ok":
+                return None
+            data = resp.get("data") or {}
+            if data.get("optionsChain") or data.get("callOi") is not None:
+                eligible.add(sym)
+        return eligible
 
     def reconciliation_snapshot(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """One account snapshot shared by every per-symbol reconciliation.

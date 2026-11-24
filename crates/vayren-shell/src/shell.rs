@@ -18,11 +18,11 @@ use crate::view_model::{BrokerPanel, CapabilityStatus, Environment};
 use crate::viewport::ChartViewportZoom;
 pub use crate::ShellScreen;
 use crate::{
-    AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
-    DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
-    LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
-    LabTradeRow, LiveActiveStrategy, LiveBar, LiveEligibility, LiveEligibilityRow, LiveEventRow,
-    LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
+    ui_settings, AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView,
+    DlCalDay, DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric,
+    LabHeader, LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow,
+    LabTradeMetric, LabTradeRow, LiveActiveStrategy, LiveBar, LiveEligibility, LiveEligibilityRow,
+    LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
     LivePipelineStep, LivePosition, LiveRemoteGateway, LiveSelectedStock, LiveSetup, LiveStat,
     LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
     MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketTick, MarketTimeframe,
@@ -852,6 +852,19 @@ pub fn wire_market(
         "panel",
         market::MarketAction::PanelToggle
     );
+    {
+        // Geometry tier: the screen reports the live plot height; the domain
+        // derives the height-aware price-label count from it
+        // (`MarketState::set_plot_metrics`). Fires on layout settle and every
+        // resize, so the price axis stays balanced as pixels change.
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_plot_metrics(move |height: f32| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong.borrow_mut().set_plot_metrics(height);
+            refresh_viewport(&ui, &strong);
+        });
+    }
     act!(on_market_sort_asc, "sort", market::MarketAction::SortAsc);
     act!(on_market_sort_desc, "sort", market::MarketAction::SortDesc);
     act!(
@@ -992,11 +1005,13 @@ pub fn wire_market(
             let timeframe = strong.borrow().timeframe.clone();
             // Old bars stay visible (real data, previous symbol) while the
             // worker loads; the snapshot swaps in atomically on arrival.
+            // Full refresh (not viewport-only): the watchlist selection
+            // highlight and the stale-series banner belong to the same click.
             strong.borrow_mut().interact(
                 &format!("symbol:select:{name}"),
                 market::MarketAction::SelectSymbol(name.to_string()),
             );
-            refresh_viewport(&ui, &strong);
+            refresh(&ui, &strong);
             fetch(Some(name.to_string()), Some(timeframe));
         });
     }
@@ -1011,7 +1026,18 @@ pub fn wire_market(
                 &format!("timeframe:select:{timeframe}"),
                 market::MarketAction::SelectTimeframe(timeframe.to_string()),
             );
-            refresh_viewport(&ui, &strong);
+            refresh(&ui, &strong);
+            // Persist the user's actual pick for the next start (desktop
+            // client side). Atomic temp-file + rename; validated against the
+            // supported set — anything else is never written.
+            if let Some(valid) = ui_settings::UiSettings::validate_chart_timeframe(&timeframe) {
+                let settings = ui_settings::UiSettings {
+                    chart_timeframe: Some(valid),
+                };
+                if let Err(err) = settings.save_atomic(&ui_settings::default_settings_path()) {
+                    eprintln!("Failed to persist chart timeframe: {err}");
+                }
+            }
             fetch(Some(symbol), Some(timeframe.to_string()));
         });
     }
@@ -3390,6 +3416,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         can_stop: view.setup.can_stop,
         needs_live_confirm: view.setup.needs_live_confirm,
         confirmed_live: view.setup.confirmed_live,
+        confirm_dialog_open: view.setup.confirm_dialog_open,
         symbol_total: view.setup.symbol_total.into(),
         stock_universe: Rc::new(slint::VecModel::from(
             view.setup
@@ -3890,6 +3917,11 @@ where
     }
     wire_unit!(on_live_start_requested, LiveState::start);
     wire_unit!(on_live_stop_requested, LiveState::stop);
+    wire_unit!(on_live_confirm_requested, LiveState::confirm_live);
+    wire_unit!(
+        on_live_confirm_cancel_requested,
+        LiveState::close_confirm_dialog
+    );
     wire_unit!(on_live_inspector_toggled, LiveState::toggle_inspector);
     {
         // CLEAR EVENTS is UI-hygiene only: it drops the rendered event
@@ -4992,6 +5024,7 @@ mod tests {
             can_stop: false,
             needs_live_confirm: false,
             confirmed_live: false,
+            confirm_dialog_open: false,
             symbol_total: "527 symbols (OBR C1C4)".into(),
             stock_universe: Rc::new(slint::VecModel::from(Vec::<slint::SharedString>::new()))
                 .into(),

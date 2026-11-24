@@ -187,6 +187,8 @@ export component AppWindow inherits Window {
     callback live-quantity-edited(string);
     callback live-start-requested();
     callback live-stop-requested();
+    callback live-confirm-requested();
+    callback live-confirm-cancel-requested();
     callback live-event-filter-changed(string);
     callback live-event-type-picked(string);
     callback live-clear-events();
@@ -218,6 +220,7 @@ export component AppWindow inherits Window {
     callback market-price-drag(float, float);
     callback market-price-drag-end();
     callback market-price-reset();
+    callback market-plot-metrics(length);
     callback market-indicator-popup(bool);
     callback market-indicator-query(string);
     callback market-indicator-category(string);
@@ -804,6 +807,7 @@ export component AppWindow inherits Window {
                     price-drag(n, a) => { root.market-price-drag(n, a); }
                     price-drag-end() => { root.market-price-drag-end(); }
                     price-reset() => { root.market-price-reset(); }
+                    plot-metrics(h) => { root.market-plot-metrics(h); }
                     indicator-popup(o) => { root.market-indicator-popup(o); }
                     indicator-query(s) => { root.market-indicator-query(s); }
                     indicator-category(s) => { root.market-indicator-category(s); }
@@ -1058,6 +1062,8 @@ export component AppWindow inherits Window {
                     quantity-edited(t) => { root.live-quantity-edited(t); }
                     start-requested() => { root.live-start-requested(); }
                     stop-requested() => { root.live-stop-requested(); }
+                    confirm-requested() => { root.live-confirm-requested(); }
+                    confirm-cancel-requested() => { root.live-confirm-cancel-requested(); }
                     event-filter-changed(t) => { root.live-event-filter-changed(t); }
                     event-type-picked(i) => { root.live-event-type-picked(i); }
                     clear-events() => { root.live-clear-events(); }

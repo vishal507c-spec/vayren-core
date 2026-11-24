@@ -1545,21 +1545,10 @@ pub fn spawn_remote_pump(
                         let detail = if ok {
                             String::new()
                         } else {
-                            let join = |key: &str| {
-                                payload
-                                    .get(key)
-                                    .and_then(|v| v.as_array())
-                                    .map(|list| {
-                                        list.iter()
-                                            .filter_map(|v| v.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join("; ")
-                                    })
-                                    .unwrap_or_default()
-                            };
-                            let blockers = join("start_blockers");
-                            if !blockers.is_empty() {
-                                blockers
+                            let explicit_detail =
+                                payload.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+                            if !explicit_detail.is_empty() {
+                                explicit_detail.to_string()
                             } else {
                                 let reason = payload
                                     .get("status_reason")
@@ -1574,11 +1563,24 @@ pub fn spawn_remote_pump(
                                     if !err.is_empty() {
                                         err.to_string()
                                     } else {
-                                        payload
-                                            .get("detail")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("refused by backend")
-                                            .to_string()
+                                        let join = |key: &str| {
+                                            payload
+                                                .get(key)
+                                                .and_then(|v| v.as_array())
+                                                .map(|list| {
+                                                    list.iter()
+                                                        .filter_map(|v| v.as_str())
+                                                        .collect::<Vec<_>>()
+                                                        .join("; ")
+                                                })
+                                                .unwrap_or_default()
+                                        };
+                                        let blockers = join("start_blockers");
+                                        if !blockers.is_empty() {
+                                            blockers
+                                        } else {
+                                            "refused by backend".to_string()
+                                        }
                                     }
                                 }
                             }

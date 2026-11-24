@@ -707,7 +707,7 @@ def _live_action(
                 snapshot["action_note"] = "strategy start in progress"
                 return snapshot
 
-            confirmed = bool(action.get("confirmed", True)) or bool(
+            confirmed = bool(action.get("confirmed", False)) or bool(
                 getattr(service, "is_live_confirmed", lambda: False)()
             )
             ok, reasons = service.start(
@@ -1164,6 +1164,12 @@ def _trading_service_snapshot(data_dir: str, strategy_dir: str, broker_manager: 
     else:
         snap["market_bars"] = []
         snap["market_bar_count"] = 0
+    # Server-authoritative safe-disconnect state (persisted for crash recovery).
+    # A read-only projection: it never starts a sequence or mutates the engine.
+    with contextlib.suppress(Exception):
+        snap["safe_disconnect"] = _safe_disconnect_service(
+            data_dir, strategy_dir, broker_manager
+        ).snapshot()
     return snap
 
 
@@ -1194,6 +1200,25 @@ def _live_unavailable(reason: str) -> dict:
 
 
 _TRADING_SERVICES: dict[tuple[str, str], Any] = {}
+_SAFE_DISCONNECT_SERVICES: dict[tuple[str, str], Any] = {}
+
+
+def _safe_disconnect_service(data_dir: str, strategy_dir: str, broker_manager: Any = None) -> Any:
+    """Cached safe-disconnect orchestrator over the SAME live service + manager."""
+    from app.services.safe_disconnect_service import SafeDisconnectService
+
+    key = (str(data_dir), str(strategy_dir))
+    coordinator = _SAFE_DISCONNECT_SERVICES.get(key)
+    if coordinator is None:
+        coordinator = SafeDisconnectService(
+            str(data_dir),
+            _live_service(data_dir, strategy_dir, broker_manager),
+            broker_manager,
+        )
+        _SAFE_DISCONNECT_SERVICES[key] = coordinator
+    else:
+        coordinator.rebind(_live_service(data_dir, strategy_dir, broker_manager), broker_manager)
+    return coordinator
 
 
 def _portfolio_snapshot(data_dir: str, strategy_dir: str) -> dict:
@@ -2660,6 +2685,26 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                     snapshot = _handle_disconnect_broker(
                         command, str(data_dir), str(strategy_dir), broker_manager
                     )
+                    result = {"type": "system_snapshot", "data": snapshot}
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "safe_disconnect":
+                    broker_id = str(command.get("broker_id") or "").strip().lower()
+                    coordinator = _safe_disconnect_service(
+                        str(data_dir), str(strategy_dir), broker_manager
+                    )
+                    outcome = coordinator.run(
+                        str(command.get("request_id", "") or ""),
+                        broker_id,
+                        acknowledge_exposure=bool(command.get("acknowledge_exposure", False)),
+                    )
+                    snapshot = _trading_service_snapshot(
+                        str(data_dir), str(strategy_dir), broker_manager
+                    )
+                    snapshot["action_note"] = outcome.get("reason", "")
+                    snapshot["action_ok"] = bool(outcome.get("ok", False))
+                    snapshot["safe_disconnect"] = outcome
                     result = {"type": "system_snapshot", "data": snapshot}
                     if not _emit(result):
                         break

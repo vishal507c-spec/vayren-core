@@ -375,6 +375,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "broker_session": scrub(broker_session),
         "websocket": scrub(websocket),
         "server_code": scrub(server_code),
+        "safe_disconnect": scrub(live.get("safe_disconnect", {})),
     }
     return scrub(snapshot)
 

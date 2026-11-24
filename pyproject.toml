@@ -71,6 +71,15 @@ line-ending = "auto"
 "src/backtest/tests/test_runner.py" = ["E501"]
 "src/backtest/tests/test_batch_worker.py" = ["E501"]
 
+# The OBR C1C4 engine is a 1:1 transcription of the original TradingView Pine
+# strategy. Its mixedCase names (entryMode, c1ThresholdPct, slPrice, isIdle…)
+# are the persisted parameter keys and runtime attributes consumed verbatim by
+# strategy/registry.py, app/services/live_trading_service.py and the v5.3
+# preservation tests. Renaming them would change the strategy's public contract
+# for zero behaviour gain. Only the two naming rules are excepted — every
+# other rule (type syntax, format, complexity, line length) stays enforced.
+"src/strategy/obr_c1c4_engine.py" = ["N802", "N815"]
+
 # ── Pyright (Type Checker) ────────────────────────────────────
 [tool.pyright]
 typeCheckingMode = "standard"

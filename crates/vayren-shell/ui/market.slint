@@ -869,7 +869,9 @@ component CandleGlyph inherits Rectangle {
     in property <length> slot;
 
     property <length> body-w: Math.max(1px, slot * 0.6);
-    property <length> cx: c.x * plot-w;
+    // Snap the centre and the 1px wick to whole pixels: sub-pixel positions
+    // make the renderer antialias a 1px rectangle into a blurry 2px smear.
+    property <length> cx: Math.round(c.x * plot-w / 1px) * 1px;
 
     x: cx - body-w / 2;
     y: 0px;
@@ -877,7 +879,7 @@ component CandleGlyph inherits Rectangle {
     height: grid-h + vol-h;
     // wick
     Rectangle {
-        x: (parent.width - 1px) / 2;
+        x: Math.round((parent.width - 1px) / 2px) * 1px;
         y: parent.c.h * parent.grid-h;
         width: 1px;
         height: Math.max(1px, (parent.c.l - parent.c.h) * parent.grid-h);
@@ -889,7 +891,6 @@ component CandleGlyph inherits Rectangle {
         y: parent.c.top * parent.grid-h;
         width: parent.width;
         height: Math.max(1px, parent.c.body * parent.grid-h);
-        border-radius: VayrenDesign.radius-sm;
         background: MarketTone.brush(parent.c.tone);
     }
     // volume pane removed: bars hidden, zone reclaimed by the price grid.
@@ -2015,6 +2016,10 @@ export component MarketScreen inherits Rectangle {
     // row id: "scale" | "cross"). The popup stays the single
     // entry point so the toolbar keeps its v1.25.0 pixel inventory.
     callback chart-opt-picked(string);
+    // Live plot height in px: the engine reports it on layout settle and on
+    // every resize; the shell feeds it to `MarketState::set_plot_metrics`
+    // so the right price axis scales its label count with the pixels.
+    callback plot-metrics(length);
 
     // â”€â”€ local presentation state (menus, drag) â”€â”€
     // Menu state is in-out (not internal) so the Slint viewer and the
@@ -2358,6 +2363,10 @@ export component MarketScreen inherits Rectangle {
                                 Math.max(root.plot-slots, root.candles.length), 1
                             );
                             property <length> slot: self.width / n;
+                            // Report height changes (including the first
+                            // layout settle) to the engine for the height-aware
+                            // price-label count.
+                            changed height => { root.plot-metrics(self.height); }
 
                             // TradingView-grade chart grid: hairline guides
                             // sit UNDER candles and overlays and derive from
@@ -2375,6 +2384,24 @@ export component MarketScreen inherits Rectangle {
                                 width: 1px;
                                 height: plot.height;
                                 background: VayrenPalette.hairline-soft;
+                            }
+
+                            // Current-price line, drawn in the plot's OWN
+                            // coordinate system: one pixel-high, short dotted
+                            // segments at exactly `last-price-pos` — the same
+                            // fraction the right-axis badge uses. Rendered
+                            // beneath candles, so it reads as a price guide
+                            // and never as a decorative overlay or a crosshair.
+                            if root.has-data && root.has-last-price: Rectangle {
+                                property <int> dash-count: Math.max(0, Math.floor(plot.width / 8px));
+                                for i in self.dash-count: Rectangle {
+                                    x: i * 8px;
+                                    y: root.last-price-pos * plot.grid-h;
+                                    width: 4px;
+                                    height: 1px;
+                                    background: root.last-price-up
+                                        ? VayrenPalette.pos : VayrenPalette.neg;
+                                }
                             }
 
                             // candles + volume (absolute, clipped)
@@ -2683,11 +2710,19 @@ export component MarketScreen inherits Rectangle {
                                 y: 0px;
                                 width: 1px;
                                 height: parent.height;
-                                background: VayrenPalette.hairline;
+                                background: VayrenPalette.hairline-soft;
                             }
 
-                            property <length> tick-h: 16px;
+                            property <length> tick-h: 14px;
+                            // TradingView rule: a scale label that would sit
+                            // under a badge is suppressed — the badge carries
+                            // that price already. Two labels fighting for the
+                            // same pixels was the "1,160.00" clipping bug.
                             for t in root.price-ticks: Text {
+                                visible: !(root.has-data && root.has-last-price
+                                    && Math.abs(t.pos - root.last-price-pos) * parent.grid-h < 20px)
+                                    && !(root.has-hover && root.cross-visible
+                                    && Math.abs(t.pos - root.hover-y) * parent.grid-h < 20px);
                                 y: Math.max(2px, Math.min(t.pos * parent.grid-h - parent.tick-h / 2, parent.grid-h - parent.tick-h - 2px));
                                 height: parent.tick-h;
                                 x: 6px;
@@ -2700,12 +2735,27 @@ export component MarketScreen inherits Rectangle {
                                 overflow: elide;
                             }
 
-                            // Active crosshair price badge on right price axis
+                            // Active crosshair price badge on right price axis.
+                            // Clamped into the strip; when the pointer is near
+                            // the permanent LTP badge it shifts away (above or
+                            // below) so the two markers never overlap; if a
+                            // residual collision persists at the pin edges, the
+                            // LTP badge owns the space and this hides instead.
                             if root.has-hover && root.cross-visible: Rectangle {
                                 property <length> lbl-w: 80px;
-                                property <length> lbl-h: 20px;
+                                property <length> lbl-h: 18px;
+                                property <length> c: root.hover-y * parent.grid-h;
+                                property <length> l: root.last-price-pos * parent.grid-h;
+                                property <bool> near-ltp: root.has-data && root.has-last-price
+                                    && Math.abs(c - l) < self.lbl-h + 6px;
+                                property <length> base-y: near-ltp && c > l
+                                    ? c + self.lbl-h / 2
+                                    : c - self.lbl-h / 2;
+                                property <length> badge-y: Math.max(2px, Math.min(base-y, parent.grid-h - self.lbl-h - 2px));
+                                visible: !(root.has-data && root.has-last-price
+                                    && Math.abs(badge-y - l) < self.lbl-h);
                                 x: (parent.width - self.lbl-w) / 2;
-                                y: Math.max(2px, Math.min(root.hover-y * parent.grid-h - self.lbl-h / 2, parent.grid-h - self.lbl-h - 2px));
+                                y: badge-y;
                                 width: self.lbl-w;
                                 height: self.lbl-h;
                                 background: VayrenPalette.crosshair-bg;
@@ -2728,9 +2778,13 @@ export component MarketScreen inherits Rectangle {
                             // direction-colored, painted after (above) the
                             // crosshair badge so it is never hidden by it.
                             if root.has-data && root.has-last-price: Rectangle {
-                                property <length> lbl-w: parent.width - 12px;
-                                property <length> lbl-h: 20px;
-                                x: 6px;
+                                // Slim pill centred on the EXACT same Y as the
+                                // dotted price line in the plot (the line's Y is
+                                // `last-price-pos * grid-h`; the pill follows it,
+                                // clamped at the strip's top/bottom edges).
+                                property <length> lbl-w: parent.width - 16px;
+                                property <length> lbl-h: 16px;
+                                x: 8px;
                                 y: Math.max(2px, Math.min(root.last-price-pos * parent.grid-h - self.lbl-h / 2, parent.grid-h - self.lbl-h - 2px));
                                 width: self.lbl-w;
                                 height: self.lbl-h;
@@ -2743,7 +2797,7 @@ export component MarketScreen inherits Rectangle {
                                     text: root.last-price;
                                     color: VayrenPalette.accent-text;
                                     font-size: VayrenDesign.fs-label;
-                                    font-weight: 700;
+                                    font-weight: 600;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
@@ -2870,6 +2924,45 @@ export component MarketScreen inherits Rectangle {
                             horizontal-alignment: center;
                             vertical-alignment: center;
                             overflow: elide;
+                        }
+
+                        // TradingView parity: the crosshair's date + time
+                        // follows the pointer on the time axis. `hover-time`
+                        // is computed by the Rust kernel (day/month/year +
+                        // HH:MM for intraday), so the badge always names the
+                        // bar actually under the cursor — including the empty
+                        // area to the right of the newest bar.
+                        if root.has-hover && root.cross-visible && root.hover-time != "": Rectangle {
+                            property <length> plot-w: parent.width - root.price-strip;
+                            property <length> badge-w: 132px;
+                            property <length> badge-h: 18px;
+                            // Short connector makes the crosshair read as one
+                            // continuous line from the plot into the axis.
+                            Rectangle {
+                                x: root.hover-x * parent.plot-w;
+                                y: 0;
+                                width: 1px;
+                                height: 4px;
+                                background: VayrenPalette.crosshair-line;
+                            }
+                            x: Math.max(0px, Math.min(root.hover-x * self.plot-w - self.badge-w / 2, self.plot-w - self.badge-w));
+                            y: (parent.height - self.badge-h) / 2;
+                            width: self.badge-w;
+                            height: self.badge-h;
+                            background: VayrenPalette.crosshair-bg;
+                            border-width: 1px;
+                            border-color: VayrenPalette.crosshair-border;
+                            border-radius: VayrenDesign.radius-sm;
+                            clip: true;
+                            Text {
+                                text: root.hover-time;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
                         }
 
                         TouchArea {

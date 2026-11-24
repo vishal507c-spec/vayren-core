@@ -294,11 +294,27 @@ pub const MIN_VISIBLE_BARS: usize = 10;
 /// memory and is reachable by horizontal panning; nothing is deleted,
 /// truncated, downsampled or aggregated to enforce it.
 pub const MAX_VISIBLE_BARS: usize = 1600;
-pub const INITIAL_BARS: usize = 1400;
+/// Opening window: a professional chart shows a readable slice of recent
+/// price action, not the symbol's entire multi-month history. 1,400 bars on a
+/// 1,600px plot is ~1px per candle — every daily range collapses into a thin
+/// band and the autoscaled price axis spans months instead of the visible
+/// levels. 260 slots stay readable at every desktop width and still leave the
+/// full history reachable by horizontal zoom-out/pan (nothing is deleted).
+pub const INITIAL_BARS: usize = 260;
 /// One candle's full horizontal budget in px (legacy `MIN_CANDLE_SLOT`).
 pub const MIN_CANDLE_SLOT_PX: f32 = 1.0;
 pub const RIGHT_MARGIN_FRACTION: f64 = 0.15;
 pub const PRICE_EDGE_MARGIN: f64 = 0.05;
+/// Target minimum vertical gap between adjacent price labels (~64px at
+/// ~11px font — a TradingView-grade readable pitch). The shell reports the
+/// plot's live height on resize and the domain derives how many levels the
+/// axis may show from it (see [`MarketState::set_plot_metrics`]).
+pub const PRICE_LABEL_SPACING_PX: f32 = 64.0;
+/// Floor/ceiling on the height-aware price label count. Below 4 levels a
+/// tall chart keeps sparser, readable labels; above 16 the levels run out
+/// of space before they outrun readability.
+pub const PRICE_TICKS_MIN: usize = 4;
+pub const PRICE_TICKS_MAX: usize = 16;
 pub const ZOOM_STEP: f64 = 1.25;
 pub const PRICE_ZOOM_STEP: f64 = 1.25;
 /// Backlog cap for queued backend wire strings. Overflow is counted and
@@ -450,7 +466,14 @@ pub struct MarketState {
     /// data, viewport or caches — geometry rebuilds only for scale changes.
     pub scale_mode: ChartScaleMode,
     pub cross_visible: bool,
+    /// Live plot height in px (0 = not reported yet, e.g. headless tests).
+    /// The shell reports it when the chart's layout settles and on every
+    /// resize; it feeds the height-aware price-label count.
+    pub price_axis_h: f32,
     pub cached_price_range: std::cell::Cell<Option<(f64, usize, usize, (f64, f64))>>,
+    /// Derived from `price_axis_h`: how many price levels the axis may show
+    /// at the current height. See [`MarketState::set_plot_metrics`].
+    pub price_tick_max: usize,
 }
 
 impl Default for MarketState {
@@ -501,7 +524,9 @@ impl Default for MarketState {
             dropped_pending_actions: 0,
             scale_mode: ChartScaleMode::Regular,
             cross_visible: true,
+            price_axis_h: 0.0,
             cached_price_range: std::cell::Cell::new(None),
+            price_tick_max: 6,
         }
     }
 }
@@ -511,6 +536,22 @@ impl MarketState {
     /// `max_visible_bars`): density cap bounded by the MAX_VISIBLE_BARS limit.
     pub fn max_visible_bars(&self) -> usize {
         self.width_cap.max(MIN_VISIBLE_BARS).min(MAX_VISIBLE_BARS)
+    }
+
+    /// Live plot metrics reported by the screen (geometry tier). Recomputes
+    /// the height-aware price-label count: with a real height the axis shows
+    /// ~one label per [`PRICE_LABEL_SPACING_PX`] pixels, floored at
+    /// [`PRICE_TICKS_MIN`] and capped at [`PRICE_TICKS_MAX`]. Zero/unknown
+    /// heights keep the legacy default of 6 so headless callers behave as
+    /// before.
+    pub fn set_plot_metrics(&mut self, height_px: f32) {
+        self.price_axis_h = height_px;
+        self.price_tick_max = if height_px.is_finite() && height_px > 0.0 {
+            ((height_px / PRICE_LABEL_SPACING_PX).round() as usize)
+                .clamp(PRICE_TICKS_MIN, PRICE_TICKS_MAX)
+        } else {
+            6
+        };
     }
 
     /// legacy `_anchor_first`: latest bar sits `RIGHT_MARGIN_FRACTION` from the
@@ -617,9 +658,21 @@ impl MarketState {
         let previous_symbol = std::mem::take(&mut self.selected_symbol);
         let previous_timeframe = std::mem::take(&mut self.timeframe);
         let previous_total = self.bars.len();
-        let same_series = previous_symbol == symbol
-            && previous_timeframe == timeframe
-            && !previous_symbol.is_empty();
+        // `selected_symbol` is updated optimistically by `SelectSymbol` the
+        // moment the user clicks a row, BEFORE these bars arrive. Deriving
+        // "same series" from it made the new symbol adopt the OLD viewport:
+        // `count`/`first` kept the previous symbol's scale, so a large chart
+        // followed by a small one rendered as a tiny cluster in the corner.
+        // The bars' recorded OWNER is the only honest comparison (with a
+        // fallback for states built by direct `set_bars` calls).
+        let incoming_series = format!("{symbol}\u{1}{timeframe}");
+        let previous_series = std::mem::take(&mut self.bars_series);
+        let same_series = !self.bars.is_empty()
+            && (previous_series == incoming_series
+                || (previous_series.is_empty()
+                    && previous_symbol == symbol
+                    && previous_timeframe == timeframe));
+        self.bars_series = incoming_series;
         self.selected_symbol = symbol.to_string();
         self.timeframe = timeframe.to_string();
         self.exchange = exchange.to_string();
@@ -634,6 +687,11 @@ impl MarketState {
             // or timeframe paints stale levels with no live source — the
             // classic unexplained horizontal line. Fresh snapshots repopulate
             // what is still legitimate.
+            // `plot_series` is an overlay too: an extend/horizontal indicator
+            // series emits the SAME persistent horizontal ray as a stored ray.
+            // Leaving it behind re-indexes old points onto the new bars and
+            // paints the unexplained stuck line with no live source or tag.
+            self.plot_series.clear();
             self.strategy_rays.clear();
             self.strategy_markers.clear();
             self.trade_markers.clear();
@@ -644,6 +702,9 @@ impl MarketState {
         if !self.bars.is_empty() {
             self.notice.clear();
         }
+        // Bars now belong to the header's series: the optimistic header change
+        // from SelectSymbol/SelectTimeframe is resolved.
+        self.bars_stale = false;
         if self.bars.is_empty() {
             self.status = MarketStatus::Empty;
             self.first = 0.0;
@@ -753,14 +814,33 @@ impl MarketState {
                 true
             }
             MarketAction::SelectSymbol(symbol) => {
+                if self.selected_symbol != symbol {
+                    // The header changes now; the bars still belong to the
+                    // previous series until the snapshot lands. Mark them
+                    // stale and drop transient chart state immediately so no
+                    // old crosshair / manual price scale leaks into the new
+                    // symbol's layout.
+                    self.bars_stale = !self.bars.is_empty();
+                    self.hover = None;
+                    self.price_manual = None;
+                    self.drag_origin = None;
+                    self.price_drag_active = false;
+                    self.cached_price_range.set(None);
+                }
                 self.selected_symbol = symbol;
-                self.hover = None;
                 true
             }
             MarketAction::SelectTimeframe(timeframe) => {
                 if self.timeframes.iter().any(|t| t == &timeframe) {
+                    if self.timeframe != timeframe {
+                        self.bars_stale = !self.bars.is_empty();
+                        self.hover = None;
+                        self.price_manual = None;
+                        self.drag_origin = None;
+                        self.price_drag_active = false;
+                        self.cached_price_range.set(None);
+                    }
                     self.timeframe = timeframe;
-                    self.hover = None;
                     true
                 } else {
                     false
@@ -1455,9 +1535,29 @@ pub fn short_time(stamp: &str) -> String {
     }
 }
 
+/// Approximate day index from a `YYYY-MM-DD` prefix of a bar stamp: enough
+/// to tell a one-day span from a multi-day span without calendar math.
+fn approx_day_index(date_part: &str) -> i64 {
+    let y = date_part
+        .get(..4)
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let m = date_part
+        .get(5..7)
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let d = date_part
+        .get(8..10)
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    y * 372 + m * 31 + d
+}
+
 /// Adaptive axis timestamp formatting (Problem 2):
 /// - Intraday (1m, 5m, 15m, 1h): clean times like `09:15`, `10:30`, `14:45`
 /// - Daily (1D): clean dates like `Jun 10`, `Jun 11`, `Jun 12`
+/// - Multi-day intraday windows: date labels for every bar — the HH:MM
+///   stamp repeats across days and would read as garbage
 /// - Macro / Multi-month (1W, 1M, or window > 3 months): clean `Jun 2026`
 pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> String {
     let cleaned = stamp.replace('T', " ");
@@ -1510,6 +1610,24 @@ pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> S
     let has_intraday_time =
         !time_part.is_empty() && time_part != "00:00" && time_part != "00:00:00";
 
+    // Multi-day window on an intraday timeframe (e.g. a 260-bar window over
+    // several days): every bar is labeled by date, never by the HH:MM stamp
+    // it carries — the intraday labels repeat across days and would read as
+    // garbage, and the axis should say which day the bar belongs to.
+    let mut day_lo = i64::MAX;
+    let mut day_hi = i64::MIN;
+    for b in window {
+        let d = approx_day_index(b.time.as_str());
+        day_lo = day_lo.min(d);
+        day_hi = day_hi.max(d);
+    }
+    let multi_day = !is_explicit_macro && !is_explicit_daily && day_hi - day_lo >= 2;
+
+    let day_num = day
+        .parse::<u32>()
+        .map(|d| d.to_string())
+        .unwrap_or_else(|_| day.to_string());
+
     let span_macro = if window.len() >= 2 {
         let first_date = window.first().map(|b| b.time.as_str()).unwrap_or("");
         let last_date = window.last().map(|b| b.time.as_str()).unwrap_or("");
@@ -1537,6 +1655,8 @@ pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> S
 
     if is_explicit_macro || span_macro {
         format!("{month_name} {year}")
+    } else if multi_day {
+        format!("{month_name} {day_num}")
     } else if is_explicit_intraday || (has_intraday_time && !is_explicit_daily) {
         if time_part.len() >= 5 {
             time_part[..5].to_string()
@@ -1544,10 +1664,6 @@ pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> S
             format!("{month_name} {day}")
         }
     } else {
-        let day_num = day
-            .parse::<u32>()
-            .map(|d| d.to_string())
-            .unwrap_or_else(|_| day.to_string());
         format!("{month_name} {day_num}")
     }
 }
@@ -2084,6 +2200,21 @@ fn transform_price(xform: ScaleXform, value: f64) -> Option<f64> {
     }
 }
 
+/// A stored ray is legitimate only while it can carry its axis tag. This
+/// mirrors the `ray_levels` gate exactly: a flat or untransformable price
+/// range must never leave a horizontal line painted behind the candles with
+/// no value label (the unexplained "stuck line" class of bug).
+fn ray_has_tag(ray: &StrategyRay, frame: ScaleFrame, span: f64) -> bool {
+    if ray.start < 0 || !span.is_finite() || span <= 0.0 {
+        return false;
+    }
+    let Some(t) = transform_price(frame.xform, ray.price) else {
+        return false;
+    };
+    let pos = ((frame.high - t) / span) as f32;
+    pos.is_finite()
+}
+
 fn pad_range(low: f64, high: f64) -> (f64, f64) {
     let mut span = high - low;
     if !span.is_finite() || span <= 0.0 {
@@ -2217,9 +2348,19 @@ fn axis_decimals(xform: ScaleXform, low: f64, high: f64) -> usize {
 /// Percent mode steps in % units; Log mode steps in real-price space
 /// (positions map back through the log frame); labels reuse the exact
 /// cursor-tag formatters so axis and crosshair can never disagree.
-fn nice_price_ticks(xform: ScaleXform, low: f64, high: f64, dec: usize) -> Vec<AxisTick> {
-    const MAX_TICKS: usize = 6;
-    if !low.is_finite() || !high.is_finite() || high <= low {
+///
+/// `max_ticks` is the level budget: [`MarketState::set_plot_metrics`]
+/// derives it from the live plot height so the axis is as balanced as the
+/// pixels allow (spacing ~ [`PRICE_LABEL_SPACING_PX`] px); the legacy default
+/// is 6.
+fn nice_price_ticks_at_height(
+    xform: ScaleXform,
+    low: f64,
+    high: f64,
+    dec: usize,
+    max_ticks: usize,
+) -> Vec<AxisTick> {
+    if max_ticks == 0 || !low.is_finite() || !high.is_finite() || high <= low {
         return vec![AxisTick {
             pos: 0.5,
             label: fmt_scale_dec(xform, 0.5 * (low + high), dec),
@@ -2237,12 +2378,13 @@ fn nice_price_ticks(xform: ScaleXform, low: f64, high: f64, dec: usize) -> Vec<A
             label: fmt_scale_dec(xform, 0.5 * (low + high), dec),
         }];
     }
-    let step = nice_step(hi - lo, MAX_TICKS);
+    let step = nice_step(hi - lo, max_ticks);
     let mut ticks = Vec::new();
     let mut k = (lo / step).ceil() as i64;
     // Integer-grid walk: immune to `v += step` float drift, so levels stay
-    // exactly round (1,150.00, never 1,149.99999).
-    for _ in 0..12 {
+    // exactly round (1,150.00, never 1,149.99999). The headroom covers the
+    // ceil/floor rounding of the grid walk at both ends.
+    for _ in 0..(max_ticks.saturating_add(8)).max(16) {
         let mut v = k as f64 * step;
         if v > hi + step * 1e-9 {
             break;
@@ -2472,7 +2614,13 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         // span fractions (grid lines follow these ticks one-for-one).
         // Adjacent duplicates collapse (intraday time-only labels repeat
         // across days) so the axis never shows the same stamp twice.
-        price_ticks = nice_price_ticks(frame.xform, frame.low, frame.high, dec);
+        price_ticks = nice_price_ticks_at_height(
+            frame.xform,
+            frame.low,
+            frame.high,
+            dec,
+            state.price_tick_max,
+        );
         let mut last_time_label = String::new();
         // Adaptive tick generation (Problem 2):
         // Calculate available plot fraction and min spacing to never allow label collision.
@@ -2909,7 +3057,8 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         // Strategy-owned rays (REF HIGH/LOW horizontals): same emitter,
         // horizon is the tail end (clipped to the viewport either way).
         for ray in &state.strategy_rays {
-            if ray.start < 0 {
+            // Same gate as the axis-tag emitter: no labelled value, no line.
+            if !ray_has_tag(ray, frame, span) {
                 continue;
             }
             emit_ray(
@@ -3190,6 +3339,11 @@ fn snap_str_list(value: &serde_json::Value, key: &str) -> Option<Vec<String>> {
 /// window, hover, pending actions) are preserved. Missing or mistyped
 /// sections degrade to honest absence (Loading/Empty), never invented values.
 pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
+    // A payload that carries `bars` is a full snapshot: every backend-owned
+    // overlay section it omits is honestly absent. Keeping the previous
+    // section in that case is what left a stale ray/series drawn on the chart
+    // after a reload whose payload had no overlay keys.
+    let full_snapshot = value.get("bars").is_some();
     if let Some(rows) = value.get("symbols").and_then(|v| v.as_array()) {
         state.symbols = rows
             .iter()
@@ -3372,6 +3526,8 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
                 })
             })
             .collect();
+    } else if full_snapshot {
+        state.plot_series.clear();
     }
     // Trade markers: chart positions resolved backend-side through chart
     // timestamps (replay indices never index chart bars) + covered flags
@@ -3417,6 +3573,9 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             .get("focused_trade")
             .and_then(|v| v.as_u64())
             .map(|v| v as usize);
+    } else if full_snapshot {
+        state.trade_markers.clear();
+        state.focused_trade = None;
     }
     // Focused single-trade detail (explicit inspection replaces ambient).
     state.focused = value.get("focused").and_then(|f| {
@@ -3462,6 +3621,8 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
                 })
             })
             .collect();
+    } else if full_snapshot {
+        state.strategy_markers.clear();
     }
     // Strategy-owned rays (REF HIGH/LOW horizontals).
     if let Some(rows) = value.get("strategy_rays").and_then(|v| v.as_array()) {
@@ -3485,6 +3646,8 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
                 })
             })
             .collect();
+    } else if full_snapshot {
+        state.strategy_rays.clear();
     }
     // Trade context strip facts (pre-formatted labels from the retained legacy
     // panel — the bridge carries them verbatim).
@@ -3644,11 +3807,11 @@ mod tests {
         st.set_bars("TEST", "15m", "NSE", bars(5000));
         st.follow_latest = false;
         st.first = 2000.0;
-        // Sub-bar wheel step: 0.0001 * 1400 slots ≈ 0.14 bars of movement
-        // (f32 gesture precision — the exact delta the wheel reported).
+        // Sub-bar wheel step: 0.0001 * the window slots ≈ 0.026 bars of
+        // movement (INITIAL_BARS is 260; the legacy probe used 1400 slots).
         let before = st.first;
         assert!(st.apply(MarketAction::WheelPanX(0.0001)));
-        assert!((st.first - (before - 0.14)).abs() < 1e-6);
+        assert!((st.first - (before - 0.0001 * st.count as f64)).abs() < 1e-6);
         // Sub-bar drag step tracks the gesture origin exactly (f32 gesture
         // precision: 0.5001f32 - 0.5f32 is not exactly 1e-4).
         let before = st.first;
@@ -3689,6 +3852,28 @@ mod tests {
         assert!(st.count <= MAX_VISIBLE_BARS);
         assert!(st.first >= 0.0 && st.first <= st.max_pan_first() as f64);
         assert!(st.follow_latest);
+        assert!(!st.visible_window().is_empty());
+    }
+
+    /// Optimistic `SelectSymbol` updates the header BEFORE the backend's bars
+    /// arrive. The incoming series must re-fit from its own data instead of
+    /// inheriting the previous symbol's fractional viewport (corner cluster).
+    #[test]
+    fn optimistic_symbol_select_refits_when_new_bars_land() {
+        let mut st = MarketState::default();
+        st.set_bars("AAA", "15m", "NSE", bars(5000));
+        st.apply(MarketAction::WheelZoom(0.5, -1.0));
+        st.apply(MarketAction::WheelPanX(0.3));
+        let stale_count = st.count;
+        st.apply(MarketAction::SelectSymbol("BBB".into()));
+        assert!(st.bars_stale);
+        assert!(st.hover.is_none());
+        st.set_bars("BBB", "15m", "NSE", bars(120));
+        assert_eq!(st.bars.len(), 120);
+        assert!(st.count <= 120, "stale count {stale_count} leaked into BBB");
+        assert!(st.first >= 0.0 && st.first <= st.max_pan_first() as f64);
+        assert!(st.follow_latest);
+        assert!(!st.bars_stale);
         assert!(!st.visible_window().is_empty());
     }
 
@@ -3993,9 +4178,12 @@ mod tests {
         st.set_bars("TEST", "15m", "NSE", bars(3000));
         // Early pans move; once clamped at the oldest bar the action reports
         // a no-op (false) so the screen skips rebuilding an unchanged scene.
+        // With the smaller default opening window (INITIAL_BARS), each
+        // WheelPanX(0.5) step covers ~half the window, so a few more steps
+        // are needed to reach the clamp.
         let mut moved = 0;
         let mut noop = 0;
-        for _ in 0..20 {
+        for _ in 0..40 {
             if st.apply(MarketAction::WheelPanX(0.5)) {
                 moved += 1;
             } else {
@@ -4547,6 +4735,14 @@ mod tests {
         let mut st = MarketState::default();
         st.width_cap = GOLD_CHART_W; // legacy max_visible_bars at 1200px width
         st.set_bars("PAR", "15m", "NSE", golden_bars(3000));
+        // The golden suite probes legacy 1200px-density geometry
+        // ("every expected value below was produced by the REAL legacy
+        // widget on the same inputs"). The product default opening window is
+        // now `INITIAL_BARS` (smaller — see `initial_window_matches_legacy_anchor`
+        // and the new-behavior tests), so pin the legacy density explicitly:
+        // `set_bars` uses INITIAL_BARS, which has since changed.
+        st.count = GOLD_CHART_W;
+        st.first = st.anchor_first(3000, GOLD_CHART_W) as f64;
         st
     }
 
@@ -4630,9 +4826,10 @@ mod tests {
         assert_eq!((st.first, st.count), (1222.5, 315));
         let (lo, hi) = st.price_range();
         assert!((lo - 1006.386).abs() < 5e-4 && (hi - 1025.174).abs() < 5e-4);
-        // legacy reset → the fresh-chart viewport.
+        // legacy reset → the fresh-chart viewport (the product default opening
+        // window: INITIAL_BARS, capped by the width; this suite pins 1200 above).
         assert!(st.apply(MarketAction::ResetView));
-        assert_eq!((st.first, st.count), (1980.0, 1200));
+        assert_eq!((st.first, st.count), (2778.0, INITIAL_BARS));
         assert!(st.follow_latest);
     }
 
@@ -4879,6 +5076,116 @@ mod tests {
     }
 
     #[test]
+    fn plot_metrics_scale_the_price_label_count_with_height() {
+        let mut st = MarketState::default();
+        assert_eq!(
+            st.price_tick_max, 6,
+            "unreported height keeps the legacy default"
+        );
+        st.set_plot_metrics(900.0);
+        // 900px / ~64px-per-label ≈ 14 — a 900px axis shows a wider band of
+        // readable levels than the legacy default.
+        assert!(
+            (12..=PRICE_TICKS_MAX).contains(&st.price_tick_max),
+            "900px -> {}",
+            st.price_tick_max
+        );
+        st.set_plot_metrics(300.0);
+        assert!(
+            (PRICE_TICKS_MIN..=6).contains(&st.price_tick_max),
+            "300px -> {}",
+            st.price_tick_max
+        );
+        st.set_plot_metrics(1200.0);
+        assert_eq!(
+            st.price_tick_max, PRICE_TICKS_MAX,
+            "capped at the readable maximum"
+        );
+        // Degenerate metrics fall back to the legacy default rather than 0.
+        st.set_plot_metrics(0.0);
+        assert_eq!(st.price_tick_max, 6);
+        st.set_plot_metrics(f32::NAN);
+        assert_eq!(st.price_tick_max, 6);
+    }
+
+    #[test]
+    fn taller_axis_shows_more_readable_price_levels() {
+        let mut st = MarketState::default();
+        st.set_bars("S", "15m", "", scale_bars()); // 100 bars, closes 100..199
+        st.set_plot_metrics(300.0);
+        let ticks_300 = project(&st).price_ticks;
+        assert!(
+            (PRICE_TICKS_MIN..=6).contains(&ticks_300.len()),
+            "300px -> {} ticks",
+            ticks_300.len()
+        );
+        st.set_plot_metrics(900.0);
+        let ticks_900 = project(&st).price_ticks;
+        assert!(
+            ticks_900.len() >= ticks_300.len() + 2,
+            "900px -> {} vs 300px -> {}",
+            ticks_900.len(),
+            ticks_300.len()
+        );
+        // Levels stay on the round grid (never span fractions) at any height.
+        for t in &ticks_900 {
+            let v: f64 = t.label.replace(',', "").parse().expect("tick parses");
+            assert!(v.is_finite() && v > 0.0);
+        }
+    }
+
+    #[test]
+    fn opening_window_uses_the_smaller_default() {
+        // The product default opening window is the smaller INITIAL_BARS cap,
+        // never the historical wide one; nothing is deleted — the full
+        // history stays reachable by zoom-out/pan.
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(9000));
+        assert_eq!(st.count, INITIAL_BARS);
+        assert!(st.visible_window().len() <= INITIAL_BARS);
+        assert!(st.follow_latest);
+        // A shorter dataset opens on what it has, never a phantom extra slot.
+        st.set_bars("TEST", "15m", "NCE", bars(100));
+        assert!(st.count <= 100);
+        assert!(st.visible_window().len() >= 1);
+    }
+
+    #[test]
+    fn time_axis_labels_dates_across_multi_day_windows() {
+        let mk = |day: u32, h: u32, m: u32| MarketBar {
+            time: format!("2026-03-{day:02} {h:02}:{m:02}:00"),
+            open: 100.0,
+            high: 101.0,
+            low: 99.0,
+            close: 100.5,
+            volume: 100.0,
+        };
+        // 3 distinct days at 15m.
+        let window: Vec<MarketBar> = (0..18)
+            .map(|i| mk(10 + i / 6, 10 + i % 60 / 15, (i * 15) % 60))
+            .collect();
+        let labels: Vec<String> = window
+            .iter()
+            .map(|b| format_axis_time(&b.time, "15m", &window))
+            .collect();
+        assert!(
+            labels.iter().any(|l| l == "Mar 11"),
+            "multi-day window must carry date labels: {labels:?}"
+        );
+        assert!(
+            labels.iter().all(|l| !l.contains(':')),
+            "intraday stamps repeat across days and read as garbage: {labels:?}"
+        );
+        // Same data on ONE day keeps the intraday labels.
+        let one_day: Vec<MarketBar> = (0..18).map(|i| mk(10, 10 + i / 60, i * 15 % 60)).collect();
+        let s = format_axis_time(&one_day[3].time, "15m", &one_day);
+        assert!(
+            s.contains(':'),
+            "single-day intraday keeps HH:MM labels: {s}"
+        );
+    }
+
+    #[test]
     fn last_price_and_volume_project_tv_badges() {
         let mut st = MarketState::default();
         st.width_cap = 200;
@@ -4977,9 +5284,19 @@ mod tests {
             exit_covered: false,
             exit_reason: String::new(),
         });
+        // An extend series paints the same persistent horizontal ray as a
+        // stored ray; its points index into the old bars too.
+        st.plot_series.push(PlotSeries {
+            owner: "OBR".to_string(),
+            title: "REF".to_string(),
+            points: vec![(5, 932.68)],
+            extend: "session".to_string(),
+            cap: -1,
+        });
         assert!(!project(&st).ray_levels.is_empty());
         // New symbol: every overlay dies with the old series.
         st.set_bars("B", "15m", "", scale_bars());
+        assert!(st.plot_series.is_empty());
         assert!(st.strategy_rays.is_empty());
         assert!(st.strategy_markers.is_empty());
         assert!(st.trade_markers.is_empty());
@@ -5017,6 +5334,94 @@ mod tests {
         assert!((0.0..=1.0).contains(&tag.pos));
         assert_eq!(tag.label, fmt_price_prec(150.0, 2));
         assert_eq!(tag.color, store_color_code(60, 0));
+    }
+
+    #[test]
+    fn reload_snapshot_without_overlay_keys_clears_stale_lines() {
+        // A full snapshot that omits the overlay sections must not leave the
+        // previous ray/series painted on the chart — that was the stuck line.
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", scale_bars());
+        st.strategy_rays.push(StrategyRay {
+            start: 3,
+            price: 932.68,
+            cap: -1,
+            layer: 60,
+            order: 0,
+        });
+        st.plot_series.push(PlotSeries {
+            owner: "OBR".to_string(),
+            title: "REF".to_string(),
+            points: vec![(3, 932.68)],
+            extend: "session".to_string(),
+            cap: -1,
+        });
+        st.strategy_markers.push(StrategyMarker {
+            bar: 3,
+            price: 150.0,
+            kind: "DOT".to_string(),
+            text: String::new(),
+            layer: 60,
+            order: 0,
+        });
+        assert!(!project(&st).ray_levels.is_empty());
+
+        apply_snapshot_json(
+            &mut st,
+            &serde_json::json!({
+                "selected_symbol": "S", "timeframe": "15m",
+                "bars": [{"time": "2026-06-10T09:15:00", "open": 1.0, "high": 2.0,
+                          "low": 0.5, "close": 1.5, "volume": 100.0}],
+            }),
+        );
+        assert!(st.strategy_rays.is_empty());
+        assert!(st.plot_series.is_empty());
+        assert!(st.strategy_markers.is_empty());
+        let view = project(&st);
+        assert!(view.ray_levels.is_empty());
+        assert!(
+            view.plot_segments.iter().all(|s| s.series != -2),
+            "no untagged ray segment survives the reload"
+        );
+        // The chart is clean, not blank: gridlines and the price badge remain.
+        assert!(!view.price_ticks.is_empty());
+        assert!(!view.time_ticks.is_empty());
+        assert!(view.has_last_price);
+    }
+
+    #[test]
+    fn untransformable_ray_is_not_drawn_without_a_tag() {
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", scale_bars());
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        assert_eq!(st.scale_mode, ChartScaleMode::Logarithmic);
+        // Log scale cannot place a non-positive price: it has no axis tag, so
+        // it must not leave a horizontal line at the fallback centre position.
+        st.strategy_rays.push(StrategyRay {
+            start: 5,
+            price: -10.0,
+            cap: -1,
+            layer: 60,
+            order: 0,
+        });
+        // Control: a transformable ray still carries its tag and its line.
+        st.strategy_rays.push(StrategyRay {
+            start: 5,
+            price: 150.0,
+            cap: -1,
+            layer: 60,
+            order: 0,
+        });
+        let view = project(&st);
+        assert_eq!(view.ray_levels.len(), 1);
+        assert_eq!(
+            view.plot_segments.iter().filter(|s| s.series == -2).count(),
+            1,
+            "only the tagged ray paints a line"
+        );
     }
 
     #[test]
@@ -5093,11 +5498,12 @@ mod tests {
         // Panning must NOT re-baseline: the lowest % level on screen is the
         // same before and after the viewport moves.
         let frame_before = scale_frame(&st);
-        let before_ticks: Vec<String> = nice_price_ticks(
+        let before_ticks: Vec<String> = nice_price_ticks_at_height(
             frame_before.xform,
             frame_before.low,
             frame_before.high,
             axis_decimals(frame_before.xform, frame_before.low, frame_before.high),
+            6,
         )
         .into_iter()
         .map(|t| t.label)
@@ -5106,11 +5512,12 @@ mod tests {
         st.first = (st.first - 5.0).clamp(0.0, st.max_pan_first() as f64);
         assert!(st.first < (total as f64) - 1.0, "pan must actually move");
         let frame_after = scale_frame(&st);
-        let after_ticks: Vec<String> = nice_price_ticks(
+        let after_ticks: Vec<String> = nice_price_ticks_at_height(
             frame_after.xform,
             frame_after.low,
             frame_after.high,
             axis_decimals(frame_after.xform, frame_after.low, frame_after.high),
+            6,
         )
         .into_iter()
         .map(|t| t.label)

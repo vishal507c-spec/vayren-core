@@ -27,6 +27,7 @@ provider per symbol), but the API does not assume that.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -98,6 +99,37 @@ class MarketDataFanout:
         self._connect_lock = threading.Lock()
         self._last_reconnect_epoch = 0.0
         self._reconnect_lock = threading.Lock()
+        self._pump_thread: threading.Thread | None = None
+
+    def start_background_pump(self, interval_s: float = 0.1) -> None:
+        """Continuous pump of the upstream face into the shared history.
+
+        Without this, history only advances when a consumer polls — the
+        BoundedHistoryParser overlay of our previous cost (MARKET_QUEUE_
+        OVERFLOW). With it, the venue-side deques drain at a fixed cadence
+        while sessions poll independently on their own timeline.
+        """
+        interval_s = max(0.05, float(interval_s or 0.1))
+        with self._state_lock:
+            if self._closed or self._pump_thread is not None:
+                return
+            thread = threading.Thread(
+                target=self._pump_loop,
+                args=(interval_s,),
+                daemon=True,
+                name="md-fanout-pump",
+            )
+            self._pump_thread = thread
+        thread.start()
+
+    def _pump_loop(self, interval_s: float) -> None:
+        while True:
+            with self._state_lock:
+                if self._closed:
+                    return
+            with contextlib.suppress(Exception):
+                self._pump()
+            time.sleep(interval_s)
 
     # ── consumer lifecycle ──────────────────────────────────────────────
 
@@ -270,6 +302,11 @@ class MarketDataFanout:
             )
             self._consumers.clear()
             self._history.clear()
+        # The background pump may be inside upstream.poll() right now. Wait
+        # for that drain to finish before unsubscribing/disconnecting the
+        # venue-owned face, so teardown can never race a live poll.
+        with self._pump_lock:
+            pass
         if symbols:
             self._call_upstream("unsubscribe", tuple(symbols))
         if self._close_upstream_when_empty:

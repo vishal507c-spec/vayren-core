@@ -23,6 +23,7 @@ pub mod python_bridge;
 pub mod remote_live;
 pub mod remote_source;
 pub mod shell;
+pub mod ui_settings;
 
 slint::include_modules!();
 

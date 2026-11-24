@@ -55,6 +55,11 @@ ERROR_CODES = (
     "UNKNOWN_COMMAND",
     "COMMAND_REJECTED",
     "RATE_LIMITED",
+    # Reliability codes: the desktop turns these into actionable messages
+    # instead of a generic 8s "gateway did not respond" guess.
+    "SERVER_BUSY",
+    "CIRCUIT_OPEN",
+    "DEADLINE_EXCEEDED",
     "SERVER_ERROR",
 )
 

@@ -3240,14 +3240,14 @@ pub fn project(state: &LabState) -> LabView {
             kind: 2,
         });
     }
-    cfg_checks.push(LabCheckData {
-        label: if bits & (1 << 4) == 0 {
-            "Capital positive".to_string()
-        } else {
-            validation::MESSAGES[4].to_string()
-        },
-        kind: if bits & (1 << 4) == 0 { 0 } else { 2 },
-    });
+    // The passing "Capital positive" chip was removed by request; a failing
+    // capital still surfaces the kernel message verbatim.
+    if bits & (1 << 4) != 0 {
+        cfg_checks.push(LabCheckData {
+            label: validation::MESSAGES[4].to_string(),
+            kind: 2,
+        });
+    }
     if !dates_error.is_empty() {
         cfg_checks.push(LabCheckData {
             label: dates_error.clone(),
@@ -5381,7 +5381,11 @@ mod tests {
             "removed rows must stay gone: {:?}",
             v.cfg_checks
         );
-        assert!(v.cfg_checks.iter().any(|c| c.label == "Capital positive"));
+        assert!(
+            !v.cfg_checks.iter().any(|c| c.label == "Capital positive"),
+            "the passing capital row was removed by request: {:?}",
+            v.cfg_checks
+        );
     }
 
     #[test]

@@ -35,7 +35,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from app.observable import IntervalTimer, Signal
 from broker.error_taxonomy import redact
@@ -74,7 +74,10 @@ from strategy.universe_store import StrategyUniverseStore, UniverseStoreError
 DEFAULT_STRATEGY_DIR = resolve_strategy_dir(None)
 _WARMUP_BARS = 120
 _ACTIVITY_CAP = 500
-_TICK_MS = 1000
+# Market-data pump cadence. 1s let FYERS tick bursts overflow the 50k
+# upstream buffer (MARKET_QUEUE_OVERFLOW). 200ms keeps the fanout drained
+# without touching strategy logic (candles still evaluate on close only).
+_TICK_MS = 200
 #: Bounded START-time order-WebSocket proof (the adapter waits, never retries).
 _LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 1.0
 #: A venue mark stays "live" only while ticks keep arriving. The window is
@@ -2128,6 +2131,7 @@ class LiveTradingService:
             return
         now = time.time()
         failures: list[str] = []
+        now_ist = datetime.now(_VENUE_TZ)
         # Copy under the handoff lock: STOP swaps/clears _sessions on the
         # worker thread while this timer thread steps — iterating a
         # mutating dict would raise. The copy's sessions are already
@@ -2140,6 +2144,10 @@ class LiveTradingService:
                 session.step(now)
             except Exception as exc:  # noqa: BLE001 - fail closed, report it
                 failures.append(f"{symbol}: {exc}")
+            with contextlib.suppress(Exception):
+                session.check_tick_invalidation()
+            with contextlib.suppress(Exception):
+                session.eod_sweep(now_ist)
             with contextlib.suppress(Exception):
                 self._refresh_mark(symbol)
         if failures:
@@ -2884,6 +2892,27 @@ class LiveTradingService:
         md_faces = self._probe_live_venue(self._live_venue_id)
         if md_faces:
             self._feed_kind = "live"
+        # Original v5.3.0 FNOUniverseEngine: venue-native F&O classification,
+        # proven once per run. None = unproven (every symbol keeps the
+        # standard 15:15 EOD exit — never silently treat everyone as non-F&O).
+        fno_symbols: set[str] | None = None
+        if mode is ExecutionMode.LIVE and md_faces:
+            trading_face = next(iter(md_faces.values()), None)
+            classify = getattr(trading_face, "fno_underlyings", None)
+            if callable(classify):
+                try:
+                    fno_symbols = cast("set[str] | None", classify(tuple(self._config.symbols)))
+                except Exception as exc:  # noqa: BLE001 - fail safe
+                    fno_symbols = None
+                    with contextlib.suppress(Exception):
+                        self._record_activity(
+                            self._config.strategy_name or "session",
+                            "",
+                            f"FNO_CLASSIFICATION_FAILED: {exc} — "
+                            "all symbols exit at 15:15; 15:08 requires the venue option chain",
+                            "error",
+                            "SYSTEM",
+                        )
         base_dir = self._data_dir / "live" / "sessions"
         try:
             from data.settings import NSE_HOLIDAYS
@@ -3024,6 +3053,8 @@ class LiveTradingService:
                     request_id=f"live-{symbol}",
                     order_gate=self._session_order_gate(),
                 )
+                with contextlib.suppress(Exception):
+                    session.set_fno_classification(fno_symbols)
                 contract = session.register_strategy(
                     record.id, record.version, _factory, params, definition
                 )
@@ -3090,6 +3121,14 @@ class LiveTradingService:
             raise
         with self._state_lock:
             self._sessions = sessions
+        # Fast-drain: the market-data fanout now pumps the upstream face
+        # continuously while sessions also poll on their own cadence. This
+        # is the MARKET_QUEUE_OVERFLOW fix — bursts during long per-tick
+        # stalls (22 reconciles, session build) can no longer drop ticks
+        # from the venue-side deques.
+        for fanout in self._market_fanouts:
+            with contextlib.suppress(Exception):
+                fanout.start_background_pump(interval_s=0.1)
 
     def _probe_live_venue(self, venue_id: str) -> dict[str, Any]:
         """START-time venue truth: connect + health + account, read-only.
@@ -3709,19 +3748,13 @@ class LiveTradingService:
                         now_ist = datetime.now(_VENUE_TZ)
                         today_ist = now_ist.date()
 
-                        eng_date = getattr(eng, "prev_date_key", None)
-                        if eng_date is not None and eng_date != today_ist:
-                            if hasattr(eng, "reset_for_new_day"):
-                                eng.reset_for_new_day(today_ist)
-                            else:
-                                eng.refHigh = None
-                                eng.refLow = None
-                                eng.refSet = False
-                                eng.ccSellLow = None
-                                eng.ccSellSet = False
-                                eng.entryPrice = None
-                                eng.slPrice = None
-
+                        # READ-ONLY SNAPSHOT INVARIANT: never mutate strategy
+                        # state here. The previous `reset_for_new_day(today)`
+                        # call pre-seeded `prev_date_key` before the day's
+                        # first candle, so `process_bar` treated that candle
+                        # as "not a new day", skipped C1 capture, and forced
+                        # `metaLabelPass=False` for the whole session. Day
+                        # rollover belongs exclusively to `process_bar`.
                         ref_idx = getattr(getattr(eng, "cfg", None), "refIndex", 3)
                         c_count = getattr(eng, "candleCount", 0)
                         is_today_active = getattr(eng, "prev_date_key", None) == today_ist

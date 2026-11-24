@@ -204,11 +204,12 @@ def test_2_starts_at_0949_ist_with_0915_opening_candle() -> None:
     assert bars[0].open == 100.0
     assert bars[0].close == 102.0
 
-    # Feed into OBR strategy to verify candleCount becomes 0 (Candle 1)
+    # Feed into OBR strategy: the first candle of the day is C1 (count 0).
     logic = _create_obr_logic()
     view = BarView(bars=bars, index=0, params=logic.params, state=StrategyState())
     logic.on_bar(view)
-    assert logic.engine.candleCount == 1  # Candle 1 processed
+    assert logic.engine.candleCount == 0  # C1 captured on the first candle
+    assert logic.engine.c1High == 105.0
     assert logic.engine.refSet is False  # Ref candle locks at candle 3
 
 

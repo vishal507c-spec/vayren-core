@@ -87,6 +87,8 @@ export component LiveHostWindow inherits Window {
     callback watchlist-search-changed(string);
     callback refresh-stocks();
     callback broker-capital-refresh();
+    callback confirm-requested();
+    callback confirm-cancel-requested();
 
     LiveScreen {
         width: 100%;
@@ -153,5 +155,7 @@ export component LiveHostWindow inherits Window {
         watchlist-search-changed(t) => { root.watchlist-search-changed(t); }
         refresh-stocks() => { root.refresh-stocks(); }
         broker-capital-refresh() => { root.broker-capital-refresh(); }
+        confirm-requested() => { root.confirm-requested(); }
+        confirm-cancel-requested() => { root.confirm-cancel-requested(); }
     }
 }

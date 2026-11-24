@@ -95,6 +95,10 @@ from strategy import StrategyDefinition, StrategyLogic, StrategyParameters, Stra
 
 VENUE_TZ = timezone(timedelta(hours=5, minutes=30))
 
+#: Original v5.3.0 time constants (SystemConfig): EOD_TIME = 15:15; FNO_EXIT_TIME = 15:08.
+_EOD_EXIT_MINUTES = 15 * 60 + 15
+_FNO_EXIT_MINUTES = 15 * 60 + 8
+
 
 def ist_session_date() -> str:
     """Current NSE/IST trading-session date (YYYY-MM-DD)."""
@@ -302,6 +306,17 @@ class LiveSession:
         # ceiling, so even a planner-adjusted quantity can never exceed the
         # 0.15% per-stock limit. One-shot entries (popped on submit).
         self._sized_risk: dict[str, SizingVerdict] = {}
+        # Original v5.3.0 tick-level invalidation: once a pending SELL is
+        # cancelled because LTP re-touched ref_high, never re-attempt for
+        # that symbol that day (idempotent, race-safe).
+        self._invalidation_cancelled: set[str] = set()
+        # Original v5.3.0 F&O 15:08 forced exit. None = classification unproven
+        # (every symbol then keeps the standard 15:15 EOD exit).
+        self._fno_symbols: set[str] | None = None
+        self._eod_date: str = ""
+        self._eod_done: set[str] = set()
+        self._eod_attempts: dict[str, int] = {}
+        self._eod_exit_order: dict[str, str] = {}
         # Phase-4 protective-stop state (per symbol, from the strategy's own
         # stop value — never invented): required stop price, lifecycle and
         # the active SL order. Filled quantity alone sizes protection.
@@ -825,6 +840,292 @@ class LiveSession:
         price = getattr(event, "price", None)
         if price and self._broker is not None:
             self._broker.on_market_price(event.symbol, float(price), event.timestamp)
+        self._maybe_cancel_invalidated_entry(event.symbol, float(price) if price else None)
+
+    def _maybe_cancel_invalidated_entry(self, symbol: str, price: float | None) -> None:
+        """Original v5.3.0: an unfilled SELL SLM is cancelled the moment live
+        LTP reaches/crosses the reference high. Broker acknowledgement is
+        verified; a fill/cancel race is left to reconciliation, never guessed.
+        """
+        if (
+            not price
+            or self._broker is None
+            or self._mode != ExecutionMode.LIVE
+            or symbol not in self._subscribed_symbols
+            or symbol in self._invalidation_cancelled
+        ):
+            return
+        cancel = getattr(self._broker, "cancel_order", None)
+        if not callable(cancel):
+            return
+        for ctx in self._contexts.values():
+            # A context may declare its instruments; never let one symbol's
+            # engine state (refHigh) cancel another symbol's working order.
+            instruments = tuple(getattr(ctx.contract, "instruments", ()) or ())
+            if instruments and symbol not in instruments:
+                continue
+            eng = getattr(ctx.logic, "engine", None)
+            if eng is None or not getattr(eng, "ccSellSet", False):
+                continue
+            if not getattr(eng, "isIdle", lambda: False)():
+                continue  # already filled — the SL owns the exit, not a cancel
+            ref_high = getattr(eng, "refHigh", None)
+            if ref_high is None or float(price) < float(ref_high):
+                continue
+            for order in self._engine.open_orders():
+                if order.symbol != symbol or order.side != "SELL":
+                    continue
+                if order.state not in (
+                    OrderState.SUBMITTED,
+                    OrderState.ACKNOWLEDGED,
+                    OrderState.PARTIALLY_FILLED,
+                ):
+                    continue
+                broker_id = order.broker_order_id
+                if not broker_id:
+                    continue
+                self._invalidation_cancelled.add(symbol)
+                try:
+                    confirmed = bool(cancel(broker_id))
+                except Exception as exc:  # noqa: BLE001 - cancel must not crash ticks
+                    confirmed = False
+                    self._journal.record("ENTRY_CANCEL_FAILED", symbol=symbol, reason=str(exc))
+                if confirmed:
+                    with suppress(Exception):
+                        self._engine.reconcile(
+                            order.client_order_id,
+                            OrderState.CANCELLED.value,
+                            reason="ref_high invalidation",
+                        )
+                    self._journal.record(
+                        "ENTRY_CANCELLED_INVALIDATION",
+                        symbol=symbol,
+                        broker_order_id=broker_id,
+                    )
+                else:
+                    # Unconfirmed: leave the order unresolved for reconciliation.
+                    self._journal.record(
+                        "ENTRY_CANCEL_UNCONFIRMED",
+                        symbol=symbol,
+                        broker_order_id=broker_id,
+                    )
+                return
+
+    # ── EOD protection (original v5.3.0: SystemSafetyEngine + FNOExitTimeEngine)
+    #
+    # Both engines are wall-clock-driven: the position is force-exited at
+    # 15:08 IST for F&O-eligible symbols (venue-proven), at 15:15 IST
+    # otherwise. This engine lives at the execution layer, so it survives a
+    # long-polling live service that stopped delivering the last 30m candle
+    # before market close.
+
+    def set_fno_classification(self, symbols: set[str] | None) -> None:
+        """Attach venue-proven F&O eligibility for this session's symbols.
+
+        ``None`` (classification unproven) keeps the standard 15:15 EOD
+        exit for every symbol — the original fail-safe posture.
+        """
+        if symbols is None:
+            self._fno_symbols = None
+        else:
+            self._fno_symbols = {str(s) for s in symbols}
+
+    def check_tick_invalidation(self) -> None:
+        """Run the tick-level pending-SELL cancellation now (one call per tick)."""
+        if self._broker is None or not self._subscribed_symbols:
+            return
+        marks = getattr(self._provider, "last_close", None)
+        if not isinstance(marks, dict):
+            return
+        for symbol in self._subscribed_symbols:
+            price = marks.get(symbol)
+            if isinstance(price, (int, float)):
+                self._maybe_cancel_invalidated_entry(symbol, float(price))
+
+    def eod_sweep(self, now_ist: datetime | None = None) -> None:
+        """Wall-clock EOD protection: cancel pending entries, force-exit positions.
+
+        Idempotent per day per symbol; always journaled, never raises, never
+        blocks new entries elsewhere. Fail-safe: floor, journal residuals.
+        """
+        if self._broker is None or self._mode != ExecutionMode.LIVE:
+            return
+        now_ist = now_ist or datetime.now(VENUE_TZ)
+        if now_ist.tzinfo is None:
+            now_ist = now_ist.replace(tzinfo=VENUE_TZ)
+        now_ist = now_ist.astimezone(VENUE_TZ)
+        day = ist_session_date()
+        if self._eod_date != day:
+            self._eod_date = day
+            self._eod_done = set()
+            self._eod_attempts = {}
+            self._eod_exit_order = {}
+        minute = now_ist.hour * 60 + now_ist.minute
+        for symbol in self._subscribed_symbols:
+            is_fno = self._fno_symbols is not None and symbol in self._fno_symbols
+            cutoff = _FNO_EXIT_MINUTES if is_fno else _EOD_EXIT_MINUTES
+            if minute < cutoff or symbol in self._eod_done:
+                continue
+            reason = "fno_exit_time" if is_fno else "eod_exit_time"
+            exit_client_id = self._eod_exit_order.get(symbol)
+            if exit_client_id is not None:
+                tracked = self._engine.get(exit_client_id)
+                if tracked is not None and tracked.state not in TERMINAL_STATES:
+                    continue  # exit order working at the venue
+                self._eod_exit_order.pop(symbol, None)
+            if not self._eod_cancel_pending_orders(symbol):
+                continue  # a cancel must confirm before we stack an exit
+            position = self._ledger.position(symbol)
+            if position.flat:
+                self._eod_done.add(symbol)
+                continue
+            if self._eod_attempts.get(symbol, 0) >= 6:
+                self._eod_done.add(symbol)
+                self._journal.record(
+                    "EOD_EXIT_RESIDUAL",
+                    symbol=symbol,
+                    reason="exit attempts exhausted; residual exposed",
+                )
+                continue
+            self._eod_attempts[symbol] = self._eod_attempts.get(symbol, 0) + 1
+            self._eod_place_exit(symbol, reason)
+
+    def _eod_cancel_pending_orders(self, symbol: str) -> bool:
+        """Confirmed cancels for every working order of the symbol.
+
+        Returns True when nothing working remains (or all confirmed), False
+        while any cancel is still unconfirmed (caller retries next tick).
+        """
+        assert self._broker is not None
+        for order in self._engine.open_orders():
+            if order.symbol != symbol:
+                continue
+            if order.state not in (
+                OrderState.SUBMITTED,
+                OrderState.ACKNOWLEDGED,
+                OrderState.PARTIALLY_FILLED,
+            ):
+                continue
+            broker_id = order.broker_order_id
+            if not broker_id:
+                # Never stack a market exit on top of an unlinked working
+                # order: if it fills, the exit would open a reverse position.
+                # Reconciliation links it (or proves it dead) and the next
+                # tick retries; this symbol only, never the whole sweep.
+                self._journal.record(
+                    "EOD_CANCEL_NOLINK",
+                    symbol=symbol,
+                    client_order_id=order.client_order_id,
+                    reason="no broker order id",
+                )
+                return False
+            try:
+                confirmed = bool(self._broker.cancel_order(broker_id))
+            except Exception as exc:  # noqa: BLE001 - cancellation is risk reducing
+                confirmed = False
+                self._journal.record(
+                    "EOD_CANCEL_FAILED",
+                    symbol=symbol,
+                    client_order_id=order.client_order_id,
+                    reason=str(exc),
+                )
+            if not confirmed:
+                self._journal.record(
+                    "EOD_CANCEL_UNCONFIRMED",
+                    symbol=symbol,
+                    client_order_id=order.client_order_id,
+                    broker_order_id=broker_id,
+                )
+                return False
+            with suppress(Exception):
+                self._engine.reconcile(
+                    order.client_order_id, OrderState.CANCELLED.value, reason="eod sweep"
+                )
+            self._journal.record(
+                "EOD_ORDER_CANCELLED",
+                symbol=symbol,
+                client_order_id=order.client_order_id,
+                broker_order_id=broker_id,
+            )
+        return True
+
+    def _eod_place_exit(self, symbol: str, reason: str) -> bool:
+        """Market-exit the current open position (risk-reducing; sent even
+        if the dispatch circuits are open). Returns True when submitted."""
+        assert self._broker is not None
+        position = self._ledger.position(symbol)
+        if position.flat:
+            return False
+        quantity = floor(abs(position.quantity))
+        if quantity <= 0:
+            return False
+        # Convention: BUY fills -> +qty (LONG), SELL fills -> -qty (SHORT).
+        side = "SELL" if position.quantity > 0 else "BUY"
+        self._sl_seq += 1
+        intent_id = f"{reason}:{symbol}:{self._sl_seq}"
+        client_order_id = f"{intent_id}:o1"
+        plan = OrderPlan(
+            intent_id=intent_id,
+            symbol=symbol,
+            side=side,
+            quantity=float(quantity),
+            order_type="MARKET",
+        )
+        order = BrokerOrder(
+            client_order_id=client_order_id,
+            intent_id=intent_id,
+            symbol=symbol,
+            side=side,
+            quantity=float(quantity),
+            session_date=ist_session_date(),
+            order_type="MARKET",
+        )
+        try:
+            self._engine.create(order)
+            self._engine.transition(client_order_id, OrderState.VALIDATED, reason=reason)
+            broker_id = self._broker.place_order(plan, client_order_id)
+            if not broker_id:
+                # A venue that returns no id cannot be proven submitted. Keep
+                # it tracked as UNKNOWN so the next tick never double-exits.
+                self._eod_exit_order[symbol] = client_order_id
+                with suppress(Exception):
+                    self._engine.transition(
+                        client_order_id, OrderState.UNKNOWN, reason="no broker order id"
+                    )
+                self._journal.record("EOD_EXIT_UNKNOWN", symbol=symbol, reason="no broker order id")
+                return True
+            self._engine.transition(
+                client_order_id, OrderState.SUBMITTED, reason=reason, broker_order_id=str(broker_id)
+            )
+        except Exception as exc:  # noqa: BLE001 - EOD must not raise
+            kind, safe_reason = classify_exception(exc)
+            if kind in ("TIMEOUT", "NETWORK", "RATE_LIMITED"):
+                self._eod_exit_order[symbol] = client_order_id
+                with suppress(Exception):
+                    self._engine.transition(client_order_id, OrderState.UNKNOWN, reason=safe_reason)
+                self._journal.record("EOD_EXIT_UNKNOWN", symbol=symbol, reason=safe_reason)
+                return True
+            with suppress(Exception):
+                self._engine.transition(client_order_id, OrderState.REJECTED, reason=safe_reason)
+            self._journal.record(
+                "EOD_EXIT_REJECTED",
+                symbol=symbol,
+                client_order_id=client_order_id,
+                reason=safe_reason,
+            )
+            return False
+        self._eod_exit_order[symbol] = client_order_id
+        self._broker_calls += 1
+        self._journal.record(
+            "EOD_EXIT_SENT",
+            symbol=symbol,
+            client_order_id=client_order_id,
+            broker_order_id=str(broker_id),
+            side=side,
+            quantity=float(quantity),
+            reason=reason,
+        )
+        return True
 
     def _handle_signal(
         self, context: StrategyContext, signal: StrategySignal, now_epoch: float
@@ -1410,7 +1711,11 @@ class LiveSession:
             return
         self._seen_fills.add(fill_key)
         updated = self._engine.apply_fill(tracked, fill)
-        if fill.partial:
+        if updated.filled_qty >= updated.quantity:
+            updated = self._engine.transition(
+                updated.client_order_id, OrderState.FILLED, reason="fill"
+            )
+        elif fill.partial:
             updated = self._engine.transition(
                 updated.client_order_id, OrderState.PARTIALLY_FILLED, reason="partial"
             )
@@ -1997,6 +2302,13 @@ class LiveSession:
                 }
                 for symbol, prot in self._stop_protection.items()
             },
+            # Original-v5.3.0-equivalent: a restarted session mid-session
+            # still knows the wall-clock EOD state so it cannot re-fire exits
+            # or start new entries past the cutoff.
+            "eod_date": self._eod_date,
+            "eod_done": sorted(self._eod_done),
+            "eod_attempts": dict(self._eod_attempts),
+            "eod_exit_order": dict(self._eod_exit_order),
         }
 
     def recover(self, checkpoint: dict[str, Any]) -> None:
@@ -2088,6 +2400,24 @@ class LiveSession:
             self._stop_levels.clear()
             self._stop_protection.clear()
             self._sl_seq = 0
+            self._eod_date = ""
+            self._eod_done = set()
+            self._eod_attempts = {}
+            self._eod_exit_order = {}
+        if is_same_day:
+            cp_eod_date = str(checkpoint.get("eod_date") or "")
+            if cp_eod_date == self._eod_date:
+                self._eod_done = {
+                    str(s) for s in checkpoint.get("eod_done", []) if isinstance(s, str)
+                }
+                self._eod_attempts = {
+                    str(k): int(v) for k, v in (checkpoint.get("eod_attempts") or {}).items()
+                }
+                self._eod_exit_order = {
+                    str(k): str(v)
+                    for k, v in (checkpoint.get("eod_exit_order") or {}).items()
+                    if isinstance(v, str)
+                }
         # Idempotency state rebuilds BEFORE any new submission (FINAL §K):
         # restored orders (incl. UNKNOWN) must reconcile before trading.
         engine_data = checkpoint.get("engine", {})

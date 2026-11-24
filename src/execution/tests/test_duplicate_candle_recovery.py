@@ -390,7 +390,10 @@ def test_session_recovery_seeds_seen_timestamps_and_skips_duplicates() -> None:
     assert engine.refSet is True
     assert engine.refHigh == 108.0
     assert engine.refLow == 103.0
-    assert engine.ccInvalidated is False  # NOT invalidated!
+    # Original v5.3.0: a candle that breaks refHigh is an UP touch /
+    # invalidation — the symbol is blocked for the day (no long entries).
+    assert engine.ccInvalidated is True
+    assert engine.dayDone is True
     assert engine.firstBreakDone is True  # C4 broke refHigh (115 > 108)
 
 
@@ -462,7 +465,11 @@ def test_recovery_idempotence_multiple_runs() -> None:
 
 
 def test_obrengine_c1c4_breakout_and_confirmation_signal() -> None:
-    """OBR C1C4 generates valid BUY signal when breakout and confirmation occur cleanly."""
+    """Original v5.3.0: SELL-only, armed on the break candle itself.
+
+    The SLM trigger is the break candle LOW (not ref_low, not a later
+    confirmation candle). Stop is the reference high.
+    """
     driver = _create_obr_driver("NSE:DAMCAPITAL")
     ctx = driver.context
 
@@ -480,28 +487,29 @@ def test_obrengine_c1c4_breakout_and_confirmation_signal() -> None:
     assert eng.refLow == 103.0
     assert eng.ccInvalidated is False
 
-    # Now C4: Breakout candle (High breaks 108 -> 110, Low stays above refLow: 104)
-    c4 = _make_bar("NSE:DAMCAPITAL", "2026-11-05 10:45:00", 107, 110, 104, 109)
+    # C4: DOWN break candle (Low 101 < refLow 103, High 107 <= refHigh 108)
+    c4 = _make_bar("NSE:DAMCAPITAL", "2026-11-05 10:45:00", 107, 107, 101, 102)
     sig4 = driver.on_candle(_make_candle_event(c4, seq=4))
-    assert sig4 is None  # Breakout detected, waiting for confirmation on C5
+    assert sig4 is not None  # armed immediately on the break candle
+    assert sig4.symbol == "NSE:DAMCAPITAL"
+    assert sig4.side == "SELL"
+    assert sig4.price == 101.0  # break candle low = SLM trigger
+    assert sig4.stop_loss == 108.0  # reference high
     assert eng.firstBreakDone is True
-    assert eng.ccBuySet is True
-    assert eng.ccBuyHigh == 110.0
+    assert eng.ccSellSet is True
+    assert eng.ccSellLow == 101.0
     assert eng.ccInvalidated is False
 
-    # Now C5: Confirmation candle (High breaks 110 -> 112)
-    c5 = _make_bar("NSE:DAMCAPITAL", "2026-11-05 11:15:00", 109, 112, 107, 111)
+    # C5: no new entry signal (one trade per day; SL owns any exit)
+    c5 = _make_bar("NSE:DAMCAPITAL", "2026-11-05 11:15:00", 102, 107, 100, 103)
     sig5 = driver.on_candle(_make_candle_event(c5, seq=5))
-
-    # Signal MUST be generated!
-    assert sig5 is not None
-    assert sig5.symbol == "NSE:DAMCAPITAL"
-    assert sig5.side == "BUY"
+    assert sig5 is None or sig5.side != "SELL"
     assert eng.ccInvalidated is False
 
 
 def test_obrengine_c1c4_genuine_double_break_still_invalidates() -> None:
-    """OBR C1C4 sets ccInvalidated = True only on genuine market double-break."""
+    """Original v5.3.0: a candle breaking BOTH ref levels is an UP touch /
+    invalidation — NO TRADE, symbol blocked for the day."""
     driver = _create_obr_driver("NSE:DAMCAPITAL")
     ctx = driver.context
 
@@ -512,22 +520,21 @@ def test_obrengine_c1c4_genuine_double_break_still_invalidates() -> None:
 
     driver.restore_window((c0, c1, c2, c3))
 
-    # C4: Breaks Ref High (110 > 108), refLow not broken
-    c4 = _make_bar("NSE:DAMCAPITAL", "2026-11-05 10:45:00", 107, 110, 104, 109)
-    driver.on_candle(_make_candle_event(c4, seq=4))
+    # C4: breaks BOTH refHigh (110 > 108) and refLow (101 < 103)
+    c4 = _make_bar("NSE:DAMCAPITAL", "2026-11-05 10:45:00", 107, 110, 101, 105)
+    sig4 = driver.on_candle(_make_candle_event(c4, seq=4))
     ctx_logic: Any = ctx.logic
+    assert sig4 is None
     assert ctx_logic.engine.firstBreakDone is True
-    assert ctx_logic.engine.ccBuySet is True
-    assert ctx_logic.engine.ccInvalidated is False
+    assert ctx_logic.engine.ccInvalidated is True
+    assert ctx_logic.engine.ccSellSet is False
+    assert ctx_logic.engine.dayDone is True
 
-    # C5: Crashes and breaches Ref Low (101 <= 103) without touching entry (high 107 < 110)
+    # C5: still blocked — no signal
     c5 = _make_bar("NSE:DAMCAPITAL", "2026-11-05 11:15:00", 105, 107, 101, 102)
     sig5 = driver.on_candle(_make_candle_event(c5, seq=5))
-
     assert sig5 is None
-    # Genuine double-break rule MUST invalidate!
     assert ctx_logic.engine.ccInvalidated is True
-    assert ctx_logic.engine.ccBuySet is False
 
 
 def test_all_22_stocks_isolated_recovery() -> None:

@@ -503,7 +503,7 @@ def test_21_duplicates_and_older_ticks_dropped() -> None:
     assert router.poll() == ()
 
 
-def test_22_shared_instrument_across_strategies() -> None:
+def test_22_shared_instrument_across_strategies(tmp_path) -> None:
     from app.services.live_trading_service import LiveTradingService
 
     router, _, fyers, _ = _router()
@@ -513,7 +513,9 @@ def test_22_shared_instrument_across_strategies() -> None:
     # Two strategies holding the same canonical instrument read the same
     # normalized tick — strategy state is untouched by routing.
     assert tick.instrument_id == RELIANCE
-    service = LiveTradingService(str(ROOT / "nonexistent-data"), str(ROOT / "nonexistent-strat"))
+    # Isolated temp dirs: the constructor creates them, so the repo tree is
+    # never polluted by a test run.
+    service = LiveTradingService(str(tmp_path / "data"), str(tmp_path / "strat"))
     assert service.available_symbols("Momentum") == ()
 
 

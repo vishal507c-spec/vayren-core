@@ -16,6 +16,29 @@ use std::sync::{
     mpsc, Arc, Mutex,
 };
 use std::time::{Duration, Instant};
+
+/// A control command that emits no progress for this long is a gateway
+/// problem, not a slow but healthy venue call. Progress frames reset the
+/// deadline, so a long broker authentication is reported honestly instead of
+/// being mislabelled "gateway did not respond" after a fixed 8 seconds.
+const COMMAND_DEADLINE: Duration = Duration::from_secs(20);
+
+/// Broker-session command deadline, shared by every SYSTEM button binding.
+/// `None` means no broker command is in flight. Progress frames keep pushing
+/// it forward; the authoritative ack clears it (never a stale UI state).
+static BROKER_PENDING: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn action_is_broker_command(action: &str) -> bool {
+    matches!(
+        action,
+        "connect_broker"
+            | "disconnect_broker"
+            | "safe_disconnect"
+            | "revoke_session"
+            | "save_broker_credentials"
+            | "broker_status"
+    )
+}
 use vayren_shell::broker_connection::{BrokerWorkspace, ConnectionState};
 use vayren_shell::lab;
 use vayren_shell::live;
@@ -822,7 +845,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the native MarketState. The chart/UI mount arrives in SLICE 5 — here
     // the state must be real, complete and render-ready.
     let snapshot_symbol = arg_value(&argv, "--symbol");
-    let snapshot_timeframe = arg_value(&argv, "--timeframe");
+    // Restore the user's last selected MARKET chart timeframe from the
+    // desktop settings BEFORE requesting chart data. `UiSettings::load`
+    // validates the saved value: an unsupported one falls back to `None`
+    // (backend default). An explicit `--timeframe` flag still wins; nothing
+    // is written here, so the backend default never gets persisted.
+    let saved_timeframe = vayren_shell::ui_settings::UiSettings::load(
+        &vayren_shell::ui_settings::default_settings_path(),
+    )
+    .chart_timeframe;
+    let snapshot_timeframe = arg_value(&argv, "--timeframe").or(saved_timeframe);
     println!("Requesting market snapshot...");
     let market_state = match PythonBackend::lock_send(
         &backend,
@@ -1333,12 +1365,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let Some(ui) = weak.upgrade() else { return };
                 if let Ok(mut pending) = server_op_timer_pending.try_lock() {
                     if let Some(t0) = *pending {
-                        if t0.elapsed() > Duration::from_secs(8) {
+                        if t0.elapsed() > COMMAND_DEADLINE {
                             *pending = None;
                             ui.set_server_op_busy(false);
                             ui.set_server_op_tone(3);
                             ui.set_server_op_feedback(slint::SharedString::from(
-                                "✕ Request timed out after 8s — gateway did not respond",
+                                "✕ Gateway silent for 20s — outcome UNKNOWN; run Gateway Health or Retry",
                             ));
                         }
                     }
@@ -1487,6 +1519,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     &action,
                                     &payload,
                                 );
+                                // A live venue call keeps pushing the deadline
+                                // forward: silence, not elapsed wall time, is
+                                // the signal that the gateway is unhealthy.
+                                if action == "server_op" {
+                                    if let Ok(mut pending) = server_op_timer_pending.lock() {
+                                        if pending.is_some() {
+                                            *pending = Some(Instant::now());
+                                        }
+                                    }
+                                }
+                                if action_is_broker_command(&action) {
+                                    if let Ok(mut pending) = BROKER_PENDING.lock() {
+                                        if pending.is_some() {
+                                            *pending = Some(Instant::now());
+                                        }
+                                    }
+                                }
                                 dirty = true;
                             }
                             RemoteUiUpdate::CommandAck {
@@ -1518,9 +1567,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         ui.set_conn_status_message(detail.clone().into());
                                     }
                                 }
+                                if action_is_broker_command(&action) {
+                                    if let Ok(mut pending) = BROKER_PENDING.lock() {
+                                        *pending = None;
+                                    }
+                                }
                                 if action == "select_broker"
                                     || action == "connect_broker"
                                     || action == "disconnect_broker"
+                                    || action == "safe_disconnect"
                                     || action == "save_broker_credentials"
                                     || action == "broker_status"
                                 {
@@ -1533,6 +1588,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             sync_broker_ui(&ui, snapshot, &timer_broker_form);
                                         }
                                     }
+                                }
+                                if action == "safe_disconnect" {
+                                    // BLOCKED/FAILED are honest outcomes: the
+                                    // broker was deliberately kept connected.
+                                    ui.set_conn_status_message(detail.clone().into());
+                                    ui.set_conn_error_message(detail.clone().into());
+                                    ui.set_conn_is_failed(!ok);
+                                    ui.set_conn_cta_enabled(true);
+                                    ui.set_conn_form_enabled(true);
                                 }
                                 if action == "connect_broker"
                                     || action == "disconnect_broker"
@@ -2399,10 +2463,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &handle,
                     sender,
                     &gate,
-                    "disconnect_broker",
+                    "safe_disconnect",
                     &broker_id,
                     None,
-                    "Disconnecting the EC2 broker session…",
+                    "DISCONNECT requested — stopping engine, reconciling exposure, then releasing the broker…",
                 );
                 return;
             }
@@ -3197,6 +3261,16 @@ fn send_remote_broker_command(
     let Some(ui) = handle.upgrade() else {
         return;
     };
+    // Immediate, local duplicate-command guard: the click is acknowledged by
+    // the pill below, and a second click while a command is in flight is
+    // consumed without ever reaching the gateway. The gateway also rejects a
+    // repeated request_id; this is the first line of defence.
+    if BROKER_PENDING.lock().map(|p| p.is_some()).unwrap_or(false) {
+        ui.set_conn_status_message(
+            "A broker command is already in progress — duplicate ignored.".into(),
+        );
+        return;
+    }
     if broker_id.trim().is_empty() {
         ui.set_conn_status_message("No broker selected — pick a venue first.".into());
         return;
@@ -3225,33 +3299,53 @@ fn send_remote_broker_command(
         ui.set_conn_status_message("Gateway link closed — request not sent.".into());
         return;
     }
+    // The click is acknowledged locally BEFORE any network work: no blocking
+    // call is made on the UI thread, so this paint lands immediately.
+    if let Ok(mut pending) = BROKER_PENDING.lock() {
+        *pending = Some(Instant::now());
+    }
     // Read/save actions must never paint a fake "Connecting…" pill: the
     // session state only changes on an explicit connect/disconnect.
     if action == "broker_status" || action == "save_broker_credentials" {
         ui.set_conn_status_message(progress_note.into());
     } else {
-        ui.set_conn_pill_label("Connecting…".into());
+        let optimistic = if action == "safe_disconnect" {
+            "STOPPING…"
+        } else if action == "disconnect_broker" || action == "revoke_session" {
+            "DISCONNECTING…"
+        } else {
+            "Connecting…"
+        };
+        ui.set_conn_pill_label(optimistic.into());
         ui.set_conn_pill_tone(2);
         ui.set_conn_is_failed(false);
         ui.set_conn_status_message(progress_note.into());
 
-        // Optimistic paint is time-boxed. A command that is sent but never
-        // acked must never leave the pill spinning forever — the gateway
-        // gets a read-only status probe and the UI states the exact failure.
+        // The optimistic paint is time-boxed and progress-aware: a slow venue
+        // call keeps sending `command_progress`, which resets the shared
+        // deadline. On a real silence we tell the operator what is unknown
+        // and probe read-only — we never invent a DISCONNECTED verdict.
         let timeout_handle = handle.clone();
         let timeout_cmd = cmd.clone();
         let timeout_broker = broker_id.to_string();
-        slint::Timer::single_shot(std::time::Duration::from_secs(8), move || {
+        slint::Timer::single_shot(COMMAND_DEADLINE, move || {
             let Some(ui) = timeout_handle.upgrade() else {
                 return;
             };
-            if ui.get_conn_pill_label().as_str() != "Connecting…" {
-                return; // authoritative ack already repainted
+            let still_pending = BROKER_PENDING
+                .lock()
+                .map(|p| p.is_some_and(|t| t.elapsed() >= COMMAND_DEADLINE))
+                .unwrap_or(true);
+            if !still_pending || ui.get_conn_pill_label().as_str() != optimistic {
+                return; // authoritative ack/progress already repainted
+            }
+            if let Ok(mut pending) = BROKER_PENDING.lock() {
+                *pending = None;
             }
             ui.set_conn_pill_label("UNKNOWN".into());
             ui.set_conn_pill_tone(3);
             ui.set_conn_status_message(
-                "✕ No gateway response within 8s — run Gateway Health or Retry".into(),
+                "✕ No gateway response — outcome UNKNOWN, run Gateway Health or Retry".into(),
             );
             let mut params = serde_json::Map::new();
             params.insert(
@@ -3450,10 +3544,10 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                 &handle,
                 &cmd,
                 &gate,
-                "disconnect_broker",
+                "safe_disconnect",
                 &broker_id,
                 None,
-                "Disconnecting the EC2 broker session…",
+                "DISCONNECT requested — stopping engine, reconciling exposure, then releasing the broker…",
             );
         });
     }
@@ -3472,12 +3566,12 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                 let Some(ui) = weak.upgrade() else { return };
                 if let Ok(mut pending) = server_op_timer_pending.try_lock() {
                     if let Some(t0) = *pending {
-                        if t0.elapsed() > Duration::from_secs(8) {
+                        if t0.elapsed() > COMMAND_DEADLINE {
                             *pending = None;
                             ui.set_server_op_busy(false);
                             ui.set_server_op_tone(3);
                             ui.set_server_op_feedback(slint::SharedString::from(
-                                "✕ Request timed out after 8s — gateway did not respond",
+                                "✕ Gateway silent for 20s — outcome UNKNOWN; run Gateway Health or Retry",
                             ));
                         }
                     }
@@ -3620,6 +3714,20 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 &action,
                                 &payload,
                             );
+                            if action == "server_op" {
+                                if let Ok(mut pending) = server_op_timer_pending.lock() {
+                                    if pending.is_some() {
+                                        *pending = Some(Instant::now());
+                                    }
+                                }
+                            }
+                            if action_is_broker_command(&action) {
+                                if let Ok(mut pending) = BROKER_PENDING.lock() {
+                                    if pending.is_some() {
+                                        *pending = Some(Instant::now());
+                                    }
+                                }
+                            }
                             dirty = true;
                         }
                         RemoteUiUpdate::CommandAck {
@@ -3658,9 +3766,15 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                     ui.set_conn_status_message(detail.clone().into());
                                 }
                             }
+                            if action_is_broker_command(&action) {
+                                if let Ok(mut pending) = BROKER_PENDING.lock() {
+                                    *pending = None;
+                                }
+                            }
                             if action == "select_broker"
                                 || action == "connect_broker"
                                 || action == "disconnect_broker"
+                                || action == "safe_disconnect"
                                 || action == "save_broker_credentials"
                                 || action == "broker_status"
                             {
@@ -3669,6 +3783,15 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                         sync_broker_ui(&ui, snapshot, &broker_form);
                                     }
                                 }
+                            }
+                            if action == "safe_disconnect" {
+                                // BLOCKED/FAILED are honest outcomes: the
+                                // broker was deliberately kept connected.
+                                ui.set_conn_status_message(detail.clone().into());
+                                ui.set_conn_error_message(detail.clone().into());
+                                ui.set_conn_is_failed(!ok);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
                             }
                             if action == "connect_broker"
                                 || action == "disconnect_broker"

@@ -166,6 +166,7 @@ class HeadlessGateway(BackendGateway):
             "revoke_session",
             "broker_status",
             "save_broker_credentials",
+            "safe_disconnect",
         ):
             return self._apply_broker_command(act)
         return _live_action(
@@ -192,6 +193,20 @@ class HeadlessGateway(BackendGateway):
                 "action_note": f"{name} requires a broker id",
                 "action_ok": False,
             }
+        if name == "safe_disconnect":
+            from app.headless import _safe_disconnect_service
+
+            coordinator = _safe_disconnect_service(self._data_dir, self._strategy_dir, manager)
+            outcome = coordinator.run(
+                request_id,
+                broker_id,
+                acknowledge_exposure=bool(action.get("acknowledge_exposure", False)),
+            )
+            snapshot = _trading_service_snapshot(self._data_dir, self._strategy_dir, manager)
+            snapshot["safe_disconnect"] = outcome
+            snapshot["action_note"] = outcome.get("reason", "")
+            snapshot["action_ok"] = bool(outcome.get("ok", False))
+            return snapshot
         if name == "connect_broker":
             credentials = action.get("credentials")
             creds = dict(credentials) if isinstance(credentials, dict) else {}

@@ -183,6 +183,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         universe_exchange: view.setup.universe_exchange.into(),
         pending_start: view.setup.pending_start,
         pending_stop: view.setup.pending_stop,
+        confirm_dialog_open: view.setup.confirm_dialog_open,
         lifecycle_stage: view.setup.lifecycle_stage.into(),
         lifecycle_detail: view.setup.lifecycle_detail.into(),
         lifecycle_done: view.setup.lifecycle_done,
@@ -502,6 +503,8 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
     wire_unit!(on_stop_requested, LiveState::stop);
     wire_unit!(on_inspector_toggled, LiveState::toggle_inspector);
     wire_unit!(on_broker_capital_refresh, LiveState::refresh_broker_capital);
+    wire_unit!(on_confirm_requested, LiveState::confirm_live);
+    wire_unit!(on_confirm_cancel_requested, LiveState::close_confirm_dialog);
     {
         // CLEAR EVENTS is UI-hygiene only (same contract as shell::wire_live):
         // drops the rendered history, never queues a host action.

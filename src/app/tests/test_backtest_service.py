@@ -20,6 +20,13 @@ from app.services.backtest_service import (  # noqa: E402
 
 
 def _write_trend_db(path: Path, days: int = 60) -> None:
+    """30m NSE-session bars with a guaranteed original-rule SELL setup/day.
+
+    C1 (09:15) and C4 (10:45) ranges exceed 0.35%/0.45% of the previous
+    close; the 10:15 candle is the reference; 10:45 breaks ref_low without
+    breaking ref_high (DOWN break -> SLM SELL @ break low); 11:15 re-touches
+    ref_high (SL exit). This matches VAYREN OS v5.3.0 SELL-only OBR.
+    """
     con = sqlite3.connect(str(path))
     con.execute(
         "CREATE TABLE ohlcv(candle_time TEXT PRIMARY KEY, open REAL NOT NULL,"
@@ -28,18 +35,39 @@ def _write_trend_db(path: Path, days: int = 60) -> None:
     )
     from datetime import date, timedelta
 
+    slots = [
+        "09:15",
+        "09:45",
+        "10:15",
+        "10:45",
+        "11:15",
+        "11:45",
+        "12:15",
+        "12:45",
+        "13:15",
+        "13:45",
+        "14:15",
+        "14:45",
+        "15:15",
+    ]
     rows = []
-    price = 100.0
     for day in range(days):
         day_label = (date(2026, 1, 1) + timedelta(days=day)).strftime("%Y-%m-%d")
-        for slot in range(25):
-            hour = 9 + (15 * (slot + 1) + 15) // 60
-            minute = (15 * (slot + 1) + 15) % 60
-            stamp = f"{day_label} {hour:02d}:{minute:02d}:00"
-            # Sawtooth: trends up, then snaps back (guaranteed crossovers).
-            wave = (day + slot) % 20
-            price = 100.0 + (wave if wave < 10 else 20 - wave)
-            rows.append((stamp, price - 0.5, price + 0.5, price - 1.0, price, 5000))
+        base = 100.0 + day * 0.1
+        for hm in slots:
+            if hm == "09:15":
+                o, h, lo, c = base, base + 1.0, base - 1.0, base
+            elif hm == "09:45":
+                o, h, lo, c = base, base + 0.5, base - 0.5, base
+            elif hm == "10:15":
+                o, h, lo, c = base, base + 0.8, base - 0.8, base
+            elif hm == "10:45":
+                o, h, lo, c = base, base + 0.6, base - 1.5, base - 1.0
+            elif hm == "11:15":
+                o, h, lo, c = base - 1.0, base + 0.9, base - 1.6, base + 0.85
+            else:
+                o, h, lo, c = base, base + 0.2, base - 0.2, base
+            rows.append((f"{day_label} {hm}:00", o, h, lo, c, 5000))
     con.executemany(
         "INSERT INTO ohlcv(candle_time, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?)",
         rows,
@@ -58,11 +86,11 @@ def test_builtin_strategy_runs_on_real_bars(store: Path, tmp_path: Path) -> None
     results = run_backtest(
         "OBR C1C4",
         ["TREND"],
-        "15m",
+        "30m",
         None,
         None,
         1000000.0,
-        "buy",
+        "sell",
         store,
         tmp_path,
     )
@@ -73,13 +101,13 @@ def test_builtin_strategy_runs_on_real_bars(store: Path, tmp_path: Path) -> None
     assert len(results["equity_curve"]) == metrics["total_trades"] + 1
     assert results["ranking"][0]["symbol"] == "TREND"
     first = results["trades"][0]
-    assert first["side"] == "LONG"
+    assert first["side"] == "SHORT"  # original v5.3.0 is SELL-only
     assert first["exit_time"] >= first["entry_time"]
 
 
 def test_obr_c1c4_runs_again_on_real_bars(store: Path, tmp_path: Path) -> None:
     results = run_backtest(
-        "OBR C1C4", ["TREND"], "15m", None, None, 1000000.0, "buy", store, tmp_path
+        "OBR C1C4", ["TREND"], "30m", None, None, 1000000.0, "sell", store, tmp_path
     )
     assert results["metrics"]["total_trades"] >= 0
     assert results["ranking"][0]["symbol"] == "TREND"
@@ -87,8 +115,9 @@ def test_obr_c1c4_runs_again_on_real_bars(store: Path, tmp_path: Path) -> None:
 
 def test_sell_mode_shorts(store: Path, tmp_path: Path) -> None:
     results = run_backtest(
-        "OBR C1C4", ["TREND"], "15m", None, None, 1000000.0, "sell", store, tmp_path
+        "OBR C1C4", ["TREND"], "30m", None, None, 1000000.0, "sell", store, tmp_path
     )
+    assert results["metrics"]["total_trades"] > 0
     assert all(t["side"] == "SHORT" for t in results["trades"])
 
 
@@ -159,11 +188,11 @@ def _run(store: Path, tmp_path: Path, **overrides):
     args = {
         "strategy_name": "OBR C1C4",
         "symbols": ["TREND"],
-        "timeframe": "15m",
+        "timeframe": "30m",
         "start": None,
         "end": None,
         "capital": 1000000.0,
-        "mode": "buy",
+        "mode": "sell",
         "data_dir": store,
         "strategy_dir": tmp_path,
     }
@@ -207,16 +236,16 @@ def test_lab_run_applies_full_command_config(store: Path, tmp_path: Path) -> Non
     command = {
         "strategy": "OBR C1C4",
         "symbols": ["TREND"],
-        "timeframe": "15m",
+        "timeframe": "30m",
         "start": first,
         "end": last,
         "capital": 500000.0,
-        "mode": "buy",
+        "mode": "sell",
     }
     workspace = _lab_run(str(tmp_path), str(store), command, repository)
     assert workspace["run"] == "complete"
     assert workspace["config"]["universe"] == "TREND"
-    assert workspace["config"]["timeframe"] == "15m"
+    assert workspace["config"]["timeframe"] == "30m"
     assert workspace["config"]["dates"] == f"{first} → {last}"
     assert workspace["config"]["capital"] == "₹500,000"
     assert workspace["results"]["metrics"]["total_trades"] > 0
