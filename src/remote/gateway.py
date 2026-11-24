@@ -211,6 +211,16 @@ class HeadlessGateway(BackendGateway):
             credentials = action.get("credentials")
             creds = dict(credentials) if isinstance(credentials, dict) else {}
             ok, message, session = manager.connect_broker(broker_id, creds, request_id=request_id)
+            if ok:
+                # A failed safe-disconnect deliberately keeps the venue link
+                # up. Once the operator reconnects, that stale FAILED verdict
+                # no longer describes the current session.
+                from app.headless import _safe_disconnect_service
+
+                with contextlib.suppress(Exception):
+                    _safe_disconnect_service(
+                        self._data_dir, self._strategy_dir, manager
+                    ).note_broker_connected(broker_id)
             snapshot = _trading_service_snapshot(self._data_dir, self._strategy_dir, manager)
             snapshot["broker_session"] = session
             snapshot["action_note"] = message

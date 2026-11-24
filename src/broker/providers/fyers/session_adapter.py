@@ -32,6 +32,7 @@ from broker.providers.fyers.live_auth import (
     HttpTransport,
     _UrllibTransport,
 )
+from broker.providers.fyers.socket_close import bounded_close_sdk_socket
 from broker.vocab import BrokerError, Environment, ErrorCode
 
 logger = logging.getLogger(__name__)
@@ -257,56 +258,19 @@ class _AccountSnapshotFetch:
 
 
 def _safe_close_order_ws(ws: Any) -> None:
-    """Safely close FyersOrderSocket handling SDK AttributeError without leaking threads.
+    """Close FyersOrderSocket through the bounded, leak-aware SDK path.
 
-    The official fyers_apiv3 SDK (order_ws.py:444) calls self.running_thread.join()
-    without checking if self.running_thread is None, raising AttributeError and
-    abandoning t.join() and ping_thread.join(). This leaks background socket and ping
-    threads as zombies that continually fight for the single-user session.
+    The official fyers_apiv3 SDK (order_ws.py:444) calls
+    ``self.running_thread.join()`` without checking for ``None`` and then joins
+    the socket and ping threads with no timeout. The ping thread sleeps 10s
+    between pings, so the vendor close can outlive the safe-disconnect budget
+    after the socket is already closed. ``bounded_close_sdk_socket`` keeps the
+    SDK close path but bounds every join and force-closes the raw socket if the
+    vendor still wedges.
     """
     if ws is None:
         return
-    # 1. Stop SDK auto-reconnect loop so on_close doesn't re-dial
-    if hasattr(ws, "restart_flag"):
-        with contextlib.suppress(Exception):
-            ws.restart_flag = False
-
-    # 2. Defensively supply joinable running_thread if None to avoid SDK AttributeError
-    # in order_ws.py line 444 (self.running_thread.join()).
-    if getattr(ws, "running_thread", None) is None:
-
-        class _NoOpJoinable:
-            def join(self, timeout: float | None = None) -> None:
-                pass
-
-        with contextlib.suppress(Exception):
-            ws.running_thread = _NoOpJoinable()
-
-    # 3. Close connection and handle SDK AttributeError specifically without hiding others
-    if hasattr(ws, "close_connection"):
-        try:
-            ws.close_connection()
-        except AttributeError as exc:
-            # The official fyers_apiv3 SDK calls self.running_thread.join() on None.
-            # Only intercept this specific SDK flaw; do not hide unrelated exceptions.
-            if "'NoneType' object has no attribute 'join'" in str(exc) or (
-                hasattr(exc, "name") and exc.name == "join"
-            ):
-                logger.info(
-                    "ORDER_WS_CLOSE_HANDLED broker=FYERS reason=SDK running_thread None bypassed"
-                )
-                t = getattr(ws, "t", None)
-                if t is not None and hasattr(t, "join") and getattr(t, "is_alive", lambda: False)():
-                    t.join(timeout=2.0)
-                ping_thread = getattr(ws, "ping_thread", None)
-                if (
-                    ping_thread is not None
-                    and hasattr(ping_thread, "join")
-                    and getattr(ping_thread, "is_alive", lambda: False)()
-                ):
-                    ping_thread.join(timeout=2.0)
-            else:
-                raise
+    bounded_close_sdk_socket(ws, label="ORDER")
 
 
 class FyersSessionAdapter:

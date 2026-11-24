@@ -111,7 +111,12 @@ def test_desktop_shortcut_launches_rust_directly() -> None:
     )
     assert "python" not in target.lower(), "no Python launcher in the desktop path"
     assert "launch_native" not in args, "shortcut must bypass scripts/launch_native.py"
-    assert "--data-dir" in args and "--strategy-dir" in args
+    # Production shortcut must open the EC2 gateway in remote mode, not a
+    # local backend: the authoritative session lives on the server and a
+    # local session cannot place or cancel an order through the venue link.
+    assert "--remote-ui" in args and "wss://" in args and "/vayren/v1" in args, (
+        f"shortcut must target the TLS remote gateway route: {args}"
+    )
     assert "--local" not in args, "shortcut must not contain --local override"
 
 

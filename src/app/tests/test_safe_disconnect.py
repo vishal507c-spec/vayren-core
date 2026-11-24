@@ -35,6 +35,8 @@ class FakeManager:
         status: str = "CONNECTED",
         fail_read: bool = False,
         connector: Any = None,
+        disconnect_ok: bool = True,
+        disconnect_message: str = "disconnected",
     ) -> None:
         self.positions = positions or []
         self.orders = orders or []
@@ -42,12 +44,17 @@ class FakeManager:
         self.fail_read = fail_read
         self.disconnects: list[str] = []
         self.connector = connector
+        self.disconnect_ok = disconnect_ok
+        self.disconnect_message = disconnect_message
 
     def state(self, _broker_id: str) -> dict[str, Any]:
         return {"status": self.status, "adapter": self.connector or object()}
 
     def disconnect_broker(self, _broker_id: str, request_id: str = "") -> tuple[bool, str]:
         self.disconnects.append(request_id)
+        if not self.disconnect_ok:
+            self.status = "ERROR"
+            return False, self.disconnect_message
         self.status = "DISCONNECTED"
         return True, "disconnected"
 
@@ -193,3 +200,90 @@ def test_crash_recovery_fails_closed(tmp_path: Any) -> None:
     snap = coordinator.snapshot()
     assert snap["state"] == SafeDisconnectState.FAILED.value
     assert "restarted" in snap["reason"]
+
+
+def test_failed_disconnect_clears_after_verified_reconnect(tmp_path: Any) -> None:
+    manager = FakeManager(
+        connector=ExposureAdapter([], []),
+        disconnect_ok=False,
+        disconnect_message="disconnect timed out after 10s; broker sockets may still be alive",
+    )
+    coordinator = _coordinator(tmp_path, FakeService(status="STOPPED"), manager)
+
+    failed = coordinator.run("r10", "fyers")
+    assert failed["state"] == SafeDisconnectState.FAILED.value
+    assert coordinator.snapshot()["state"] == SafeDisconnectState.FAILED.value
+
+    manager.status = "CONNECTED"
+    coordinator.note_broker_connected("fyers")
+    cleared = coordinator.snapshot()
+    assert cleared["state"] == SafeDisconnectState.CONNECTED.value
+    assert "re-established" in cleared["reason"]
+
+
+def test_failed_disconnect_stays_failed_while_broker_is_not_connected(tmp_path: Any) -> None:
+    manager = FakeManager(
+        connector=ExposureAdapter([], []),
+        disconnect_ok=False,
+        disconnect_message="disconnect timed out after 10s",
+    )
+    coordinator = _coordinator(tmp_path, FakeService(status="STOPPED"), manager)
+    assert coordinator.run("r11", "fyers")["state"] == SafeDisconnectState.FAILED.value
+
+    # The manager is still ERROR, so a reconnect note is not proof of a link.
+    coordinator.note_broker_connected("fyers")
+    assert coordinator.snapshot()["state"] == SafeDisconnectState.FAILED.value
+
+
+def test_blocked_exposure_is_not_cleared_by_reconnect(tmp_path: Any) -> None:
+    manager = FakeManager(connector=ExposureAdapter([{"qty": 1, "symbol": "NOCIL"}], []))
+    coordinator = _coordinator(tmp_path, FakeService(status="STOPPED"), manager)
+    assert coordinator.run("r12", "fyers")["state"] == SafeDisconnectState.BLOCKED.value
+
+    manager.status = "CONNECTED"
+    coordinator.note_broker_connected("fyers")
+    blocked = coordinator.snapshot()
+    assert blocked["state"] == SafeDisconnectState.BLOCKED.value
+    assert "positions=1" in blocked["reason"]
+
+
+def test_startup_clears_stale_disconnect_failure_when_broker_connected(tmp_path: Any) -> None:
+    (tmp_path / "safe_disconnect_state.json").write_text(
+        json.dumps(
+            {
+                "state": "FAILED",
+                "request_id": "r13",
+                "broker_id": "fyers",
+                "reason": "broker did not confirm disconnect: disconnect timed out after 10s",
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager = FakeManager(status="CONNECTED", connector=ExposureAdapter([], []))
+    coordinator = _coordinator(tmp_path, FakeService(status="STOPPED"), manager)
+
+    snap = coordinator.snapshot()
+    assert snap["state"] == SafeDisconnectState.CONNECTED.value
+    assert "re-established" in snap["reason"]
+
+
+def test_startup_keeps_engine_stop_failure_even_when_broker_connected(tmp_path: Any) -> None:
+    (tmp_path / "safe_disconnect_state.json").write_text(
+        json.dumps(
+            {
+                "state": "FAILED",
+                "request_id": "r14",
+                "broker_id": "fyers",
+                "reason": (
+                    "engine did not acknowledge STOP (status=RUNNING) - broker kept connected"
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager = FakeManager(status="CONNECTED", connector=ExposureAdapter([], []))
+    coordinator = _coordinator(tmp_path, FakeService(status="STOPPED"), manager)
+
+    snap = coordinator.snapshot()
+    assert snap["state"] == SafeDisconnectState.FAILED.value
+    assert "did not acknowledge STOP" in snap["reason"]

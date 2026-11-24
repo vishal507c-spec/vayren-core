@@ -1592,9 +1592,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if action == "safe_disconnect" {
                                     // BLOCKED/FAILED are honest outcomes: the
                                     // broker was deliberately kept connected.
+                                    // Keep the pill authoritative: a failed
+                                    // disconnect must not claim the venue link
+                                    // is down while the same snapshot proves
+                                    // the session is still connected.
+                                    let still_connected = payload
+                                        .get("snapshot")
+                                        .map(vayren_shell::remote_live::broker_connected)
+                                        .unwrap_or(false);
                                     ui.set_conn_status_message(detail.clone().into());
                                     ui.set_conn_error_message(detail.clone().into());
-                                    ui.set_conn_is_failed(!ok);
+                                    ui.set_conn_is_failed(!ok && !still_connected);
                                     ui.set_conn_cta_enabled(true);
                                     ui.set_conn_form_enabled(true);
                                 }
@@ -3787,9 +3795,17 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             if action == "safe_disconnect" {
                                 // BLOCKED/FAILED are honest outcomes: the
                                 // broker was deliberately kept connected.
+                                // Keep the pill authoritative: a failed
+                                // disconnect must not claim the venue link is
+                                // down while the same snapshot proves the
+                                // session is still connected.
+                                let still_connected = payload
+                                    .get("snapshot")
+                                    .map(vayren_shell::remote_live::broker_connected)
+                                    .unwrap_or(false);
                                 ui.set_conn_status_message(detail.clone().into());
                                 ui.set_conn_error_message(detail.clone().into());
-                                ui.set_conn_is_failed(!ok);
+                                ui.set_conn_is_failed(!ok && !still_connected);
                                 ui.set_conn_cta_enabled(true);
                                 ui.set_conn_form_enabled(true);
                             }

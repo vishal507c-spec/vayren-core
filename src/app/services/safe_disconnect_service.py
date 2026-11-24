@@ -135,6 +135,8 @@ class SafeDisconnectService:
                 reason=str(raw.get("reason", "") or ""),
                 exposure=dict(raw.get("exposure") or {}),
             )
+            if resumed is SafeDisconnectState.FAILED:
+                self._clear_stale_disconnect_failure()
             return
         if resumed is not SafeDisconnectState.CONNECTED:
             self._result = SafeDisconnectResult(
@@ -166,13 +168,59 @@ class SafeDisconnectService:
             tmp.replace(self._path)
 
     def snapshot(self) -> dict[str, Any]:
+        # A failed disconnect keeps the broker connected by design. Once the
+        # operator reconnects (or the gateway restarts and re-establishes the
+        # session), the stale "sockets may still be alive" verdict must not
+        # outlive the link it described.
         with self._lock:
+            self._clear_failed_disconnect_locked(self._result.broker_id)
             return self._result.to_dict()
 
     def rebind(self, service: Any, manager: Any | None) -> None:
         """Refresh injected references if the composition root recreated them."""
         self._service = service
         self._manager = manager
+
+    def note_broker_connected(self, broker_id: str) -> None:
+        """Clear a stale failed-disconnect verdict after a verified reconnect.
+
+        Only failures whose reason is about the broker disconnect are cleared;
+        an engine-stop failure or a BLOCKED exposure verdict stays visible until
+        the operator resolves it. The reconnect itself is the proof that the old
+        "broker sockets may still be alive" warning no longer describes the
+        current session.
+        """
+        with self._lock:
+            self._clear_failed_disconnect_locked(broker_id)
+
+    def _clear_stale_disconnect_failure(self) -> None:
+        with self._lock:
+            self._clear_failed_disconnect_locked(self._result.broker_id)
+
+    def _clear_failed_disconnect_locked(self, broker_id: str) -> None:
+        current = self._result
+        if current.state is not SafeDisconnectState.FAILED:
+            return
+        # Only the broker's own disconnect failure is superseded by a
+        # reconnect. A crash-recovery verdict, an engine STOP failure, or an
+        # unresolved-exposure BLOCKED still needs the operator.
+        if not current.reason.lower().startswith("broker did not confirm disconnect"):
+            return
+        broker_id = str(broker_id or current.broker_id or "").strip().lower()
+        if not broker_id or self._manager is None:
+            return
+        try:
+            status = str(self._manager.state(broker_id).get("status", "")).upper()
+        except Exception:  # noqa: BLE001 - an unreadable manager is not proof
+            return
+        if status not in ("CONNECTED", "LIVE_READY", "DEGRADED"):
+            return
+        self._result = SafeDisconnectResult(
+            state=SafeDisconnectState.CONNECTED,
+            broker_id=broker_id,
+            reason="broker session re-established after a failed disconnect",
+        )
+        self._persist()
 
     # ── orchestration ─────────────────────────────────────────────
 

@@ -569,6 +569,17 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
     }
 }
 
+/// Whether the authoritative broker session is still connected.
+///
+/// A failed safe disconnect deliberately keeps the venue link up. The SYSTEM
+/// panel must not repaint the whole connection as failed when the same
+/// snapshot still proves the session is CONNECTED/DEGRADED.
+pub fn broker_connected(sections: &serde_json::Value) -> bool {
+    authoritative_broker(sections)
+        .map(|authority| session_verdict(&authority).connected)
+        .unwrap_or(false)
+}
+
 /// Zip form values onto schema keys for `connect_broker`. Empty inputs and
 /// saved-value sentinels (•••) are dropped so untouched fields keep the
 /// gateway's stored values — a blank retype can never wipe saved secrets.
@@ -2355,6 +2366,21 @@ mod tests {
             verdict.description,
             "Complete FYERS login from SYSTEM → BROKERS"
         );
+    }
+
+    #[test]
+    fn broker_connected_follows_the_authoritative_session() {
+        let mut sections = authoritative_sections();
+        assert!(
+            !broker_connected(&sections),
+            "LOGIN_REQUIRED is not connected"
+        );
+        sections["broker_session"]["state"] = json!("CONNECTED");
+        assert!(broker_connected(&sections));
+        sections["broker_session"]["state"] = json!("DEGRADED");
+        assert!(broker_connected(&sections));
+        sections["broker_session"]["state"] = json!("ERROR");
+        assert!(!broker_connected(&sections));
     }
 
     #[test]

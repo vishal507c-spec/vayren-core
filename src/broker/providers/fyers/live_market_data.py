@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from broker.capabilities import CapabilitySet, Caps, Domain, capability_set
+from broker.providers.fyers.socket_close import bounded_close_sdk_socket
 from broker.vocab import BrokerError, ErrorCode
 
 logger = logging.getLogger(__name__)
@@ -733,8 +734,10 @@ class FyersLiveMarketData:
         if client is None:
             return
         try:
-            if hasattr(client, "close_connection"):
-                client.close_connection()
+            if hasattr(client, "close_connection") and not bounded_close_sdk_socket(
+                client, label="MARKET"
+            ):
+                logger.warning("MARKET_WS_DISCONNECT_BOUNDED broker=FYERS")
         except Exception as exc:
             logger.warning("MARKET_WS_DISCONNECT_WARN broker=FYERS reason=%s", exc)
 
