@@ -221,6 +221,28 @@ def test_failed_disconnect_clears_after_verified_reconnect(tmp_path: Any) -> Non
     assert "re-established" in cleared["reason"]
 
 
+def test_reconnect_reconciles_enum_broker_status(tmp_path: Any) -> None:
+    """BrokerManager.state() returns a BrokerStatus enum, not a plain string."""
+
+    class _EnumStatus:
+        value = "CONNECTED"
+
+        def __str__(self) -> str:
+            return "BrokerStatus.CONNECTED"
+
+    manager = FakeManager(
+        connector=ExposureAdapter([], []),
+        disconnect_ok=False,
+        disconnect_message="disconnect timed out after 10s",
+    )
+    coordinator = _coordinator(tmp_path, FakeService(status="STOPPED"), manager)
+    assert coordinator.run("r15", "fyers")["state"] == SafeDisconnectState.FAILED.value
+
+    manager.status = _EnumStatus()  # type: ignore[assignment]
+    coordinator.note_broker_connected("fyers")
+    assert coordinator.snapshot()["state"] == SafeDisconnectState.CONNECTED.value
+
+
 def test_failed_disconnect_stays_failed_while_broker_is_not_connected(tmp_path: Any) -> None:
     manager = FakeManager(
         connector=ExposureAdapter([], []),

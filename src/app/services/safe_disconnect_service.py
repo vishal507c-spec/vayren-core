@@ -210,7 +210,10 @@ class SafeDisconnectService:
         if not broker_id or self._manager is None:
             return
         try:
-            status = str(self._manager.state(broker_id).get("status", "")).upper()
+            raw_status = self._manager.state(broker_id).get("status", "")
+            # BrokerManager stores a BrokerStatus enum, whose str() is
+            # "BrokerStatus.CONNECTED" — compare its VALUE, not that label.
+            status = str(getattr(raw_status, "value", raw_status) or "").upper()
         except Exception:  # noqa: BLE001 - an unreadable manager is not proof
             return
         if status not in ("CONNECTED", "LIVE_READY", "DEGRADED"):

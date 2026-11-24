@@ -1291,7 +1291,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 6817,
+  "entity_count": 6818,
   "files": [
     {
       "domain": "CORE",
@@ -8455,7 +8455,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 16402,
+  "relationship_count": 16412,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -11562,6 +11562,7 @@
         "app.tests.test_safe_disconnect:test_failed_disconnect_stays_failed_while_broker_is_not_connected",
         "app.tests.test_safe_disconnect:test_flat_broker_disconnects_after_verified_stop",
         "app.tests.test_safe_disconnect:test_open_position_blocks_disconnect_and_keeps_broker",
+        "app.tests.test_safe_disconnect:test_reconnect_reconciles_enum_broker_status",
         "app.tests.test_safe_disconnect:test_startup_clears_stale_disconnect_failure_when_broker_connected",
         "app.tests.test_safe_disconnect:test_startup_keeps_engine_stop_failure_even_when_broker_connected",
         "app.tests.test_safe_disconnect:test_stop_not_acknowledged_keeps_broker",
@@ -21662,6 +21663,7 @@
         "app.tests.test_safe_disconnect:test_failed_disconnect_stays_failed_while_broker_is_not_connected",
         "app.tests.test_safe_disconnect:test_flat_broker_disconnects_after_verified_stop",
         "app.tests.test_safe_disconnect:test_open_position_blocks_disconnect_and_keeps_broker",
+        "app.tests.test_safe_disconnect:test_reconnect_reconciles_enum_broker_status",
         "app.tests.test_safe_disconnect:test_startup_clears_stale_disconnect_failure_when_broker_connected",
         "app.tests.test_safe_disconnect:test_startup_keeps_engine_stop_failure_even_when_broker_connected",
         "app.tests.test_safe_disconnect:test_stop_not_acknowledged_keeps_broker",
@@ -21692,6 +21694,7 @@
         "app.tests.test_safe_disconnect:test_failed_disconnect_stays_failed_while_broker_is_not_connected",
         "app.tests.test_safe_disconnect:test_flat_broker_disconnects_after_verified_stop",
         "app.tests.test_safe_disconnect:test_open_position_blocks_disconnect_and_keeps_broker",
+        "app.tests.test_safe_disconnect:test_reconnect_reconciles_enum_broker_status",
         "app.tests.test_safe_disconnect:test_startup_clears_stale_disconnect_failure_when_broker_connected",
         "app.tests.test_safe_disconnect:test_startup_keeps_engine_stop_failure_even_when_broker_connected",
         "app.tests.test_safe_disconnect:test_stop_not_acknowledged_keeps_broker",
@@ -21723,6 +21726,7 @@
         "app.tests.test_safe_disconnect:test_failed_disconnect_stays_failed_while_broker_is_not_connected",
         "app.tests.test_safe_disconnect:test_flat_broker_disconnects_after_verified_stop",
         "app.tests.test_safe_disconnect:test_open_position_blocks_disconnect_and_keeps_broker",
+        "app.tests.test_safe_disconnect:test_reconnect_reconciles_enum_broker_status",
         "app.tests.test_safe_disconnect:test_startup_clears_stale_disconnect_failure_when_broker_connected",
         "app.tests.test_safe_disconnect:test_startup_keeps_engine_stop_failure_even_when_broker_connected",
         "app.tests.test_safe_disconnect:test_stop_not_acknowledged_keeps_broker",
@@ -21751,6 +21755,7 @@
         "app.tests.test_safe_disconnect:test_failed_disconnect_stays_failed_while_broker_is_not_connected",
         "app.tests.test_safe_disconnect:test_flat_broker_disconnects_after_verified_stop",
         "app.tests.test_safe_disconnect:test_open_position_blocks_disconnect_and_keeps_broker",
+        "app.tests.test_safe_disconnect:test_reconnect_reconciles_enum_broker_status",
         "app.tests.test_safe_disconnect:test_startup_clears_stale_disconnect_failure_when_broker_connected",
         "app.tests.test_safe_disconnect:test_startup_keeps_engine_stop_failure_even_when_broker_connected",
         "app.tests.test_safe_disconnect:test_stop_not_acknowledged_keeps_broker",
@@ -21788,7 +21793,7 @@
       "file": "src/app/tests/test_safe_disconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 238,
+      "line": 260,
       "module": "src/app",
       "name": "test_blocked_exposure_is_not_cleared_by_reconnect",
       "public": true,
@@ -21913,7 +21918,7 @@
       "file": "src/app/tests/test_safe_disconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 224,
+      "line": 246,
       "module": "src/app",
       "name": "test_failed_disconnect_stays_failed_while_broker_is_not_connected",
       "public": true,
@@ -21972,11 +21977,32 @@
         "app.tests.test_safe_disconnect:FakeService",
         "app.tests.test_safe_disconnect:_coordinator"
       ],
+      "dotted": "app.tests.test_safe_disconnect.test_reconnect_reconciles_enum_broker_status",
+      "file": "src/app/tests/test_safe_disconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 224,
+      "module": "src/app",
+      "name": "test_reconnect_reconciles_enum_broker_status",
+      "public": true,
+      "qualified": "app.tests.test_safe_disconnect:test_reconnect_reconciles_enum_broker_status",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.safe_disconnect_service:SafeDisconnectState",
+        "app.tests.test_safe_disconnect:ExposureAdapter",
+        "app.tests.test_safe_disconnect:FakeManager",
+        "app.tests.test_safe_disconnect:FakeService",
+        "app.tests.test_safe_disconnect:_coordinator"
+      ],
       "dotted": "app.tests.test_safe_disconnect.test_startup_clears_stale_disconnect_failure_when_broker_connected",
       "file": "src/app/tests/test_safe_disconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 250,
+      "line": 272,
       "module": "src/app",
       "name": "test_startup_clears_stale_disconnect_failure_when_broker_connected",
       "public": true,
@@ -21997,7 +22023,7 @@
       "file": "src/app/tests/test_safe_disconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 270,
+      "line": 292,
       "module": "src/app",
       "name": "test_startup_keeps_engine_stop_failure_even_when_broker_connected",
       "public": true,
