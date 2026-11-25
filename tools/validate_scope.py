@@ -853,7 +853,7 @@ def cache_store(
     path = _cache_path(built["key"])
     tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
     tmp.write_text(json.dumps(record, sort_keys=True), encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
+    repo_index._atomic_replace(tmp, path)
     return {"stored": True, "key": built["key"]}
 
 

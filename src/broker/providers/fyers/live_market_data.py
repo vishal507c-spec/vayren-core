@@ -469,6 +469,21 @@ class FyersLiveMarketData:
             self._consumer_delivered.pop(consumer_id, None)
             self._consumer_dropped.pop(consumer_id, None)
 
+    def _prune_consumed_locked(self) -> None:
+        """Drop history every registered cursor has already advanced past.
+
+        ``poll()`` is a cursor read, not a destructive drain. Without this,
+        a filled bounded history stays at max_queue_size forever and every
+        later tick is falsely counted as overflow. A consumer that is
+        registered but never polls keeps its cursor low, so genuine loss is
+        still counted.
+        """
+        if not self._history or not self._consumer_cursors:
+            return
+        floor = min(self._consumer_cursors.values())
+        while self._history and self._history[0][0] <= floor:
+            self._history.popleft()
+
     def poll(self, consumer_id: str | None = None) -> tuple[dict[str, Any], ...]:
         """Return this consumer's new quotes without consuming anyone else's.
 
@@ -497,6 +512,7 @@ class FyersLiveMarketData:
                 cursor = max(cursor, self._history[-1][0])
             self._consumer_cursors[cid] = cursor
             self._consumer_delivered[cid] += len(quotes)
+            self._prune_consumed_locked()
         return quotes
 
     @property
@@ -823,17 +839,22 @@ class FyersLiveMarketData:
             exch_ts = ev.get("exchange_timestamp")
             if isinstance(exch_ts, (int, float)) and exch_ts > 0:
                 self._last_latency_ms = max(0.0, (time.time() - float(exch_ts)) * 1000.0)
+        overflow_snapshot = 0
+        buffer_snapshot = 0
         with self._history_lock:
             for ev in normalized_events:
+                self._prune_consumed_locked()
                 if len(self._history) >= self._max_queue_size:
                     self._overflow_dropped += 1
                 self._history_seq += 1
                 self._history.append((self._history_seq, ev))
-        if self._overflow_dropped and self._overflow_dropped % 1000 == 0:
+            overflow_snapshot = self._overflow_dropped
+            buffer_snapshot = len(self._history)
+        if overflow_snapshot and overflow_snapshot % 1000 == 0:
             logger.warning(
                 "MARKET_QUEUE_OVERFLOW broker=FYERS dropped=%d buffer=%d",
-                self._overflow_dropped,
-                self.buffered_quotes,
+                overflow_snapshot,
+                buffer_snapshot,
             )
 
     # ── Payload normalization ──────────────────────────────────────────

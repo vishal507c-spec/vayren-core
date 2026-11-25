@@ -43,8 +43,10 @@ fn test_blotters_have_scrollviews_for_all_four_tabs() {
         "Positions tab must wrap rows in ScrollView"
     );
     assert!(
-        src.contains("if root.orders.length > 0: ScrollView {"),
-        "Orders tab must wrap rows in ScrollView"
+        src.contains("root.orders-today.length > 0: ScrollView {")
+            && src.contains("root.orders-attention.length > 0: ScrollView {")
+            && src.contains("root.orders-history.length > 0: ScrollView {"),
+        "Every Orders view must wrap its cards in a ScrollView"
     );
     assert!(
         src.contains("if root.fills.length > 0: ScrollView {"),
@@ -57,15 +59,42 @@ fn test_blotters_have_scrollviews_for_all_four_tabs() {
 }
 
 #[test]
-fn test_orders_table_columns_aligned() {
+fn test_orders_cards_answer_the_human_questions() {
     let src = include_str!("../ui/live.slint");
+    // Level 1: today's summary plus a separate, prominent position count.
     assert!(
-        src.contains("Text { width: 70px; text: \"STATUS\"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }"),
-        "Orders header STATUS column must match row width (70px)"
+        src.contains("TODAY'S ORDERS"),
+        "Overview heading is required"
     );
     assert!(
-        src.contains("Text { horizontal-stretch: 1; text: \"DETAIL\"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }"),
-        "Orders header DETAIL column must stretch to match row reason"
+        src.contains("OPEN POSITIONS  \" + root.open-positions-count"),
+        "Open positions must be a separate, prominent count"
+    );
+    assert!(
+        src.contains("No orders placed today."),
+        "Empty Orders view must say plainly that nothing was placed today"
+    );
+    // Level 1: the three reconciled views.
+    assert!(
+        src.contains("Needs Attention (") && src.contains("History ("),
+        "Orders must offer Today / Needs Attention / History"
+    );
+    // Level 2: stock, side, outcome, execution price and a real timestamp.
+    assert!(
+        src.contains("root.order.plain-status")
+            && src.contains("root.order.plain-detail")
+            && src.contains("root.order.record-time"),
+        "Order cards must show outcome, plain detail and exact record time"
+    );
+    // Level 3: recorded events and technical fields stay hidden until expand.
+    assert!(
+        src.contains("for step in root.order.timeline")
+            && src.contains("for line in root.order.details"),
+        "Expanding a card must show the real lifecycle and technical details"
+    );
+    assert!(
+        !src.contains("Text { width: 70px; text: \"ORDER ID\""),
+        "Long technical IDs must not clutter the primary view"
     );
 }
 

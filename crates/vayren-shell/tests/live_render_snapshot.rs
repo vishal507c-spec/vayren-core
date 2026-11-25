@@ -678,6 +678,7 @@ fn order_row(symbol: &str, status: &str) -> vayren_shell::live::OrderRow {
             "0".into()
         },
         history,
+        ..Default::default()
     }
 }
 

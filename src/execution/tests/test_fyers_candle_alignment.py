@@ -201,6 +201,48 @@ def test_ohlcv_accumulation_accuracy_30m() -> None:
     assert ev5.is_closed is True
 
 
+def test_premarket_tick_never_creates_a_candle_or_c1_shift() -> None:
+    """Engine started at 08:45/08:55 must still take C1 from the 09:15 bar."""
+    face = _MockQuoteFace()
+    feed = BrokerFeedProvider(face, timeframe="30m", session_anchor="09:15")
+    feed.open(("NSE:KAYNES-EQ",), "30m")
+
+    pre = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 50.0,
+            "volume": 500,
+            "timestamp": "2026-10-30T03:15:00Z",  # 08:45 IST pre-open
+        }
+    )
+    assert pre is None
+    assert "NSE:KAYNES-EQ" not in feed._buckets
+
+    assert (
+        feed._ingest(
+            {
+                "symbol": "NSE:KAYNES-EQ",
+                "price": 100.0,
+                "volume": 1000,
+                "timestamp": "2026-10-30T03:45:00Z",  # 09:15 IST
+            }
+        )
+        is None
+    )
+    closed = feed._ingest(
+        {
+            "symbol": "NSE:KAYNES-EQ",
+            "price": 110.0,
+            "volume": 2000,
+            "timestamp": "2026-10-30T04:15:00Z",  # 09:45 IST closes 09:15
+        }
+    )
+    assert closed is not None
+    assert closed.timestamp == "2026-10-30 09:15:00"
+    assert closed.open == 100.0
+    assert closed.low == 100.0  # pre-market price 50 never entered the bar
+
+
 # ── 4. Duplicate, Late, and Out-of-Order Ticks Handling ───────────────────────
 
 

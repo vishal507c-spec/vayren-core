@@ -344,6 +344,10 @@ class TestNseMarketSessionRegression:
         mock_session._lifecycle = MagicMock()
         mock_session._lifecycle.state = LifecycleState.RUNNING
         mock_session._broker = mock_broker
+        # `_pre_order_checks` reads the data provider's overflow counter;
+        # an unbound MagicMock reports int() == 1 and falsely blocks the
+        # open-market path.
+        mock_session._provider = mock_broker
         mock_session._normalizer = MagicMock()
         mock_session._normalizer.is_stale.return_value = False
         mock_session._reconciliation = MagicMock()
@@ -351,6 +355,10 @@ class TestNseMarketSessionRegression:
         mock_session._engine = MagicMock()
         mock_session._engine.by_intent.return_value = None
         mock_session._engine.open_orders.return_value = []
+        # The production session keeps an int overflow baseline; a bare
+        # MagicMock here is not a number and makes the open-market check
+        # fail with a TypeError instead of exercising the real gate.
+        mock_session._overflow_baseline = 0
 
         intent = ExecutionIntent(
             intent_id="int-1",
@@ -375,6 +383,7 @@ class TestNseMarketSessionRegression:
         mock_broker.order_margin = MagicMock(return_value=1000.0)
         mock_broker.funds = MagicMock(return_value={"available": 50000.0})
         mock_broker.capital = MagicMock(return_value=MagicMock(available_margin=50000.0))
+        mock_broker.overflow_dropped = 0
 
         # 1. Closed market clock (post 15:30 IST) -> BLOCKED
         closed_epoch = datetime.datetime(2026, 11, 9, 16, 0, 0, tzinfo=IST).timestamp()

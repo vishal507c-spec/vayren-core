@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import pytest
+
 from broker.capabilities import CapabilitySet, Caps, Domain
 from broker.faces import FactoryPlugin
 from broker.registry import BrokerRecord, default_registry
@@ -237,6 +239,59 @@ def test_driver_warmup_and_on_candle_deduplication() -> None:
     assert ctx.bars[-1].timestamp == "2026-11-05 10:15:00"
 
 
+def test_engine_started_premarket_does_not_shift_c1_or_reference() -> None:
+    """Starting at 08:45/08:55 must leave C1=09:15 and ref=10:15 intact.
+
+    Regression for the 25-Nov-2026 incident where a 08:45 pre-open bucket
+    became C1, moving the reference to 09:45 and failing MetaLabel all day.
+    """
+    driver = _create_obr_driver()
+    ctx = driver.context
+    premarket = _make_bar("TEST", "2026-11-25 08:45:00", 200, 200, 200, 200)
+    assert driver.on_candle(_make_candle_event(premarket, seq=1)) is None
+    assert len(ctx.bars) == 0
+
+    driver.warmup(
+        (
+            premarket,
+            _make_bar("TEST", "2026-11-25 09:15:00", 100, 105, 95, 102),
+            _make_bar("TEST", "2026-11-25 09:45:00", 102, 108, 101, 106),
+        )
+    )
+    engine = cast(Any, ctx.logic).engine
+    assert len(ctx.bars) == 2
+    assert engine.c1High == 105
+    assert engine.c1Low == 95
+
+    driver.on_candle(
+        _make_candle_event(_make_bar("TEST", "2026-11-25 10:15:00", 108, 110, 100, 109), seq=3)
+    )
+    assert engine.refHigh == 110
+    assert engine.refLow == 100
+
+
+@pytest.mark.parametrize("start", ["08:45", "08:55", "09:15", "09:45"])
+def test_all_start_times_preserve_canonical_indices(start: str) -> None:
+    """Deterministic playback: any permitted start keeps C1/ref/C4 canonical."""
+    driver = _create_obr_driver()
+    ctx = driver.context
+    premarket = _make_bar("TEST", "2026-11-25 08:45:00", 999, 999, 999, 999)
+    session_bars = (
+        _make_bar("TEST", "2026-11-25 09:15:00", 100, 105, 95, 102),
+        _make_bar("TEST", "2026-11-25 09:45:00", 102, 108, 101, 106),
+        _make_bar("TEST", "2026-11-25 10:15:00", 106, 110, 100, 109),
+        _make_bar("TEST", "2026-11-25 10:45:00", 109, 112, 107, 111),
+    )
+    # Store catchup supplies the canonical in-session bars regardless of
+    # when the engine was started; pre-open ticks are rejected by the driver.
+    driver.warmup((premarket,) + session_bars)
+    engine = cast(Any, ctx.logic).engine
+    assert engine.c1High == 105 and engine.c1Low == 95
+    assert engine.refHigh == 110 and engine.refLow == 100  # ref = 10:15 bar
+    assert engine.c4High == 112 and engine.c4Low == 107  # C4 = 10:45 bar (candleCount=3)
+    assert start  # start time is the simulated operator action; indices must not depend on it
+
+
 def test_driver_restore_window_cleans_corrupted_checkpoint() -> None:
     """restore_window cleans, deduplicates, and sorts corrupted historical bars."""
     driver = _create_obr_driver()
@@ -257,12 +312,12 @@ def test_driver_restore_window_cleans_corrupted_checkpoint() -> None:
     )
 
     fed = driver.restore_window(corrupted_bars)
-    # Unique timestamps: 08:45, 09:15, 09:45, 10:15, 10:45, 11:15 -> exactly 6 bars
-    assert fed == 6
-    assert len(ctx.bars) == 6
+    # 08:45 is pre-open and must never become C1. Unique in-session bars:
+    # 09:15, 09:45, 10:15, 10:45, 11:15 -> exactly 5 bars.
+    assert fed == 5
+    assert len(ctx.bars) == 5
     timestamps = [b.timestamp for b in ctx.bars]
     assert timestamps == [
-        "2026-11-05 08:45:00",
         "2026-11-05 09:15:00",
         "2026-11-05 09:45:00",
         "2026-11-05 10:15:00",

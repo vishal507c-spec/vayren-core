@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from execution.events import CandleEvent
+from execution.market_data.health_policy import DEFAULT_SESSION_START, is_pre_session_candle
 from execution.market_data.native_normalizer import watermark
 from execution.models.contract import StrategyRuntimeContract
 from execution.models.intent import StrategySignal
@@ -65,6 +66,7 @@ class StrategyContext:
     logic: StrategyLogic
     params: StrategyParameters
     contract: StrategyRuntimeContract
+    session_start: str = DEFAULT_SESSION_START
     lifecycle: StrategyLifecycle = field(default_factory=StrategyLifecycle)
     bars: deque[Bar] = field(default_factory=lambda: deque(maxlen=512))
     state: StrategyState = field(default_factory=StrategyState)
@@ -108,6 +110,8 @@ class LiveStrategyDriver:
         last_ts = self._ctx.bars[-1].timestamp if self._ctx.bars else None
 
         for bar in bars:
+            if is_pre_session_candle(bar.timestamp, self._ctx.session_start):
+                continue
             norm = normalize_stamp(bar.timestamp)
             if norm in seen_stamps:
                 continue
@@ -134,6 +138,8 @@ class LiveStrategyDriver:
         Rejects duplicate or out-of-order candles safely.
         """
         ctx = self._ctx
+        if is_pre_session_candle(event.timestamp, ctx.session_start):
+            return None
         ctx.event_seq = watermark(ctx.event_seq, event.seq)
         if not event.is_closed:
             return None
@@ -188,6 +194,8 @@ class LiveStrategyDriver:
         seen: set[str] = set()
         clean_bars: list[Bar] = []
         for b in sorted_bars:
+            if is_pre_session_candle(b.timestamp, self._ctx.session_start):
+                continue
             norm = normalize_stamp(b.timestamp)
             if norm in seen:
                 continue

@@ -45,7 +45,11 @@ from execution.events import (
     SignalGenerated,
 )
 from execution.journal import ExecutionJournal, LatencyTracker
-from execution.market_data.health_policy import MarketDataHealthPolicy
+from execution.market_data.health_policy import (
+    DEFAULT_SESSION_START,
+    MarketDataHealthPolicy,
+    is_pre_session_candle,
+)
 from execution.market_data.normalizer import NormalizerConfig, StreamNormalizer
 from execution.market_data.provider import MarketDataProvider
 from execution.models.contract import StrategyRuntimeContract
@@ -103,6 +107,13 @@ _FNO_EXIT_MINUTES = 15 * 60 + 8
 def ist_session_date() -> str:
     """Current NSE/IST trading-session date (YYYY-MM-DD)."""
     return datetime.now(VENUE_TZ).strftime("%Y-%m-%d")
+
+
+def _overflow_count(value: object) -> int:
+    """Coerce a provider's drop counter to a non-negative int (fail closed)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
 
 
 class _RealClock:
@@ -349,6 +360,9 @@ class LiveSession:
         self._health_policy: MarketDataHealthPolicy | None = None
         self._freshness_epoch: dict[str, float] = {}
         self._stale_symbols: set[str] = set()
+        # Venue ticks dropped before the provider can see them. Baseline is
+        # captured at start(); any increase fails the live order gate closed.
+        self._overflow_baseline: int | None = None
         self._last_health_sweep_epoch = 0.0
         self._last_rebase_day: dict[str, Any] = {}
         self._subscribed_symbols: tuple[str, ...] = ()
@@ -415,6 +429,7 @@ class LiveSession:
             logic=logic,
             params=params,
             contract=contract,
+            session_start=self._config.session_start or DEFAULT_SESSION_START,
         )
         self._contexts[key] = context
         self._registrations[key] = StrategyRegistration(
@@ -515,6 +530,7 @@ class LiveSession:
             self._journal.record("NOT_LIVE_READY", reasons=list(reasons))
             return ReadinessReport(ready=False, reasons=reasons)
         self._provider.open(symbols, timeframe)
+        self._overflow_baseline = _overflow_count(getattr(self._provider, "overflow_dropped", 0))
         self._lifecycle.transition(LifecycleState.WARMING_UP, reason="warming strategies")
         for context in self._contexts.values():
             context.lifecycle.transition(LifecycleState.WARMING_UP, reason="warming")
@@ -1443,6 +1459,12 @@ class LiveSession:
                     return ("ORDER_BLOCKED", f"order stream unhealthy: {stream_reason}")
             if self._normalizer.is_stale(plan.symbol):
                 return ("ORDER_BLOCKED", f"market data stale for {plan.symbol}")
+            dropped_now = _overflow_count(getattr(self._provider, "overflow_dropped", 0))
+            baseline = _overflow_count(self._overflow_baseline)
+            if dropped_now > baseline:
+                lost = dropped_now - baseline
+                reason = f"market data unreliable: {lost} ticks dropped since session start"
+                return ("ORDER_BLOCKED", reason)
         if self._reconciliation.blocks_live:
             return ("ORDER_BLOCKED", "reconciliation blocks live")
         if not plan.symbol:
@@ -2458,27 +2480,18 @@ class LiveSession:
         now_dt = datetime.fromtimestamp(now_ts, VENUE_TZ)
         replayed = 0
 
-        # Filter pre-market bars before session start (e.g. 08:45)
-        session_start_time = None
-        if self._config.session_start:
-            with suppress(Exception):
-                session_start_time = datetime.strptime(self._config.session_start, "%H:%M").time()
-
+        # One session-alignment rule for live, replay, catchup and recovery.
+        session_start = self._config.session_start or DEFAULT_SESSION_START
         valid_bars: list[Bar] = []
         for b in bars:
-            if session_start_time is not None:
-                is_premarket = False
-                with suppress(Exception):
-                    b_dt = datetime.fromisoformat(str(b.timestamp).strip())
-                    is_premarket = b_dt.time() < session_start_time
-                if is_premarket:
-                    self._journal.record(
-                        "CANDLE_PREMARKET_SKIPPED",
-                        symbol=b.symbol,
-                        timestamp=b.timestamp,
-                        session_start=self._config.session_start,
-                    )
-                    continue
+            if is_pre_session_candle(b.timestamp, session_start):
+                self._journal.record(
+                    "CANDLE_PREMARKET_SKIPPED",
+                    symbol=b.symbol,
+                    timestamp=b.timestamp,
+                    session_start=session_start,
+                )
+                continue
             valid_bars.append(b)
 
         sorted_bars = sorted(

@@ -322,6 +322,8 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "strategy": strategy,
         "risk": risk,
         "capital": capital_block,
+        # Authoritative IST trading date for the UI's Today/History split.
+        "today_session_date": str(live.get("today_session_date", "") or ""),
         "orders": scrub(live.get("orders", [])),
         "positions": scrub(live.get("positions", [])),
         "fills": scrub(live.get("fills", [])),

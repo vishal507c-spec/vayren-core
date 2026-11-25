@@ -13,7 +13,12 @@ from datetime import datetime
 from typing import Any, cast
 
 from execution.events import CandleEvent, HeartbeatEvent
-from execution.market_data.health_policy import IST, MarketCalendar, MarketDataHealthPolicy
+from execution.market_data.health_policy import (
+    IST,
+    MarketCalendar,
+    MarketDataHealthPolicy,
+    is_pre_session_candle,
+)
 from execution.market_data.native_normalizer import candle_stale_after
 from execution.market_data.normalizer import NormalizerConfig, StreamNormalizer
 from execution.modes import ExecutionMode, ModeGates
@@ -302,3 +307,18 @@ def test_heartbeat_fallback_only_before_first_candle() -> None:
     normalizer.observe(heartbeat, 0.0)
     assert normalizer.check_health("NSE:A", policy.stale_after_seconds) == (True, "ok")
     assert normalizer.check_health("NSE:A", policy.stale_after_seconds + 0.1)[0] is False
+
+
+def test_pre_session_candle_rule_uses_session_start_not_anchor() -> None:
+    """The 08:45 pre-open bucket is never an in-session candle (25-Nov incident)."""
+    assert is_pre_session_candle("2026-11-25 08:45:00")
+    assert is_pre_session_candle("2026-11-25T08:45:00+05:30")
+    assert is_pre_session_candle("2026-11-25 09:14:59")
+    assert not is_pre_session_candle("2026-11-25 09:15:00")
+    assert not is_pre_session_candle("2026-11-25 09:45:00")
+    assert not is_pre_session_candle("not-a-timestamp")
+
+
+def test_pre_session_candle_rule_honours_venue_start() -> None:
+    assert not is_pre_session_candle("2026-11-25 08:45:00", "08:45")
+    assert is_pre_session_candle("2026-11-25 08:44:59", "08:45")

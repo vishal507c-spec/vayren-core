@@ -32,6 +32,7 @@ class _Upstream:
         self.close_calls = 0
         self.healthy = True
         self.poll_calls = 0
+        self.overflow_dropped = 0
 
     def connect(self) -> None:
         self.connect_calls += 1
@@ -160,6 +161,37 @@ def test_slow_consumer_overflows_visibly_while_fast_consumer_loses_nothing() -> 
     slow_quotes = slow.poll()
     assert [quote["symbol"] for quote in slow_quotes] == ["NSE:SLOW-EQ"]
     assert fanout.stats()["consumers"]["SLOW"]["dropped"] == 3
+
+
+def test_paused_consumer_does_not_pin_the_shared_buffer() -> None:
+    """Only active cursors hold history back (paused ones are fast-forwarded)."""
+    upstream = _Upstream()
+    fanout = MarketDataFanout(upstream, max_buffer=3)
+    fast = fanout.subscription("FAST", ("NSE:FAST",))
+    paused = fanout.subscription("PAUSED", ("NSE:FAST",))
+    fast.subscribe(("NSE:FAST",))
+    paused.subscribe(("NSE:FAST",))
+    paused.disconnect()
+
+    for index in range(8):
+        upstream.publish(_quote("FAST", 100.0 + index, index))
+        assert len(fast.poll()) == 1
+    stats = fanout.stats()
+    assert stats["overflow_dropped"] == 0
+    assert stats["buffer_depth"] <= 1
+    assert stats["consumers"]["FAST"]["delivered"] == 8
+    assert stats["consumers"]["FAST"]["dropped"] == 0
+
+
+def test_upstream_drop_counter_is_proxied_to_subscriptions() -> None:
+    """The fail-closed order gate reads this value via BrokerFeedProvider."""
+    upstream = _Upstream()
+    upstream.overflow_dropped = 7
+    fanout = MarketDataFanout(upstream)
+    subscription = fanout.subscription("A", ("NSE:A",))
+
+    assert fanout.stats()["upstream_overflow_dropped"] == 7
+    assert subscription.overflow_dropped == 7
 
 
 def test_disconnect_is_per_consumer_and_reconnect_keeps_cursors() -> None:

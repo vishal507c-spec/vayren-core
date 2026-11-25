@@ -2595,7 +2595,7 @@ def signature_record(entry: dict) -> dict:
     payload = {"schema": SIG_SCHEMA, "entries": entries}
     tmp = _sig_cache_path().with_name(f"signatures.json.tmp-{os.getpid()}")
     tmp.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8", newline="\n")
-    os.replace(tmp, _sig_cache_path())
+    repo_index._atomic_replace(tmp, _sig_cache_path())
     _SIG_MEMO.pop("file", None)
     return {"stored": True, "key": stored["key"]}
 

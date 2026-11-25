@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from execution.events import CandleEvent, MarketEvent
+from execution.market_data.health_policy import DEFAULT_SESSION_START, is_pre_session_candle
 from execution.market_data.native_normalizer import (
     candle_stale_after,
     gap_reason,
@@ -113,6 +114,7 @@ class BrokerFeedProvider(MarketDataProvider):
         face: Any,
         timeframe: str = "15m",
         session_anchor: str = "09:15",
+        session_start: str = DEFAULT_SESSION_START,
         clock: Callable[[], float] | None = None,
         stale_after_s: float | None = None,
         history_face: Any | None = None,
@@ -120,6 +122,7 @@ class BrokerFeedProvider(MarketDataProvider):
         self._face = face
         self._timeframe = timeframe
         self._anchor_s = session_anchor_seconds(session_anchor)
+        self._session_start = session_start
         self._clock = clock or time.time
         # Candle-close feeds are not tick feeds: 300s would flag every 15m+
         # timeframe as stale between legitimate candles. Rust derives the
@@ -171,6 +174,19 @@ class BrokerFeedProvider(MarketDataProvider):
     def prev_close(self) -> dict[str, float]:
         """Latest authoritative previous trading day close per symbol."""
         return dict(self._prev_close)
+
+    @property
+    def overflow_dropped(self) -> int:
+        """Ticks the venue face dropped before this provider saw them.
+
+        Zero when the face has no drop counter (replay/SQLite providers). The
+        live order gate compares this against its session-start baseline, so
+        unreliable data cannot authorise a trade.
+        """
+        try:
+            return max(0, int(getattr(self._face, "overflow_dropped", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
 
     def set_last_emitted(self, symbol: str, timestamp: str) -> None:
         """Seed the emitted watermark from startup historical recovery."""
@@ -377,6 +393,10 @@ class BrokerFeedProvider(MarketDataProvider):
             return None
         stamp = _normalize_venue_stamp(quote.get("timestamp"))
         if stamp is None or len(stamp) < 19:
+            return None
+        # Pre-open ticks must never form a candle: a 08:45 bucket shifts C1,
+        # reference and C4 by one bar and silently disables MetaLabel.
+        if is_pre_session_candle(stamp, self._session_start):
             return None
         try:
             price = float(quote.get("price", 0.0) or 0.0)

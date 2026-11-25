@@ -343,6 +343,21 @@ class MarketDataFanout:
 
     # ── delivery ────────────────────────────────────────────────────────
 
+    def _prune_consumed_locked(self) -> None:
+        """Drop history every active cursor has advanced past.
+
+        Paused consumers are excluded: ``resume()`` fast-forwards them and
+        counts their gap, so they must not pin the shared buffer forever.
+        With no active consumer the buffer legitimately accumulates and
+        real overflow is still reported.
+        """
+        cursors = [s.cursor for s in self._consumers.values() if not s.paused]
+        if not cursors or not self._history:
+            return
+        floor = min(cursors)
+        while self._history and self._history[0][0] <= floor:
+            self._history.popleft()
+
     def poll(self, consumer_id: str) -> tuple[dict[str, Any], ...]:
         """Pump the upstream once, then return only this consumer's new quotes."""
         self._pump()
@@ -367,6 +382,7 @@ class MarketDataFanout:
                 state.cursor = seq
             if self._history:
                 state.cursor = max(state.cursor, self._history[-1][0])
+            self._prune_consumed_locked()
             return tuple(quotes)
 
     def _pump(self) -> None:
@@ -388,6 +404,7 @@ class MarketDataFanout:
             with self._state_lock:
                 if self._closed:
                     return
+                self._prune_consumed_locked()
                 for quote in quotes:
                     if not isinstance(quote, dict):
                         continue
@@ -404,6 +421,14 @@ class MarketDataFanout:
             return self._upstream.health()
         except Exception as exc:  # noqa: BLE001
             return False, f"upstream health failed: {exc}"
+
+    @property
+    def upstream_overflow_dropped(self) -> int:
+        """Venue-side tick drops, proxied for downstream fail-closed gates."""
+        try:
+            return max(0, int(getattr(self._upstream, "overflow_dropped", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
 
     def stats(self) -> dict[str, Any]:
         """Machine-readable delivery/lag counters for the live snapshot."""
@@ -424,6 +449,7 @@ class MarketDataFanout:
                 "buffer_depth": len(self._history),
                 "max_buffer": self._max_buffer,
                 "overflow_dropped": self._overflow_dropped,
+                "upstream_overflow_dropped": self.upstream_overflow_dropped,
                 "pump_errors": self._pump_errors,
                 "last_error": self._last_error,
                 "closed": self._closed,
@@ -480,6 +506,11 @@ class MarketDataSubscription:
 
     def health(self) -> tuple[bool, str]:
         return self._fanout.health()
+
+    @property
+    def overflow_dropped(self) -> int:
+        """Venue drops seen by BrokerFeedProvider's fail-closed order gate."""
+        return self._fanout.upstream_overflow_dropped
 
     def disconnect(self) -> None:
         """Pause this consumer without disconnecting every other consumer."""

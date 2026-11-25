@@ -18,8 +18,9 @@ Covers:
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
+from broker.market_data_fanout import MarketDataFanout
 from execution.broker.adapter import BrokerAdapter, BrokerCapabilities
 from execution.engine import ExecutionEngine
 from execution.events import CandleEvent
@@ -39,6 +40,7 @@ class _MockBrokerFace:
         self.connected = True
         self.reconnected = False
         self.quotes_to_poll: list[dict[str, Any]] = []
+        self.overflow_dropped = 0
 
     def connect(self) -> None:
         self.connected = True
@@ -323,6 +325,71 @@ def test_duplicate_intent_prevention(tmp_path: Any) -> None:
     assert refusal is not None
     assert refusal[0] == "ORDER_BLOCKED"
     assert "duplicate intent" in refusal[1]
+
+
+def test_dropped_venue_ticks_block_live_orders(tmp_path: Any) -> None:
+    """61k overflow incident: unreliable data must not authorise an order."""
+    session = _make_live_session(tmp_path)
+    session._overflow_baseline = 0
+    cast(Any, session._provider).overflow_dropped = 5
+    intent = ExecutionIntent(
+        intent_id="intent-overflow-1",
+        strategy_id="strat-1",
+        strategy_version="1.0",
+        signal_id="sig-overflow-1",
+        timestamp="2026-11-25T10:45:00",
+        event_seq=7,
+        symbol="NSE:SCI",
+        side="SELL",
+        target_position_qty=0.0,
+        quantity=1.0,
+    )
+    plan = OrderPlan(
+        intent_id=intent.intent_id,
+        symbol=intent.symbol,
+        side=intent.side,
+        quantity=intent.quantity,
+    )
+    refusal = session._pre_order_checks(intent, plan)
+    assert refusal is not None
+    assert refusal[0] == "ORDER_BLOCKED"
+    assert "ticks dropped" in refusal[1]
+
+
+def test_fanout_venue_drops_reach_the_real_order_gate(tmp_path: Any) -> None:
+    """The 61k incident path: venue drops must fail the order gate closed."""
+    upstream = _MockBrokerFace()
+    fanout = MarketDataFanout(upstream)
+    subscription = fanout.subscription("NSE:INFY", ("NSE:INFY",))
+    provider = BrokerFeedProvider(subscription)
+    session = _make_live_session(tmp_path)
+    session._provider = provider
+    session._overflow_baseline = 0
+    upstream.overflow_dropped = 61_000
+    assert provider.overflow_dropped == 61_000
+
+    intent = ExecutionIntent(
+        intent_id="intent-fanout-gate",
+        strategy_id="strat-1",
+        strategy_version="1.0",
+        signal_id="sig-fanout-gate",
+        timestamp="2026-11-25T10:45:00",
+        event_seq=9,
+        symbol="NSE:INFY",
+        side="SELL",
+        target_position_qty=0.0,
+        quantity=1.0,
+    )
+    plan = OrderPlan(
+        intent_id=intent.intent_id,
+        symbol=intent.symbol,
+        side=intent.side,
+        quantity=intent.quantity,
+    )
+    refusal = session._pre_order_checks(intent, plan)
+    assert refusal is not None
+    assert refusal[0] == "ORDER_BLOCKED"
+    assert "ticks dropped" in refusal[1]
 
 
 def test_unresolved_unknown_order_blocks_subsequent_submissions(tmp_path: Any) -> None:

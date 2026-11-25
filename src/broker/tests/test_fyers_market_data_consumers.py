@@ -63,6 +63,26 @@ def test_bounded_history_reports_overflow_and_consumer_lag() -> None:
     md.close()
 
 
+def test_active_consumer_never_counts_false_overflow() -> None:
+    """A polled buffer must prune consumed history, not count every tick as loss."""
+    md = FyersLiveMarketData(app_id="APP123", access_token="TOKEN456", max_queue_size=3)
+    md.register_consumer("pump")
+    for index in range(3):
+        md._on_message(_tick("A", 100.0 + index, index + 1))
+    assert md.overflow_dropped == 0
+    assert len(md.poll("pump")) == 3
+    assert md.buffered_quotes == 0
+
+    for index in range(10):
+        md._on_message(_tick("A", 200.0 + index, index + 10))
+        assert len(md.poll("pump")) == 1
+    assert md.overflow_dropped == 0
+    assert md.buffered_quotes == 0
+    assert md.consumer_stats()["pump"]["delivered"] == 13
+    assert md.consumer_stats()["pump"]["dropped"] == 0
+    md.close()
+
+
 def test_close_is_safe_and_clears_cursors() -> None:
     md = FyersLiveMarketData(app_id="APP123", access_token="TOKEN456")
     md.register_consumer("A")

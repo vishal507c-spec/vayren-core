@@ -84,7 +84,9 @@ def _manifest_store(key: str, manifest: dict) -> None:
     path = EXEC_DIR / f"{key}.json"
     tmp = path.with_name(f"{key}.tmp-{os.getpid()}")
     tmp.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
+    # Windows readers/AV can hold the destination briefly; use the repo's
+    # bounded atomic-replace retry instead of a one-shot os.replace.
+    repo_index._atomic_replace(tmp, path)
 
 
 def _verify_command(command: str) -> dict:

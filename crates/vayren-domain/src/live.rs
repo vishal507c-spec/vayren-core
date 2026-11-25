@@ -249,7 +249,7 @@ pub struct PositionRow {
     pub pnl_pct: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct OrderRow {
     pub order_id: String,
     pub strategy: String,
@@ -271,6 +271,19 @@ pub struct OrderRow {
     /// (`OrderSnapshot::history`). This IS the order pipeline — the UI walks
     /// it rather than assuming a lifecycle.
     pub history: Vec<String>,
+    /// Venue order id, kept separate from the merged display id so the
+    /// technical details panel can show the authoritative broker reference.
+    pub broker_order_id: String,
+    /// Authoritative IST trading date and first genuine recorded time.
+    /// Empty means the backend has no real timestamp — never a guess.
+    pub session_date: String,
+    pub submitted_at: String,
+    pub updated_at: String,
+    /// `"HH:MM:SS — REAL_STATE"` for each genuinely recorded transition.
+    pub timeline: Vec<String>,
+    pub limit_price: String,
+    pub intent_id: String,
+    pub remaining_qty: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -652,6 +665,8 @@ pub struct LiveState {
     // Execution-critical tables (real rows only; empty means empty).
     pub positions: Vec<PositionRow>,
     pub orders: Vec<OrderRow>,
+    /// Backend's authoritative IST trading date for Today/History grouping.
+    pub today_session_date: String,
     pub fills: Vec<FillRow>,
     pub pnl: Pnl,
     pub strategy_facts: Option<StrategyFacts>,
@@ -798,6 +813,7 @@ impl Default for LiveState {
             live_confirmed: false,
             positions: Vec::new(),
             orders: Vec::new(),
+            today_session_date: String::new(),
             fills: Vec::new(),
             pnl: Pnl::default(),
             strategy_facts: None,
@@ -2306,10 +2322,41 @@ impl LiveState {
                 })
                 .collect();
         }
+        self.today_session_date = str_of(v, "today_session_date");
         if let Some(list) = v.get("orders").and_then(|a| a.as_array()) {
             self.orders = list
                 .iter()
                 .map(|o| OrderRow {
+                    broker_order_id: str_of(o, "broker_order_id"),
+                    session_date: str_of(o, "session_date"),
+                    submitted_at: str_of(o, "time"),
+                    updated_at: str_of(o, "updated_at"),
+                    timeline: o
+                        .get("timeline")
+                        .and_then(|t| t.as_array())
+                        .map(|events| {
+                            events
+                                .iter()
+                                .filter_map(|e| e.as_object())
+                                .map(|e| {
+                                    format!(
+                                        "{} — {}",
+                                        e.get("time").map(value_to_text).unwrap_or_default(),
+                                        e.get("state").map(value_to_text).unwrap_or_default()
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    limit_price: o
+                        .get("limit_price")
+                        .and_then(|v| v.as_f64())
+                        .map_or_else(|| "Not available".into(), |v| grouped(v)),
+                    intent_id: str_of(o, "intent_id"),
+                    remaining_qty: o
+                        .get("remaining_qty")
+                        .and_then(|v| v.as_f64())
+                        .map_or_else(|| "Not available".into(), |v| grouped(v)),
                     order_id: {
                         let cl_id = str_of(o, "order_id");
                         let br_id = str_of(o, "broker_order_id");
@@ -2342,6 +2389,7 @@ impl LiveState {
                         .and_then(|h| h.as_array())
                         .map(|list| list.iter().map(value_to_text).collect())
                         .unwrap_or_default(),
+                    ..Default::default()
                 })
                 .collect();
         }
@@ -3117,6 +3165,22 @@ pub struct OrderRowView {
     pub broker: String,
     pub status_tone: i32,
     pub reason: String,
+    /// Human-readable outcome (`Completed`, `Rejected — Not executed`, ...).
+    /// The exact backend status stays in `status` for the details panel.
+    pub plain_status: String,
+    pub plain_detail: String,
+    /// 0 = Today, 1 = Needs Attention, 2 = History.
+    pub bucket: i32,
+    /// `"YYYY-MM-DD HH:MM:SS IST"` or `"Not available"` — one honest label.
+    pub record_time: String,
+    pub filled_qty: String,
+    pub remaining_qty: String,
+    pub broker_order_id: String,
+    pub limit_price: String,
+    pub intent_id: String,
+    pub session_date: String,
+    pub timeline: Vec<String>,
+    pub details: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3440,6 +3504,19 @@ pub struct LiveView {
     pub has_positions: bool,
     pub orders: Vec<OrderRowView>,
     pub has_orders: bool,
+    /// Three reconciled views over the same recorded orders. An order may
+    /// appear in both Today and Needs Attention — the counts are independent.
+    pub orders_today_rows: Vec<OrderRowView>,
+    pub orders_attention_rows: Vec<OrderRowView>,
+    pub orders_history_rows: Vec<OrderRowView>,
+    pub has_orders_today: bool,
+    pub has_orders_attention: bool,
+    pub has_orders_history: bool,
+    pub orders_today_count: String,
+    pub orders_attention_count: String,
+    pub orders_history_count: String,
+    pub open_positions_count: String,
+    pub orders_summary: String,
     pub fills: Vec<FillRowView>,
     pub has_fills: bool,
     pub stats: Vec<Stat>,
@@ -3472,9 +3549,137 @@ fn side_tone(side: &str) -> i32 {
 fn order_status_tone(status: &str) -> i32 {
     match status.to_ascii_uppercase().as_str() {
         "COMPLETE" | "FILLED" => 1,
-        "REJECTED" | "UNKNOWN" => 3,
-        "PENDING" | "PARTIAL" | "OPEN" => 2,
+        "REJECTED" | "UNKNOWN" | "CANCELLED" | "EXPIRED" => 3,
+        "PENDING" | "PARTIAL" | "PARTIALLY_FILLED" | "OPEN" | "CREATED" | "VALIDATED"
+        | "SUBMITTED" | "ACKNOWLEDGED" | "WORKING" | "CANCEL_PENDING" | "MODIFY_PENDING"
+        | "MODIFIED" => 2,
         _ => 0,
+    }
+}
+
+/// Plain-language outcome. The exact backend status is preserved in `status`.
+fn plain_order_status(status: &str) -> &'static str {
+    match status.to_ascii_uppercase().as_str() {
+        "COMPLETE" | "FILLED" => "Completed",
+        "REJECTED" => "Rejected — Not executed",
+        "PARTIALLY_FILLED" | "PARTIAL" => "Partially completed",
+        "CANCELLED" | "CANCEL_PENDING" => "Cancelled",
+        "EXPIRED" => "Expired",
+        "UNKNOWN" => "Needs review — outcome unknown",
+        "CREATED" | "VALIDATED" | "SUBMITTED" | "ACKNOWLEDGED" | "WORKING" | "PENDING" | "OPEN"
+        | "MODIFY_PENDING" | "MODIFIED" => "Waiting for execution",
+        _ => "Status not available",
+    }
+}
+
+/// One sentence explaining the outcome, using only recorded backend facts.
+fn plain_order_detail(o: &OrderRow) -> String {
+    let status = o.status.to_ascii_uppercase();
+    let reason = o.reason.trim();
+    match status.as_str() {
+        "COMPLETE" | "FILLED" => {
+            if o.price == "—" || o.price == "0" || o.price.is_empty() {
+                "Execution price not available".to_string()
+            } else {
+                format!("Executed at ₹{}", o.price)
+            }
+        }
+        "PARTIALLY_FILLED" | "PARTIAL" => format!(
+            "Partially completed — {} of {} filled",
+            o.filled_qty, o.quantity
+        ),
+        "REJECTED" => {
+            let low = reason.to_ascii_lowercase();
+            if low.contains("ordertag") || low.contains("alphanumeric") {
+                "FYERS did not accept the order because the order tag contained invalid characters."
+                    .to_string()
+            } else if reason.is_empty() {
+                "Rejected by the venue. Reason: Not available".to_string()
+            } else {
+                format!("Reason: {reason}")
+            }
+        }
+        "CANCELLED" | "CANCEL_PENDING" => {
+            if reason.to_ascii_lowercase().contains("venue") {
+                "Order cancelled by venue. Execution: Not confirmed from available data."
+                    .to_string()
+            } else if reason.is_empty() {
+                "Order cancelled. Execution: Not confirmed from available data.".to_string()
+            } else {
+                format!("Reason: {reason}. Execution: Not confirmed from available data.")
+            }
+        }
+        "UNKNOWN" => "Execution: Not confirmed from available data — review in SYSTEM.".to_string(),
+        _ => {
+            if reason.is_empty() {
+                "Waiting for execution — no fill confirmed yet.".to_string()
+            } else {
+                format!("Reason: {reason}")
+            }
+        }
+    }
+}
+
+/// An order needs review only when its outcome is uncertain or unresolved.
+fn order_needs_attention(o: &OrderRow) -> bool {
+    let status = o.status.to_ascii_uppercase();
+    matches!(
+        status.as_str(),
+        "UNKNOWN" | "REJECTED" | "CANCEL_PENDING" | "EXPIRED" | "PARTIALLY_FILLED" | "PARTIAL"
+    )
+}
+
+fn order_record_time(o: &OrderRow) -> String {
+    if o.session_date.is_empty() && o.submitted_at.is_empty() {
+        "Not available".to_string()
+    } else {
+        let date = if o.session_date.is_empty() {
+            "Not available"
+        } else {
+            &o.session_date
+        };
+        let time = if o.submitted_at.is_empty() {
+            "Not available"
+        } else {
+            &o.submitted_at
+        };
+        format!("{date} {time} IST")
+    }
+}
+
+/// Technical fields, hidden until the operator expands an order card.
+fn order_details(o: &OrderRow) -> Vec<String> {
+    let ack = o
+        .timeline
+        .iter()
+        .find(|line| line.contains("ACKNOWLEDGED"))
+        .map_or_else(|| "Not available".to_string(), Clone::clone);
+    let strategy = if o.intent_id.is_empty() {
+        o.strategy.clone()
+    } else {
+        format!("{} · {}", o.strategy, o.intent_id)
+    };
+    vec![
+        format!("Backend status: {}", blank_fallback(&o.status)),
+        format!("Broker order ID: {}", blank_fallback(&o.broker_order_id)),
+        format!("Strategy identifier: {}", blank_fallback(&strategy)),
+        format!("Order type: {}", blank_fallback(&o.order_type)),
+        format!("Quantity requested: {}", blank_fallback(&o.quantity)),
+        format!("Quantity filled: {}", blank_fallback(&o.filled_qty)),
+        format!("Remaining quantity: {}", blank_fallback(&o.remaining_qty)),
+        format!("Order submission time: {}", order_record_time(o)),
+        format!("Exchange acknowledgement: {ack}"),
+        format!("Trigger price: ₹{}", o.limit_price),
+        format!("Average execution price: ₹{}", o.price),
+        format!("Raw broker error: {}", blank_fallback(&o.reason)),
+    ]
+}
+
+fn blank_fallback(value: &str) -> &str {
+    if value.trim().is_empty() {
+        "Not available"
+    } else {
+        value
     }
 }
 
@@ -4701,27 +4906,77 @@ pub fn project(state: &LiveState) -> LiveView {
             status: p.status.clone(),
         })
         .collect();
+    let today = state.today_session_date.as_str();
     let orders: Vec<OrderRowView> = state
         .orders
         .iter()
         .rev()
         .take(BLOTTER_VIEW_CAP)
-        .map(|o| OrderRowView {
-            order_id: o.order_id.clone(),
-            strategy: o.strategy.clone(),
-            symbol: o.symbol.clone(),
-            side: o.side.clone(),
-            side_tone: side_tone(&o.side),
-            qty: o.quantity.clone(),
-            order_type: o.order_type.clone(),
-            price: o.price.clone(),
-            status: o.status.clone(),
-            time: o.time.clone(),
-            broker: o.broker.clone(),
-            status_tone: order_status_tone(&o.status),
-            reason: o.reason.clone(),
+        .map(|o| {
+            let bucket = if order_needs_attention(o) {
+                1
+            } else if !today.is_empty() && o.session_date == today {
+                0
+            } else {
+                2
+            };
+            OrderRowView {
+                order_id: o.order_id.clone(),
+                strategy: o.strategy.clone(),
+                symbol: o.symbol.clone(),
+                side: o.side.clone(),
+                side_tone: side_tone(&o.side),
+                qty: o.quantity.clone(),
+                order_type: o.order_type.clone(),
+                price: o.price.clone(),
+                status: o.status.clone(),
+                time: o.time.clone(),
+                broker: o.broker.clone(),
+                status_tone: order_status_tone(&o.status),
+                reason: o.reason.clone(),
+                plain_status: plain_order_status(&o.status).into(),
+                plain_detail: plain_order_detail(o),
+                bucket,
+                record_time: order_record_time(o),
+                filled_qty: o.filled_qty.clone(),
+                remaining_qty: o.remaining_qty.clone(),
+                broker_order_id: o.broker_order_id.clone(),
+                limit_price: o.limit_price.clone(),
+                intent_id: o.intent_id.clone(),
+                session_date: o.session_date.clone(),
+                timeline: o.timeline.clone(),
+                details: order_details(o),
+            }
         })
         .collect();
+    let orders_today_rows: Vec<OrderRowView> = orders
+        .iter()
+        .filter(|o| !today.is_empty() && o.session_date == today)
+        .cloned()
+        .collect();
+    let orders_attention_rows: Vec<OrderRowView> =
+        orders.iter().filter(|o| o.bucket == 1).cloned().collect();
+    let orders_history_rows: Vec<OrderRowView> =
+        orders.iter().filter(|o| o.bucket == 2).cloned().collect();
+    let has_orders_today = !orders_today_rows.is_empty();
+    let has_orders_attention = !orders_attention_rows.is_empty();
+    let has_orders_history = !orders_history_rows.is_empty();
+    let orders_today_count = orders_today_rows.len().to_string();
+    let orders_attention_count = orders_attention_rows.len().to_string();
+    let orders_history_count = orders_history_rows.len().to_string();
+    let open_positions_count = state.positions.len().to_string();
+    let count_plain = |rows: &[OrderRowView], prefix: &str| -> usize {
+        rows.iter()
+            .filter(|o| o.plain_status.starts_with(prefix))
+            .count()
+    };
+    let orders_summary = format!(
+        "{} completed · {} pending · {} rejected · {} cancelled",
+        count_plain(&orders_today_rows, "Completed"),
+        count_plain(&orders_today_rows, "Waiting"),
+        count_plain(&orders_today_rows, "Rejected"),
+        count_plain(&orders_today_rows, "Cancelled"),
+    );
     let fills: Vec<FillRowView> = state
         .fills
         .iter()
@@ -5812,6 +6067,17 @@ pub fn project(state: &LiveState) -> LiveView {
         positions,
         has_orders: !orders.is_empty(),
         orders,
+        orders_today_rows,
+        orders_attention_rows,
+        orders_history_rows,
+        has_orders_today,
+        has_orders_attention,
+        has_orders_history,
+        orders_today_count,
+        orders_attention_count,
+        orders_history_count,
+        open_positions_count,
+        orders_summary,
         has_fills: !fills.is_empty(),
         fills,
         stats,
@@ -6280,6 +6546,7 @@ mod tests {
                 "SUBMITTED".into(),
                 "ACKNOWLEDGED".into(),
             ],
+            ..Default::default()
         };
         let steps = order_pipeline(Some(&working), true, false, false);
         let reached: Vec<&str> = steps
@@ -6331,6 +6598,7 @@ mod tests {
                 "SUBMITTED".into(),
                 "REJECTED".into(),
             ],
+            ..Default::default()
         };
         let steps = order_pipeline(Some(&rejected), true, false, false);
         // REJECTED is reached and marked failed; FILLED is never invented.
@@ -6372,6 +6640,7 @@ mod tests {
                 "ACKNOWLEDGED".into(),
                 "FILLED".into(),
             ],
+            ..Default::default()
         };
         let steps = order_pipeline(Some(&filled), true, true, true);
         let labels: Vec<&str> = steps.iter().map(|s| s.label).collect();
@@ -6403,6 +6672,7 @@ mod tests {
                 "ACKNOWLEDGED".into(),
                 "PARTIALLY_FILLED".into(),
             ],
+            ..Default::default()
         };
         // A partial counts as reached-fill, but the position/sl stages must NOT
         // claim the whole size landed while the venue reports 9 of 22.
@@ -6694,6 +6964,7 @@ mod tests {
                 "ACKNOWLEDGED".into(),
                 "FILLED".into(),
             ],
+            ..Default::default()
         }];
         st.pnl = Pnl {
             realized: Some(50.0),
@@ -9152,6 +9423,7 @@ mod tests {
                 reason: "".into(),
                 filled_qty: "10".into(),
                 history: vec!["CREATED".into(), "FILLED".into()],
+                ..Default::default()
             },
             OrderRow {
                 order_id: "ORD-2".into(),
@@ -9167,6 +9439,7 @@ mod tests {
                 reason: "Insufficient funds".into(),
                 filled_qty: "0".into(),
                 history: vec!["CREATED".into(), "REJECTED".into()],
+                ..Default::default()
             },
             OrderRow {
                 order_id: "ORD-3".into(),
@@ -9182,6 +9455,7 @@ mod tests {
                 reason: "".into(),
                 filled_qty: "0".into(),
                 history: vec!["CREATED".into(), "SUBMITTED".into()],
+                ..Default::default()
             },
         ];
 
@@ -9193,6 +9467,134 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_human_first_orders_are_bucketed_and_explained() {
+        let mut st = LiveState::default();
+        let snapshot = serde_json::json!({
+            "today_session_date": "2026-11-24",
+            "orders": [
+                {
+                    "order_id": "cid-1", "broker_order_id": "26112000204443",
+                    "symbol": "NSE:NOCIL", "side": "SELL", "quantity": 1,
+                    "type": "LIMIT", "price": 136.35, "limit_price": 136.35,
+                    "intent_id": "intent-1", "status": "FILLED",
+                    "session_date": "2026-11-24", "time": "09:48:01",
+                    "updated_at": "09:48:05", "broker": "fyers", "reason": "",
+                    "filled_qty": 1, "remaining_qty": 0,
+                    "history": ["CREATED", "SUBMITTED", "ACKNOWLEDGED", "FILLED"],
+                    "timeline": [
+                        {"state": "CREATED", "time": "09:48:01"},
+                        {"state": "SUBMITTED", "time": "09:48:02"},
+                        {"state": "ACKNOWLEDGED", "time": "09:48:03"},
+                        {"state": "FILLED", "time": "09:48:05"}
+                    ]
+                },
+                {
+                    "order_id": "cid-2", "broker_order_id": "",
+                    "symbol": "NSE:IFCI", "side": "SELL", "quantity": 1,
+                    "type": "MARKET", "price": 0, "status": "REJECTED",
+                    "session_date": "2026-11-24", "time": "09:50:00",
+                    "reason": "order submission failed: orderTag: Only alphanumeric characters allowed (HTTP 400)",
+                    "filled_qty": 0, "remaining_qty": 1,
+                    "history": ["CREATED", "REJECTED"]
+                },
+                {
+                    "order_id": "cid-3", "broker_order_id": "26111900238038",
+                    "symbol": "NSE:SAGILITY", "side": "SELL", "quantity": 1,
+                    "type": "LIMIT", "price": 0, "status": "CANCELLED",
+                    "session_date": "2026-11-20", "time": "10:15:00",
+                    "reason": "venue cancel", "filled_qty": 0,
+                    "remaining_qty": 1, "history": ["CREATED", "CANCELLED"]
+                }
+            ]
+        });
+        st.apply_snapshot(&snapshot);
+        assert_eq!(st.today_session_date, "2026-11-24");
+
+        let view = project(&st);
+        assert_eq!(view.orders_today_count, "2");
+        assert_eq!(view.orders_attention_count, "1");
+        assert_eq!(view.orders_history_count, "1");
+        assert_eq!(view.open_positions_count, "0");
+        assert_eq!(
+            view.orders_summary,
+            "1 completed · 0 pending · 1 rejected · 0 cancelled"
+        );
+
+        let completed = view
+            .orders_today_rows
+            .iter()
+            .find(|o| o.symbol == "NSE:NOCIL")
+            .expect("completed order");
+        assert_eq!(completed.symbol, "NSE:NOCIL");
+        assert_eq!(completed.plain_status, "Completed");
+        assert_eq!(completed.plain_detail, "Executed at ₹136.35");
+        assert_eq!(completed.record_time, "2026-11-24 09:48:01 IST");
+        assert_eq!(completed.status_tone, 1);
+        assert_eq!(completed.timeline.len(), 4);
+        assert!(completed
+            .details
+            .iter()
+            .any(|d| d == "Backend status: FILLED"));
+        assert!(completed
+            .details
+            .iter()
+            .any(|d| d == "Exchange acknowledgement: 09:48:03 — ACKNOWLEDGED"));
+
+        let rejected = view
+            .orders_attention_rows
+            .iter()
+            .find(|o| o.symbol == "NSE:IFCI")
+            .expect("rejected order");
+        assert_eq!(rejected.symbol, "NSE:IFCI");
+        assert_eq!(rejected.plain_status, "Rejected — Not executed");
+        assert_eq!(
+            rejected.plain_detail,
+            "FYERS did not accept the order because the order tag contained invalid characters."
+        );
+        assert_eq!(rejected.status_tone, 3);
+        assert_eq!(rejected.record_time, "2026-11-24 09:50:00 IST");
+
+        let historical = view
+            .orders_history_rows
+            .iter()
+            .find(|o| o.symbol == "NSE:SAGILITY")
+            .expect("historical order");
+        assert_eq!(historical.symbol, "NSE:SAGILITY");
+        assert_eq!(historical.plain_status, "Cancelled");
+        assert_eq!(historical.status_tone, 3);
+        assert!(historical
+            .plain_detail
+            .contains("Not confirmed from available data"));
+    }
+
+    #[test]
+    fn test_missing_timestamps_are_not_invented() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "orders": [{
+                "order_id": "cid-legacy", "symbol": "NSE:OLD", "side": "SELL",
+                "status": "UNKNOWN", "time": "", "session_date": ""
+            }]
+        }));
+        let view = project(&st);
+        assert_eq!(view.orders[0].record_time, "Not available");
+        assert_eq!(
+            view.orders[0].plain_status,
+            "Needs review — outcome unknown"
+        );
+        assert!(view.orders[0].timeline.is_empty());
+        assert_eq!(view.orders_attention_count, "1");
+    }
+
+    #[test]
+    fn test_order_status_tones_cover_the_real_vocabulary() {
+        assert_eq!(order_status_tone("PARTIALLY_FILLED"), 2);
+        assert_eq!(order_status_tone("CANCELLED"), 3);
+        assert_eq!(order_status_tone("SUBMITTED"), 2);
+        assert_eq!(order_status_tone("UNKNOWN"), 3);
+        assert_eq!(order_status_tone("FILLED"), 1);
+    }
     #[test]
     fn test_tick_flash_triggers_and_change_pct_coloring() {
         let mut st = LiveState::default();

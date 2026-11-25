@@ -565,7 +565,7 @@ def _cache_store(key: str, packet: dict) -> None:
     path = PACKET_CACHE_DIR / f"{key}.json"
     tmp = path.with_name(f"{key}.tmp-{os.getpid()}")
     tmp.write_text(json.dumps(packet, sort_keys=True), encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
+    repo_index._atomic_replace(tmp, path)
     try:
         files = sorted(
             PACKET_CACHE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True

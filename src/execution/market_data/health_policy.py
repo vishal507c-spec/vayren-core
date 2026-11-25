@@ -54,6 +54,25 @@ def _ist_clock(epoch: float) -> datetime:
     return datetime.fromtimestamp(epoch, IST)
 
 
+def is_pre_session_candle(timestamp: object, session_start: str = DEFAULT_SESSION_START) -> bool:
+    """True for a candle stamped before the venue's session start.
+
+    NSE's 08:45 pre-open bucket is NOT a session candle: feeding it to a
+    strategy shifts C1/reference/C4 indices and silently disables MetaLabel.
+    The rule is shared by live bucketing, replay, catchup, recovery and the
+    strategy driver so no path can reintroduce the shifted sequence.
+    Unparseable stamps return False — upstream validation rejects them.
+    """
+    text = str(timestamp).strip().replace("T", " ")
+    if len(text) < 16 or text[13] != ":":
+        return False
+    try:
+        clock = _clock_seconds(f"{text[11:13]}:{text[14:16]}", field_name="candle time")
+    except ValueError:
+        return False
+    return clock < _clock_seconds(session_start, field_name="session_start")
+
+
 @dataclass(frozen=True)
 class MarketCalendar:
     """Cash-market session calendar for one venue (NSE by default)."""

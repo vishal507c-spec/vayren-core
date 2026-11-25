@@ -2303,13 +2303,21 @@ class LiveTradingService:
                             "quantity": float(item.get("quantity", 0.0) or 0.0),
                             "type": str(item.get("order_type", "")),
                             "price": float(item.get("avg_fill_price") or 0.0),
+                            "limit_price": float(item.get("limit_price") or 0.0),
+                            "intent_id": str(item.get("intent_id", "") or ""),
                             "status": str(item.get("state", "")),
-                            "session_date": str(item.get("session_date", "") or ""),
-                            "time": self._history_time(item),
                             "broker": broker_name,
                             "reason": str(item.get("reason", "") or ""),
                             "filled_qty": float(item.get("filled_qty", 0.0) or 0.0),
                         }
+                        order_row["remaining_qty"] = max(
+                            0.0, float(order_row["quantity"]) - float(order_row["filled_qty"])
+                        )
+                        # Real recorded timestamps only. A missing timestamp is
+                        # reported as such by the UI — never back-filled from a
+                        # wall clock or the engine's 1970 placeholder.
+                        facts = self._order_facts(item)
+                        order_row.update(facts)
                         history = item.get("history")
                         if isinstance(history, (list, tuple)):
                             order_row["history"] = [
@@ -2670,6 +2678,8 @@ class LiveTradingService:
             "positions": positions,
             "position": positions[0] if len(positions) == 1 else None,
             "orders": orders[-50:],
+            # Authoritative IST trading date for the UI's Today/History split.
+            "today_session_date": _ist_session_date(),
             "fills": fills[-50:],
             "pnl": {
                 "realized": realized,
@@ -3010,7 +3020,10 @@ class LiveTradingService:
                     )
 
                     provider = BrokerFeedProvider(
-                        md_faces[symbol], self._config.timeframe, history_face=trading_face
+                        md_faces[symbol],
+                        self._config.timeframe,
+                        session_start="09:15",
+                        history_face=trading_face,
                     )
                 else:
                     provider = SqliteTailProvider(self._data_dir, self._config.timeframe)
@@ -3246,6 +3259,10 @@ class LiveTradingService:
             self._market_fanouts.append(fanout)
             specs = [(symbol, (symbol,)) for symbol in grouped_symbols]
             batch = fanout.subscriptions_batch(specs)
+            # Start draining immediately: subscriptions happen during the
+            # 22-symbol session build, long before the later backstop pump.
+            # Idempotent, so the existing start after build stays harmless.
+            fanout.start_background_pump(interval_s=0.1)
             md_faces.update(batch)
         return md_faces
 
@@ -4507,6 +4524,57 @@ class LiveTradingService:
                 return str(item.get("session_date", "") or "")
             return timestamp
         return str(item.get("session_date", "") or "")
+
+    @staticmethod
+    def _ist_stamp(raw: str) -> tuple[str, str] | None:
+        """Convert a genuine ISO history timestamp to (IST date, IST time)."""
+        text = str(raw or "")
+        if not text or text.startswith("1970-01-01"):
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)  # noqa: UP017 - pyright targets 3.10 syntax
+        ist = parsed.astimezone(_VENUE_TZ)
+        return ist.strftime("%Y-%m-%d"), ist.strftime("%H:%M:%S")
+
+    @classmethod
+    def _order_facts(cls, item: dict[str, Any]) -> dict[str, Any]:
+        """Authoritative, display-ready order times from recorded history.
+
+        The first genuine transition is the recorded order time; the last is
+        the latest update. Missing timestamps stay missing so the UI can say
+        "Not available" instead of inventing one.
+        """
+        timeline: list[dict[str, str]] = []
+        genuine: list[tuple[str, str, str]] = []  # (IST date, IST time, state)
+        history = item.get("history", ())
+        if isinstance(history, (list, tuple)):
+            for entry in history:
+                stage = str(entry[0]) if len(entry) > 0 else ""
+                raw = str(entry[1]) if len(entry) > 1 else ""
+                if not stage:
+                    continue
+                stamp = cls._ist_stamp(raw)
+                if stamp is not None:
+                    genuine.append((stamp[0], stamp[1], stage))
+                timeline.append(
+                    {
+                        "state": stage,
+                        "time": stamp[1] if stamp is not None else "Not available",
+                    }
+                )
+        session_date = str(item.get("session_date", "") or "")
+        if not session_date and genuine:
+            session_date = genuine[0][0]
+        return {
+            "session_date": session_date,
+            "time": genuine[0][1] if genuine else "",
+            "updated_at": genuine[-1][1] if genuine else "",
+            "timeline": timeline,
+        }
 
     # ── persistence (config always; checkpoints per symbol) ─────────────
 

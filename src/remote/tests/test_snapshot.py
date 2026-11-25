@@ -50,6 +50,44 @@ def make_live(**overrides: Any) -> dict[str, Any]:
     return live
 
 
+def test_human_first_order_facts_survive_remote_snapshot() -> None:
+    """The Rust view model must receive real timestamps and lifecycle events."""
+    snap = build_snapshot(
+        make_live(
+            today_session_date="2026-11-24",
+            orders=[
+                {
+                    "order_id": "cid-1",
+                    "broker_order_id": "26112000204443",
+                    "symbol": "NSE:NOCIL",
+                    "side": "SELL",
+                    "quantity": 1.0,
+                    "type": "LIMIT",
+                    "price": 136.35,
+                    "status": "FILLED",
+                    "session_date": "2026-11-24",
+                    "time": "09:48:01",
+                    "updated_at": "09:48:05",
+                    "reason": "",
+                    "filled_qty": 1.0,
+                    "remaining_qty": 0.0,
+                    "limit_price": 136.35,
+                    "intent_id": "intent-1",
+                    "timeline": [{"state": "CREATED", "time": "09:48:01"}],
+                }
+            ],
+        )
+    )
+    assert snap["today_session_date"] == "2026-11-24"
+    row = snap["orders"][0]
+    assert row["session_date"] == "2026-11-24"
+    assert row["time"] == "09:48:01"
+    assert row["updated_at"] == "09:48:05"
+    assert row["remaining_qty"] == 0.0
+    assert row["limit_price"] == 136.35
+    assert row["timeline"] == [{"state": "CREATED", "time": "09:48:01"}]
+
+
 def test_snapshot_sections_present() -> None:
     snap = build_snapshot(make_live())
     for section in (

@@ -277,26 +277,59 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
             })
             .collect::<Vec<_>>(),
     ));
+    let live_order = |o: vayren_domain::live::OrderRowView| LiveOrder {
+        order_id: o.order_id.into(),
+        strategy: o.strategy.into(),
+        symbol: o.symbol.into(),
+        side: o.side.into(),
+        side_tone: o.side_tone,
+        qty: o.qty.into(),
+        order_type: o.order_type.into(),
+        price: o.price.into(),
+        status: o.status.into(),
+        time: o.time.into(),
+        broker: o.broker.into(),
+        status_tone: o.status_tone,
+        reason: o.reason.into(),
+        plain_status: o.plain_status.into(),
+        plain_detail: o.plain_detail.into(),
+        bucket: o.bucket,
+        record_time: o.record_time.into(),
+        filled_qty: o.filled_qty.into(),
+        remaining_qty: o.remaining_qty.into(),
+        broker_order_id: o.broker_order_id.into(),
+        limit_price: o.limit_price.into(),
+        intent_id: o.intent_id.into(),
+        session_date: o.session_date.into(),
+        timeline: strings(o.timeline),
+        details: strings(o.details),
+    };
     ui.set_orders(model(
-        view.orders
+        view.orders.into_iter().map(&live_order).collect::<Vec<_>>(),
+    ));
+    ui.set_orders_today(model(
+        view.orders_today_rows
             .into_iter()
-            .map(|o| LiveOrder {
-                order_id: o.order_id.into(),
-                strategy: o.strategy.into(),
-                symbol: o.symbol.into(),
-                side: o.side.into(),
-                side_tone: o.side_tone,
-                qty: o.qty.into(),
-                order_type: o.order_type.into(),
-                price: o.price.into(),
-                status: o.status.into(),
-                time: o.time.into(),
-                broker: o.broker.into(),
-                status_tone: o.status_tone,
-                reason: o.reason.into(),
-            })
+            .map(&live_order)
             .collect::<Vec<_>>(),
     ));
+    ui.set_orders_attention(model(
+        view.orders_attention_rows
+            .into_iter()
+            .map(&live_order)
+            .collect::<Vec<_>>(),
+    ));
+    ui.set_orders_history(model(
+        view.orders_history_rows
+            .into_iter()
+            .map(&live_order)
+            .collect::<Vec<_>>(),
+    ));
+    ui.set_orders_today_count(view.orders_today_count.clone().into());
+    ui.set_orders_attention_count(view.orders_attention_count.clone().into());
+    ui.set_orders_history_count(view.orders_history_count.clone().into());
+    ui.set_open_positions_count(view.open_positions_count.clone().into());
+    ui.set_orders_summary(view.orders_summary.clone().into());
     ui.set_fills(model(
         view.fills
             .into_iter()
