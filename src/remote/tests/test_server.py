@@ -80,6 +80,7 @@ class FakeGateway(BackendGateway):
         self.live = live if live is not None else make_live()
         self.commands: list[dict[str, Any]] = []
         self.fail_commands = False
+        self.download_result: dict[str, Any] | None = None
 
     def get_snapshot(self) -> dict[str, Any]:
         return self.live
@@ -88,6 +89,8 @@ class FakeGateway(BackendGateway):
         self.commands.append(dict(action))
         if self.fail_commands:
             raise RuntimeError("backend exploded")
+        if action.get("action") == "download_action" and self.download_result is not None:
+            return dict(self.download_result)
         running = dict(self.live)
         if action.get("action") == "start":
             running["session_status"] = "RUNNING"
@@ -278,6 +281,90 @@ def test_unauthenticated_command_rejected(live_server: Any) -> None:
         assert error is not None and error["type"] == "error"
         assert error["payload"]["code"] == "NOT_AUTHENTICATED"
         assert gateway.commands == []
+    finally:
+        client.close()
+
+
+def test_download_action_is_accepted_and_translated(live_server: Any) -> None:
+    """The historical download wire reaches the gateway on the deferred path.
+
+    The engine runs against the broker CONNECTED on the gateway, so the remote
+    command must not be rejected by the allowlist or flattened by translation.
+    """
+    server, gateway = live_server
+    client, _welcome, _snapshot = authed_client(server)
+    try:
+        client.send_obj(
+            {
+                "type": "command",
+                "v": 1,
+                "request_id": "dl-1",
+                "payload": {"action": "download_action", "params": {"wire": "dl:download"}},
+            }
+        )
+        result = None
+        for _ in range(5):
+            frame = client.recv_obj()
+            if frame is not None and frame.get("type") == "command_result":
+                result = frame
+                break
+        assert result is not None
+        assert len(gateway.commands) == 1
+        assert gateway.commands[0]["action"] == "download_action"
+        assert gateway.commands[0]["wire"] == "dl:download"
+    finally:
+        client.close()
+
+
+def test_download_command_result_carries_authoritative_selection(live_server: Any) -> None:
+    """The desktop must receive the backend's selected count in the command ack.
+
+    Without this, optimistic checkboxes can read 5 while the Download Plan
+    still renders 0 until a periodic state_update happens to arrive.
+    """
+    server, gateway = live_server
+    symbols = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    gateway.download_result = {
+        "ok": True,
+        "download": {
+            "universe": symbols,
+            "selected": list(symbols),
+            "plan": {"stocks": "5", "interval": "15m", "range": "db", "error": ""},
+            "status": {"mode": "idle"},
+        },
+    }
+    client, _welcome, _snapshot = authed_client(server)
+    try:
+        for expected, selected in (("5", list(symbols)), ("0", [])):
+            gateway.download_result["download"]["selected"] = selected
+            gateway.download_result["download"]["plan"]["stocks"] = expected
+            request_id = f"dl-count-{expected}"
+            client.send_obj(
+                {
+                    "type": "command",
+                    "v": 1,
+                    "request_id": request_id,
+                    "payload": {
+                        "action": "download_action",
+                        "params": {"wire": "dl:select:AAA"},
+                    },
+                }
+            )
+            result = None
+            for _ in range(5):
+                frame = client.recv_obj()
+                if (
+                    frame is not None
+                    and frame.get("type") == "command_result"
+                    and frame.get("request_id") == request_id
+                ):
+                    result = frame
+                    break
+            assert result is not None
+            payload = result["payload"]
+            assert payload["ok"] is True
+            assert payload["download"]["plan"]["stocks"] == expected
+            assert len(payload["download"]["selected"]) == int(expected)
     finally:
         client.close()
 

@@ -31,6 +31,7 @@ import struct
 import threading
 import time
 from collections import OrderedDict, deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -87,6 +88,9 @@ MUTATING_ACTIONS = (
     # Orchestrated safe disconnect: stop engine, reconcile exposure, then
     # disconnect the broker only when it is safe. Never auto-liquidates.
     "safe_disconnect",
+    # Historical Download: runs the preserved engine against the broker that
+    # is CONNECTED on the gateway. Network-bound, deferred and progress-bearing.
+    "download_action",
 )
 
 #: Commands whose backend work is network-bound (broker auth, REST,
@@ -105,6 +109,7 @@ _DEFERRED_ACTIONS = frozenset(
         "sync_candles",
         "order_test",
         "safe_disconnect",
+        "download_action",
     }
 )
 
@@ -120,6 +125,7 @@ _PROGRESS_ACTIONS = frozenset(
         "safe_disconnect",
         "save_broker_credentials",
         "order_test",
+        "download_action",
     }
 )
 
@@ -137,6 +143,9 @@ EVENT_CHANNELS = (
     "broker_session",
     "brokers",
     "market",
+    # Historical Download console facts, produced by the preserved engine
+    # running on the gateway against the broker CONNECTED there.
+    "download",
     "order_stream",
     "strategy",
     "risk",
@@ -190,6 +199,13 @@ class RemoteConfig:
     #: Consecutive deferred-command failures that open the gateway circuit.
     circuit_failure_threshold: int = 3
     circuit_cooldown_s: float = 30.0
+    #: Bounded deadline for building/delivering an initial snapshot before
+    #: reporting SNAPSHOT_TIMEOUT (or explicitly flagged cached fallback).
+    snapshot_timeout_s: float = 5.0
+    #: Maximum age for warm fallback snapshots (explicitly labeled stale=True).
+    snapshot_cache_max_age_s: float = 15.0
+    #: Per-frame socket write timeout so stalled peers cannot block writers.
+    write_timeout_s: float = 2.0
     tls_cert_file: str = ""
     tls_key_file: str = ""
     allow_plaintext_non_loopback: bool = False
@@ -202,6 +218,12 @@ class RemoteConfig:
             raise ConfigError("max_connections must be at least 1")
         if self.command_deadline_s <= 0 or self.circuit_cooldown_s <= 0:
             raise ConfigError("deadline and circuit cooldown must be positive")
+        if (
+            self.snapshot_timeout_s <= 0
+            or self.snapshot_cache_max_age_s <= 0
+            or self.write_timeout_s <= 0
+        ):
+            raise ConfigError("snapshot and write timeouts must be positive")
         if self.circuit_failure_threshold < 1:
             raise ConfigError("circuit_failure_threshold must be at least 1")
         non_loopback = self.host not in _LOOPBACK_HOSTS
@@ -245,6 +267,9 @@ def config_from_env(env: dict[str, str] | None = None) -> RemoteConfig:
         command_deadline_s=_float("VAYREN_REMOTE_COMMAND_DEADLINE_S", 30.0),
         circuit_failure_threshold=_int("VAYREN_REMOTE_CIRCUIT_FAILURES", 3),
         circuit_cooldown_s=_float("VAYREN_REMOTE_CIRCUIT_COOLDOWN_S", 30.0),
+        snapshot_timeout_s=_float("VAYREN_REMOTE_SNAPSHOT_TIMEOUT_S", 5.0),
+        snapshot_cache_max_age_s=_float("VAYREN_REMOTE_SNAPSHOT_MAX_AGE_S", 15.0),
+        write_timeout_s=_float("VAYREN_REMOTE_WRITE_TIMEOUT_S", 2.0),
         tls_cert_file=(source.get("VAYREN_REMOTE_TLS_CERT", "") or "").strip(),
         tls_key_file=(source.get("VAYREN_REMOTE_TLS_KEY", "") or "").strip(),
         allow_plaintext_non_loopback=(source.get("VAYREN_REMOTE_ALLOW_PLAINTEXT", "") or "")
@@ -366,6 +391,41 @@ def perform_handshake(sock: socket.socket, expected_path: str) -> None:
 # ── connection state ─────────────────────────────────────────────────────
 
 
+@dataclass(frozen=True, slots=True)
+class _OutboundFrame:
+    """Single serialized WebSocket frame queued for a connection writer."""
+
+    opcode: int
+    payload: bytes
+    enqueued_at: float = field(default_factory=time.monotonic)
+    is_init_snapshot: bool = False
+    build_ms: float | None = None
+    snapshot_seq: int = 0
+
+
+@dataclass
+class _SnapshotBundle:
+    """Immutable point-in-time snapshot projection produced by one build."""
+
+    seq: int
+    remote: dict[str, Any]
+    hashes: dict[str, str]
+    events: list[Any]
+    built_at: float
+    wall_time: str
+    build_ms: float
+
+
+@dataclass
+class _SnapshotFetch:
+    """Single-flight snapshot build ticket shared by poll and new clients."""
+
+    started_at: float = field(default_factory=time.monotonic)
+    event: threading.Event = field(default_factory=threading.Event)
+    bundle: _SnapshotBundle | None = None
+    error: Exception | None = None
+
+
 @dataclass
 class _Connection:
     sock: socket.socket
@@ -380,8 +440,17 @@ class _Connection:
     last_activity: float = field(default_factory=time.monotonic)
     last_ping: float = field(default_factory=time.monotonic)
     authed_at: float = 0.0
+    authed_iso: str = ""
     needs_resync: bool = False
+    initial_snapshot_sent: bool = False
+    initial_snapshot_inflight: bool = False
+    last_snapshot_at: float = 0.0
+    init_snapshot_build_ms: float | None = None
+    init_snapshot_send_ms: float | None = None
+    disconnect_reason: str = ""
     send_lock: threading.Lock = field(default_factory=threading.Lock)
+    state_lock: threading.Lock = field(default_factory=threading.Lock)
+    writer_thread: threading.Thread | None = None
     closed: bool = False
 
 
@@ -503,6 +572,23 @@ class RemoteServer:
         self._request_stats: dict[str, _RequestStats] = {}
         self._circuits: dict[str, _CommandCircuit] = {}
         self._started_at = time.monotonic()
+        # Decoupled single-flight snapshot publisher + bounded worker pools so
+        # slow backend calls or stalled clients can never wedge the gateway.
+        self._snapshot_lock = threading.Lock()
+        self._snapshot_inflight: _SnapshotFetch | None = None
+        self._latest_bundle: _SnapshotBundle | None = None
+        self._snapshot_seq = 0
+        self._snapshot_build_errors = 0
+        self._last_snapshot_error = ""
+        self._last_poll_at = 0.0
+        self._last_poll_delay_ms = 0.0
+        self._last_published_seq = 0
+        self._snapshot_executor = ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="remote-snap-build"
+        )
+        self._delivery_executor = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="remote-snap-send"
+        )
 
     # ── lifecycle ──
 
@@ -549,9 +635,15 @@ class RemoteServer:
         with self._lock:
             connections = list(self._connections.values())
         for conn in connections:
-            self._close_connection(conn, _CLOSE_NORMAL)
+            self._close_connection(conn, _CLOSE_NORMAL, reason="server_stop")
         for thread in self._threads:
             thread.join(timeout=5.0)
+        for conn in connections:
+            writer = conn.writer_thread
+            if writer is not None and writer is not threading.current_thread():
+                writer.join(timeout=1.0)
+        self._snapshot_executor.shutdown(wait=False, cancel_futures=True)
+        self._delivery_executor.shutdown(wait=False, cancel_futures=True)
 
     # ── accept ──
 
@@ -574,12 +666,16 @@ class RemoteServer:
                 if now - conn.last_activity > self._config.idle_timeout_s
             ]
         for conn in stale:
+            elapsed_s = int(now - conn.last_activity)
+            conn.disconnect_reason = conn.disconnect_reason or f"idle_timeout_{elapsed_s}s"
             conn.closed = True
             logger.warning(
                 "remote: reaping stale connection (%s, idle %.0fs)",
                 conn.connection_id,
                 now - conn.last_activity,
             )
+            with contextlib.suppress(queue.Full):
+                conn.outbox.put_nowait(None)
             with contextlib.suppress(OSError):
                 conn.sock.shutdown(socket.SHUT_RDWR)
             with contextlib.suppress(OSError):
@@ -620,6 +716,55 @@ class RemoteServer:
         with self._lock:
             self._connections.pop(conn.connection_id, None)
 
+    def _start_writer(self, conn: _Connection) -> None:
+        writer = threading.Thread(
+            target=self._writer_loop,
+            args=(conn,),
+            name=f"remote-write-{conn.connection_id}",
+            daemon=True,
+        )
+        conn.writer_thread = writer
+        writer.start()
+
+    def _writer_loop(self, conn: _Connection) -> None:
+        while not self._stop.is_set() and not conn.closed:
+            try:
+                item = conn.outbox.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if item is None:
+                break
+            if conn.closed or self._stop.is_set():
+                break
+            try:
+                with conn.send_lock:
+                    if conn.closed:
+                        break
+                    if item.opcode == 0x1:
+                        send_text(conn.sock, item.payload)
+                    else:
+                        write_frame(conn.sock, item.opcode, item.payload)
+                if item.is_init_snapshot:
+                    sent_at = time.monotonic()
+                    send_ms = max(0.0, (sent_at - item.enqueued_at) * 1000.0)
+                    with conn.state_lock:
+                        if conn.init_snapshot_send_ms is None:
+                            conn.init_snapshot_send_ms = send_ms
+                    logger.info(
+                        "remote: initial snapshot sent connection_id=%s seq=%d "
+                        "build_ms=%.1f send_ms=%.1f queue_depth=%d",
+                        conn.connection_id,
+                        item.snapshot_seq,
+                        item.build_ms or 0.0,
+                        send_ms,
+                        conn.outbox.qsize(),
+                    )
+            except OSError as exc:
+                self._close_connection(
+                    conn, _CLOSE_POLICY, reason=f"write_failed:{type(exc).__name__}", force=True
+                )
+                break
+
     # ── per-connection serve ──
 
     def _serve_connection(self, sock: socket.socket, address: str) -> None:
@@ -632,14 +777,15 @@ class RemoteServer:
                 sock.close()
             return
         self._register(conn)
+        self._start_writer(conn)
         logger.info("remote: client connected (%s)", conn.connection_id)
         sock.settimeout(min(0.25, max(0.05, self._config.auth_timeout_s / 4)))
         deadline = time.monotonic() + self._config.auth_timeout_s
         try:
-            while not self._stop.is_set():
+            while not self._stop.is_set() and not conn.closed:
                 if not conn.tracker.authenticated and time.monotonic() > deadline:
                     self._send_error(conn, "NOT_AUTHENTICATED", "authentication timed out")
-                    self._close_connection(conn, _CLOSE_POLICY)
+                    self._close_connection(conn, _CLOSE_POLICY, reason="auth_timeout")
                     return
                 try:
                     opcode, payload = read_frame(sock)
@@ -647,15 +793,20 @@ class RemoteServer:
                     self._check_idle(conn)
                     continue
                 except (ConnectionError, ProtocolError, OSError, struct.error) as exc:
-                    logger.warning("remote: read failed (%s): %s", conn.connection_id, exc)
-                    self._close_connection(conn, _CLOSE_POLICY)
+                    if not conn.closed:
+                        logger.warning("remote: read failed (%s): %s", conn.connection_id, exc)
+                    self._close_connection(
+                        conn, _CLOSE_POLICY, reason=conn.disconnect_reason or "peer_closed"
+                    )
                     return
                 conn.last_activity = time.monotonic()
                 if opcode == 0x8:
-                    self._close_connection(conn, _CLOSE_NORMAL)
+                    self._close_connection(conn, _CLOSE_NORMAL, reason="client_close")
                     return
                 if opcode == 0x9:
-                    write_frame(sock, 0xA, payload[:125])
+                    self._enqueue_frame(
+                        conn, _OutboundFrame(opcode=0xA, payload=payload[:125]), drop_ok=True
+                    )
                     continue
                 if opcode == 0xA:
                     continue
@@ -667,10 +818,18 @@ class RemoteServer:
                 if self._handle_text(conn, payload):
                     return
         finally:
+            self._close_connection(
+                conn, _CLOSE_NORMAL, reason=conn.disconnect_reason or "connection_closed"
+            )
             self._unregister(conn)
-            with contextlib.suppress(OSError):
-                sock.close()
-            logger.info("remote: client disconnected (%s)", conn.connection_id)
+            writer = conn.writer_thread
+            if writer is not None and writer is not threading.current_thread():
+                writer.join(timeout=0.5)
+            logger.info(
+                "remote: client disconnected (%s) reason=%s",
+                conn.connection_id,
+                conn.disconnect_reason or "closed",
+            )
 
     def _handle_text(self, conn: _Connection, payload: bytes) -> bool:
         """Handle one text frame; True means the connection is done."""
@@ -706,13 +865,20 @@ class RemoteServer:
             may_retry = conn.tracker.note_attempt(None)
             self._send_error(conn, "AUTH_FAILED", "invalid remote token")
             if not may_retry:
-                self._close_connection(conn, _CLOSE_POLICY)
+                self._close_connection(conn, _CLOSE_POLICY, reason="auth_failed")
                 return True
             return False
         conn.tracker.note_attempt(entry)
         conn.role = entry.role
         conn.authed_at = time.monotonic()
+        conn.authed_iso = utcnow_iso()
         conn.last_activity = conn.authed_at
+        logger.info(
+            "remote: client authenticated connection_id=%s role=%s authed_at=%s",
+            conn.connection_id,
+            entry.role,
+            conn.authed_iso,
+        )
         welcome = make_envelope(
             "welcome",
             {
@@ -724,7 +890,7 @@ class RemoteServer:
             },
         )
         self._send_raw(conn, encode_message(welcome))
-        self._push_snapshot(conn, resync=False)
+        self._schedule_initial_snapshot(conn, resync=False, min_started_at=conn.authed_at)
         return False
 
     def _on_rehello(self, conn: _Connection, _message: Any) -> None:
@@ -754,13 +920,14 @@ class RemoteServer:
             if unknown:
                 self._send_error(conn, "BAD_MESSAGE", f"unknown channels: {sorted(unknown)}")
                 return
-        conn.subscriptions = wanted
+        with conn.state_lock:
+            conn.subscriptions = wanted
         if isinstance(last_seq, int) and last_seq >= 0:
             replayed = self._replay_missed(conn, last_seq)
             if not replayed:
-                self._push_snapshot(conn, resync=True)
+                self._schedule_initial_snapshot(conn, resync=True, min_started_at=time.monotonic())
         else:
-            self._push_snapshot(conn, resync=False)
+            self._schedule_initial_snapshot(conn, resync=False, min_started_at=time.monotonic())
 
     def _on_unsubscribe(self, conn: _Connection, message: Any) -> None:
         channels = message.payload.get("channels", [])
@@ -896,6 +1063,8 @@ class RemoteServer:
     def _admit_deferred(self, conn: _Connection, action: str, request_id: str) -> bool:
         """Bound the deferred fan-out and shed load honestly (never silently)."""
         now = time.monotonic()
+        err_code: str | None = None
+        err_detail = ""
         with self._lock:
             circuit = self._circuits.setdefault(action, _CommandCircuit())
             state = circuit.state(
@@ -904,23 +1073,19 @@ class RemoteServer:
                 now=now,
             )
             if state == "OPEN":
-                self._send_error(
-                    conn,
-                    "CIRCUIT_OPEN",
+                err_code = "CIRCUIT_OPEN"
+                err_detail = (
                     f"{action} temporarily unavailable after repeated backend failures; "
-                    f"retry in {int(self._config.circuit_cooldown_s - (now - circuit.opened_at))}s",
-                    request_id=request_id,
+                    f"retry in {int(self._config.circuit_cooldown_s - (now - circuit.opened_at))}s"
                 )
-                return False
-            if not self._deferred_slots.acquire(blocking=False):
-                self._send_error(
-                    conn,
-                    "SERVER_BUSY",
-                    "gateway is busy with other broker operations; retry shortly",
-                    request_id=request_id,
-                )
-                return False
-            self._inflight_deferred += 1
+            elif not self._deferred_slots.acquire(blocking=False):
+                err_code = "SERVER_BUSY"
+                err_detail = "gateway is busy with other broker operations; retry shortly"
+            else:
+                self._inflight_deferred += 1
+        if err_code is not None:
+            self._send_error(conn, err_code, err_detail, request_id=request_id)
+            return False
         return True
 
     def _release_deferred(self) -> None:
@@ -1025,7 +1190,8 @@ class RemoteServer:
         worker.start()
 
     def health_snapshot(self) -> dict[str, Any]:
-        """Heartbeat health: worker load, queue state and latency percentiles."""
+        """Heartbeat health: worker load, queue state, snapshot telemetry and latency."""
+        now = time.monotonic()
         with self._lock:
             stats = {name: value.summary() for name, value in sorted(self._request_stats.items())}
             inflight = self._inflight_deferred
@@ -1033,20 +1199,56 @@ class RemoteServer:
                 name: circuit.state(
                     threshold=self._config.circuit_failure_threshold,
                     cooldown_s=self._config.circuit_cooldown_s,
-                    now=time.monotonic(),
+                    now=now,
                 )
                 for name, circuit in sorted(self._circuits.items())
             }
-            queued = sum(conn.outbox.qsize() for conn in self._connections.values())
+            conns = list(self._connections.values())
+            queued = sum(conn.outbox.qsize() for conn in conns)
             dropped = self._dropped_messages
+        with self._snapshot_lock:
+            latest = self._latest_bundle
+            snap_building = self._snapshot_inflight is not None
+            snap_seq = self._snapshot_seq
+            snap_errors = self._snapshot_build_errors
+        client_diag: list[dict[str, Any]] = []
+        for conn in conns:
+            with conn.state_lock:
+                client_diag.append(
+                    {
+                        "connection_id": conn.connection_id,
+                        "role": conn.role or "",
+                        "authed_at": conn.authed_iso,
+                        "init_snapshot_build_ms": conn.init_snapshot_build_ms,
+                        "init_snapshot_send_ms": conn.init_snapshot_send_ms,
+                        "snapshot_age_ms": (
+                            round(max(0.0, (now - conn.last_snapshot_at) * 1000.0), 1)
+                            if conn.last_snapshot_at > 0.0
+                            else None
+                        ),
+                        "queue_depth": conn.outbox.qsize(),
+                        "needs_resync": conn.needs_resync,
+                    }
+                )
         return {
-            "uptime_s": round(time.monotonic() - self._started_at, 1),
+            "uptime_s": round(now - self._started_at, 1),
             "inflight_commands": inflight,
             "outbox_queued": queued,
+            "queue_depth": queued,
             "dropped_messages": dropped,
-            "connections": self.connection_count,
+            "connections": len(conns),
             "commands": stats,
             "circuits": circuits,
+            "last_snapshot_at": latest.wall_time if latest is not None else "",
+            "snapshot_age_ms": (
+                round(max(0.0, (now - latest.built_at) * 1000.0), 1) if latest is not None else None
+            ),
+            "snapshot_build_ms": round(latest.build_ms, 1) if latest is not None else None,
+            "snapshot_seq": snap_seq,
+            "snapshot_building": snap_building,
+            "snapshot_build_errors": snap_errors,
+            "poll_delay_ms": round(self._last_poll_delay_ms, 1),
+            "clients": client_diag,
         }
 
     def _dispatch_lifecycle(
@@ -1244,6 +1446,17 @@ class RemoteServer:
                 "action": "order_test",
                 **{k: v for k, v in args.items() if k in allowed},
             }
+        if action == "download_action":
+            # Only one `dl:*` wire is forwarded. The engine itself resolves
+            # the connected broker from the gateway's authoritative manager.
+            wire = args.get("wire")
+            if not isinstance(wire, str) or not wire.strip():
+                return None
+            return {
+                "action": "download_action",
+                "wire": wire.strip()[:200],
+                "request_id": request_id,
+            }
         return None
 
     def _command_result(
@@ -1282,6 +1495,10 @@ class RemoteServer:
             # Read-only: the refresh succeeds when the snapshot carries the
             # authoritative session; action_ok is not part of that command.
             ok = "broker_session" in fresh
+        elif action == "download_action":
+            # The gateway runs the preserved engine and reports its own verdict;
+            # never acknowledge a blocked/unauthenticated download as success.
+            ok = bool(fresh.get("ok", True))
         else:
             ok = True
         out: dict[str, Any] = {
@@ -1294,6 +1511,12 @@ class RemoteServer:
         }
         if include_snapshot:
             out["snapshot"] = build_snapshot(fresh)
+        # The gateway's download command result IS the authoritative download
+        # snapshot (selection, plan count, broker gating, progress). Without
+        # it the desktop only has optimistic checkboxes and a stale plan while
+        # it waits for the next periodic state_update.
+        if isinstance(fresh.get("download"), dict):
+            out["download"] = dict(fresh["download"])
         if isinstance(fresh.get("broker_session"), dict):
             out["broker_session"] = dict(fresh["broker_session"])
         if isinstance(fresh.get("action_note"), str):
@@ -1321,23 +1544,225 @@ class RemoteServer:
             while len(self._seen_commands) > 512:
                 self._seen_commands.popitem(last=False)
 
-    # ── publish path (poll thread) ──
+    # ── publish path (decoupled snapshot builder + non-blocking fanout) ──
+
+    def _build_snapshot_bundle(self) -> _SnapshotBundle:
+        t0 = time.monotonic()
+        live = self._gateway.get_snapshot()
+        if not isinstance(live, dict):
+            raise RuntimeError("backend snapshot returned non-dict")
+        raw_events = live.get("events")
+        events: list[Any] = list(raw_events) if isinstance(raw_events, list) else []
+        remote = self._with_download_section(build_snapshot(live))
+        hashes = {key: _stable_hash(value) for key, value in remote.items()}
+        built_at = time.monotonic()
+        build_ms = max(0.0, (built_at - t0) * 1000.0)
+        wall = utcnow_iso()
+        with self._snapshot_lock:
+            self._snapshot_seq += 1
+            seq = self._snapshot_seq
+            bundle = _SnapshotBundle(
+                seq=seq,
+                remote=remote,
+                hashes=hashes,
+                events=events,
+                built_at=built_at,
+                wall_time=wall,
+                build_ms=build_ms,
+            )
+            self._latest_bundle = bundle
+            return bundle
+
+    def _start_snapshot_fetch(self, *, min_started_at: float | None = None) -> _SnapshotFetch:
+        with self._snapshot_lock:
+            inflight = self._snapshot_inflight
+            if inflight is not None and (
+                min_started_at is None or inflight.started_at >= min_started_at - 0.005
+            ):
+                return inflight
+            if inflight is not None:
+                # An older wedged build is already occupying a worker slot;
+                # join it if it wasn't stale by much or launch an independent
+                # ticket only when idle. Joining avoids leaking duplicate builds.
+                return inflight
+            fetch = _SnapshotFetch()
+            self._snapshot_inflight = fetch
+
+        def _worker() -> None:
+            try:
+                bundle = self._build_snapshot_bundle()
+                fetch.bundle = bundle
+            except Exception as exc:  # noqa: BLE001
+                fetch.error = exc
+                with self._snapshot_lock:
+                    self._snapshot_build_errors += 1
+                    self._last_snapshot_error = str(exc)
+                logger.warning("remote: snapshot build failed: %s", exc)
+            finally:
+                with self._snapshot_lock:
+                    if self._snapshot_inflight is fetch:
+                        self._snapshot_inflight = None
+                fetch.event.set()
+
+        self._snapshot_executor.submit(_worker)
+        return fetch
+
+    def _obtain_snapshot(
+        self,
+        *,
+        timeout_s: float,
+        min_started_at: float | None = None,
+        allow_stale_fallback: bool = True,
+    ) -> tuple[_SnapshotBundle | None, bool, str]:
+        """Acquire a fresh snapshot within ``timeout_s`` or honest stale fallback."""
+        with self._snapshot_lock:
+            latest = self._latest_bundle
+            if (
+                latest is not None
+                and min_started_at is not None
+                and latest.built_at >= min_started_at
+            ):
+                return latest, False, ""
+
+        fetch = self._start_snapshot_fetch(min_started_at=min_started_at)
+        finished = fetch.event.wait(timeout=max(0.05, timeout_s))
+        if finished and fetch.bundle is not None:
+            return fetch.bundle, False, ""
+
+        if fetch.error is not None:
+            return None, False, f"SERVER_ERROR:{fetch.error}"
+
+        with self._snapshot_lock:
+            latest = self._latest_bundle
+        if (
+            allow_stale_fallback
+            and latest is not None
+            and (time.monotonic() - latest.built_at) <= self._config.snapshot_cache_max_age_s
+        ):
+            return latest, True, "backend snapshot refresh timed out — serving last known state"
+        return None, False, "DEADLINE_EXCEEDED:backend snapshot did not complete within deadline"
+
+    def _schedule_initial_snapshot(
+        self, conn: _Connection, *, resync: bool, min_started_at: float | None = None
+    ) -> None:
+        with conn.state_lock:
+            if conn.closed or self._stop.is_set():
+                return
+            conn.initial_snapshot_inflight = True
+
+        def _deliver() -> None:
+            try:
+                if conn.closed or self._stop.is_set():
+                    return
+                bundle, is_stale, err_or_reason = self._obtain_snapshot(
+                    timeout_s=self._config.snapshot_timeout_s,
+                    min_started_at=min_started_at,
+                    allow_stale_fallback=not resync,
+                )
+                if conn.closed or self._stop.is_set():
+                    return
+                if bundle is None:
+                    code, _, detail = err_or_reason.partition(":")
+                    self._send_error(
+                        conn,
+                        code or "DEADLINE_EXCEEDED",
+                        detail or "backend snapshot failed",
+                    )
+                    logger.warning(
+                        "remote: initial snapshot failed connection_id=%s code=%s",
+                        conn.connection_id,
+                        code or "DEADLINE_EXCEEDED",
+                    )
+                    return
+                self._push_bundle(
+                    conn,
+                    bundle,
+                    resync=resync,
+                    stale=is_stale,
+                    stale_reason=err_or_reason if is_stale else "",
+                    track_init=not resync,
+                )
+            finally:
+                with conn.state_lock:
+                    conn.initial_snapshot_inflight = False
+
+        try:
+            self._delivery_executor.submit(_deliver)
+        except RuntimeError:
+            with conn.state_lock:
+                conn.initial_snapshot_inflight = False
 
     def _poll_loop(self) -> None:
+        interval = max(0.05, self._config.poll_interval_s)
+        expected = time.monotonic() + interval
         while not self._stop.is_set():
-            time.sleep(max(0.1, self._config.poll_interval_s))
-            if self._stop.is_set():
-                break
+            now = time.monotonic()
+            if expected > now:
+                if self._stop.wait(timeout=expected - now):
+                    break
+                now = time.monotonic()
+            self._last_poll_at = now
+            self._last_poll_delay_ms = max(0.0, (now - expected) * 1000.0)
+            expected = now + interval
             try:
-                live = self._gateway.get_snapshot()
+                with self._lock:
+                    has_conns = bool(self._connections)
+                fetch = self._start_snapshot_fetch()
+                wait_s = min(interval, self._config.snapshot_timeout_s) if has_conns else interval
+                fetch.event.wait(timeout=wait_s)
+                if self._stop.is_set():
+                    break
+                bundle = fetch.bundle
+                with self._snapshot_lock:
+                    latest = bundle or self._latest_bundle
+                if latest is not None and latest.seq > self._last_published_seq:
+                    self._last_published_seq = latest.seq
+                    self._publish_bundle(latest)
+                else:
+                    self._maintain_connections()
             except Exception as exc:  # noqa: BLE001
-                logger.warning("remote: backend snapshot failed: %s", exc)
+                logger.warning("remote: poll cycle failed: %s", exc)
+
+    def _with_download_section(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Attach the preserved engine's console facts to the remote snapshot.
+
+        Kept at the transport layer so the gateway's own live snapshot stays
+        minimal and its tests/contract are unchanged.
+        """
+        from app.headless import _download_snapshot, _ensure_download_service
+
+        try:
+            manager = getattr(self._gateway, "_ensure_manager", lambda: None)()
+            _ensure_download_service(getattr(self._gateway, "_data_dir", ""), manager)
+            out = dict(snapshot)
+            out["download"] = _download_snapshot()
+            return out
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("remote: download section unavailable: %s", exc)
+            return snapshot
+
+    def _maintain_connections(self) -> None:
+        with self._lock:
+            connections = list(self._connections.values())
+        now = time.monotonic()
+        for conn in connections:
+            if conn.closed or not conn.tracker.authenticated:
                 continue
-            if not isinstance(live, dict):
+            self._check_idle(conn)
+            if conn.closed:
                 continue
-            self._publish(live)
+            if now - conn.last_ping >= self._config.heartbeat_interval_s:
+                conn.last_ping = now
+                self._send(
+                    conn,
+                    make_envelope(
+                        "pong",
+                        {"server_time": utcnow_iso(), "health": self.health_snapshot()},
+                    ),
+                )
 
     def _publish(self, live: dict[str, Any]) -> None:
+        """Legacy direct publish helper preserved for unit tests."""
         with self._lock:
             connections = list(self._connections.values())
         if not connections:
@@ -1345,41 +1770,76 @@ class RemoteServer:
         raw_events = live.get("events")
         events: list[Any] = list(raw_events) if isinstance(raw_events, list) else []
         try:
-            remote_snapshot = build_snapshot(live)
+            remote = self._with_download_section(build_snapshot(live))
         except Exception as exc:  # noqa: BLE001
             logger.warning("remote: snapshot projection failed: %s", exc)
             return
-        section_hashes = {key: _stable_hash(value) for key, value in remote_snapshot.items()}
+        hashes = {key: _stable_hash(value) for key, value in remote.items()}
+        with self._snapshot_lock:
+            self._snapshot_seq += 1
+            bundle = _SnapshotBundle(
+                seq=self._snapshot_seq,
+                remote=remote,
+                hashes=hashes,
+                events=events,
+                built_at=time.monotonic(),
+                wall_time=utcnow_iso(),
+                build_ms=0.0,
+            )
+            self._latest_bundle = bundle
+        self._publish_bundle(bundle)
+
+    def _publish_bundle(self, bundle: _SnapshotBundle) -> None:
+        with self._lock:
+            connections = list(self._connections.values())
+        if not connections:
+            return
+        remote_snapshot = bundle.remote
+        section_hashes = bundle.hashes
+        events = bundle.events
+        now = time.monotonic()
         for conn in connections:
-            if not conn.tracker.authenticated:
+            if conn.closed or not conn.tracker.authenticated:
                 continue
-            if not conn.last_sections and not conn.needs_resync:
+            with conn.state_lock:
+                not_initialized = not conn.initial_snapshot_sent
+                init_inflight = conn.initial_snapshot_inflight
+            if not_initialized:
+                if not init_inflight:
+                    # Recovered after an initial cold SNAPSHOT_TIMEOUT: send now!
+                    self._push_bundle(conn, bundle, resync=False, track_init=True)
                 continue
             if conn.needs_resync:
-                conn.last_sections = {}
                 conn.needs_resync = False
+                with conn.state_lock:
+                    conn.last_sections = {}
+            with conn.state_lock:
+                subs = set(conn.subscriptions)
+                prev_hashes = conn.last_sections
+                prev_tail = list(conn.last_event_tail)
             changed = {
                 key: remote_snapshot[key]
                 for key in sorted(remote_snapshot)
-                if key in conn.subscriptions
-                and section_hashes.get(key) != conn.last_sections.get(key)
+                if key in subs and section_hashes.get(key) != prev_hashes.get(key)
             }
-            for key in changed:
-                conn.last_sections[key] = section_hashes[key]
             if changed:
+                with conn.state_lock:
+                    for key in changed:
+                        conn.last_sections[key] = section_hashes[key]
                 self._send(conn, make_envelope("state_update", {"sections": changed}))
-            if "events" in conn.subscriptions:
-                fresh, resync = new_entries(conn.last_event_tail, list(events))
-                conn.last_event_tail = list(events[-50:])
+            if "events" in subs:
+                fresh, resync = new_entries(prev_tail, list(events))
+                with conn.state_lock:
+                    conn.last_event_tail = list(events[-50:])
                 if resync and fresh:
-                    self._push_snapshot(conn, resync=True, snapshot=remote_snapshot)
+                    self._push_bundle(conn, bundle, resync=True, track_init=False)
                 for entry in fresh:
                     projected = project_event(entry)
                     seq = self._record_event(projected)
                     self._send(conn, make_envelope("event", projected, seq=seq), drop_ok=True)
             self._check_idle(conn)
-            if time.monotonic() - conn.last_ping >= self._config.heartbeat_interval_s:
-                conn.last_ping = time.monotonic()
+            if not conn.closed and (now - conn.last_ping >= self._config.heartbeat_interval_s):
+                conn.last_ping = now
                 self._send(
                     conn,
                     make_envelope(
@@ -1408,35 +1868,81 @@ class RemoteServer:
                 self._send(conn, make_envelope("event", projected, seq=seq), drop_ok=True)
         return True
 
+    def _push_bundle(
+        self,
+        conn: _Connection,
+        bundle: _SnapshotBundle,
+        *,
+        resync: bool,
+        stale: bool = False,
+        stale_reason: str = "",
+        track_init: bool = False,
+    ) -> None:
+        remote = bundle.remote
+        raw_events = bundle.events
+        with conn.state_lock:
+            subs = set(conn.subscriptions)
+            wanted = {key: remote[key] for key in sorted(remote) if key in subs}
+            conn.last_sections = dict(bundle.hashes)
+            conn.last_event_tail = list(raw_events[-50:]) if isinstance(raw_events, list) else []
+            conn.initial_snapshot_sent = True
+            conn.last_snapshot_at = bundle.built_at
+            if track_init and conn.init_snapshot_build_ms is None:
+                conn.init_snapshot_build_ms = round(bundle.build_ms, 1)
+            if stale:
+                conn.needs_resync = True
+        payload: dict[str, Any] = {
+            "snapshot": wanted,
+            "server_time": bundle.wall_time or utcnow_iso(),
+            "snapshot_seq": bundle.seq,
+            "snapshot_age_ms": round(max(0.0, (time.monotonic() - bundle.built_at) * 1000.0), 1),
+        }
+        if stale:
+            payload["stale"] = True
+            if stale_reason:
+                payload["stale_reason"] = stale_reason
+        if resync:
+            payload["resync"] = True
+        try:
+            raw = encode_message(make_envelope("snapshot", payload))
+        except ProtocolError as exc:
+            logger.warning("remote: snapshot encode failed: %s", exc)
+            return
+        self._enqueue_frame(
+            conn,
+            _OutboundFrame(
+                opcode=0x1,
+                payload=raw,
+                enqueued_at=time.monotonic(),
+                is_init_snapshot=track_init,
+                build_ms=bundle.build_ms,
+                snapshot_seq=bundle.seq,
+            ),
+            drop_ok=False,
+        )
+
     def _push_snapshot(
         self, conn: _Connection, *, resync: bool, snapshot: dict | None = None
     ) -> None:
+        """Backward-compatible synchronous push helper used in tests."""
         if snapshot is not None:
-            remote = snapshot
-            try:
-                raw_events = self._gateway.get_snapshot().get("events", [])
-            except Exception:  # noqa: BLE001
-                raw_events = []
+            bundle = _SnapshotBundle(
+                seq=self._snapshot_seq,
+                remote=snapshot,
+                hashes={key: _stable_hash(value) for key, value in snapshot.items()},
+                events=[],
+                built_at=time.monotonic(),
+                wall_time=utcnow_iso(),
+                build_ms=0.0,
+            )
         else:
             try:
-                # One live build serves both the projection and the event
-                # tail: the second snapshot call here doubled every fresh
-                # connection's backend work (and every queued session step
-                # it pumps), which the connection churn amplified.
-                live = self._gateway.get_snapshot()
-                remote = build_snapshot(live)
+                bundle = self._build_snapshot_bundle()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("remote: snapshot failed: %s", exc)
                 self._send_error(conn, "SERVER_ERROR", "backend snapshot failed")
                 return
-            raw_events = live.get("events", [])
-        wanted = {key: remote[key] for key in sorted(remote) if key in conn.subscriptions}
-        conn.last_sections = {key: _stable_hash(value) for key, value in remote.items()}
-        conn.last_event_tail = list(raw_events[-50:]) if isinstance(raw_events, list) else []
-        payload: dict[str, Any] = {"snapshot": wanted, "server_time": utcnow_iso()}
-        if resync:
-            payload["resync"] = True
-        self._send(conn, make_envelope("snapshot", payload))
+        self._push_bundle(conn, bundle, resync=resync, track_init=not resync)
 
     # ── send helpers ──
 
@@ -1445,7 +1951,22 @@ class RemoteServer:
             self._message_seq += 1
             return self._message_seq
 
+    def _enqueue_frame(
+        self, conn: _Connection, frame: _OutboundFrame, *, drop_ok: bool = False
+    ) -> None:
+        if conn.closed:
+            return
+        try:
+            conn.outbox.put_nowait(frame)
+        except queue.Full:
+            self._dropped_messages += 1
+            conn.needs_resync = True
+            if not drop_ok:
+                logger.warning("remote: slow client (%s); marked for resync", conn.connection_id)
+
     def _send(self, conn: _Connection, message: dict[str, Any], *, drop_ok: bool = False) -> None:
+        if conn.closed:
+            return
         if "seq" not in message and message.get("type") in ("event", "state_update"):
             message["seq"] = self._next_seq()
         try:
@@ -1453,45 +1974,36 @@ class RemoteServer:
         except ProtocolError as exc:
             logger.warning("remote: encode failed: %s", exc)
             return
-        try:
-            conn.outbox.put_nowait(raw)
-        except queue.Full:
-            self._dropped_messages += 1
-            conn.needs_resync = True
-            if not drop_ok:
-                logger.warning("remote: slow client (%s); marked for resync", conn.connection_id)
-        else:
-            self._flush_outbox(conn)
+        self._enqueue_frame(conn, _OutboundFrame(opcode=0x1, payload=raw), drop_ok=drop_ok)
 
     def _send_raw(self, conn: _Connection, raw: bytes) -> None:
-        try:
-            conn.outbox.put_nowait(raw)
-        except queue.Full:
-            conn.needs_resync = True
-        else:
-            self._flush_outbox(conn)
+        self._enqueue_frame(conn, _OutboundFrame(opcode=0x1, payload=raw), drop_ok=False)
 
     def _flush_outbox(self, conn: _Connection) -> None:
-        # Hold the send lock across the WHOLE drain. Lifecycle workers and
-        # the poll loop can both flush; taking one frame at a time let two
-        # flushers swap frames (progress/result arriving before the frame
-        # queued ahead of them). FIFO drain + one writer keeps the stream
-        # ordered without blocking the lifecycle worker any longer than the
-        # slow client's socket already does.
+        """Retained for compatibility; writer thread drains ``conn.outbox``."""
+        if conn.closed:
+            return
         failed = False
         with conn.send_lock:
             while True:
                 try:
-                    raw = conn.outbox.get_nowait()
+                    item = conn.outbox.get_nowait()
                 except queue.Empty:
                     break
+                if item is None:
+                    continue
+                payload = item.payload if isinstance(item, _OutboundFrame) else item
+                opcode = item.opcode if isinstance(item, _OutboundFrame) else 0x1
                 try:
-                    send_text(conn.sock, raw)
+                    if opcode == 0x1:
+                        send_text(conn.sock, payload)
+                    else:
+                        write_frame(conn.sock, opcode, payload)
                 except OSError:
                     failed = True
                     break
         if failed:
-            self._close_connection(conn, _CLOSE_POLICY)
+            self._close_connection(conn, _CLOSE_POLICY, reason="flush_failed")
 
     def _send_error(
         self, conn: _Connection, code: str, detail: str, *, request_id: str | None = None
@@ -1500,26 +2012,50 @@ class RemoteServer:
             raw = encode_message(error_envelope(code, detail, request_id=request_id))
         except ProtocolError:
             return
-        try:
-            with conn.send_lock:
+        if conn.writer_thread is not None and conn.writer_thread.is_alive() and not conn.closed:
+            self._enqueue_frame(conn, _OutboundFrame(opcode=0x1, payload=raw), drop_ok=False)
+            return
+        if conn.send_lock.acquire(blocking=False):
+            try:
                 send_text(conn.sock, raw)
-        except OSError:
-            pass
+            except OSError:
+                pass
+            finally:
+                conn.send_lock.release()
 
     def _check_idle(self, conn: _Connection) -> None:
         if time.monotonic() - conn.last_activity > self._config.idle_timeout_s:
             logger.warning("remote: idle timeout (%s)", conn.connection_id)
-            self._close_connection(conn, _CLOSE_POLICY)
+            self._close_connection(conn, _CLOSE_POLICY, reason="idle_timeout")
 
-    def _close_connection(self, conn: _Connection, code: int) -> None:
+    def _close_connection(
+        self, conn: _Connection, code: int, *, reason: str = "", force: bool = False
+    ) -> None:
+        if reason and not conn.disconnect_reason:
+            conn.disconnect_reason = reason
         if conn.closed:
             return
+        if not force and conn.writer_thread is not None and conn.writer_thread.is_alive():
+            # Allow urgent queued frames (e.g. AUTH_FAILED / NOT_AUTHENTICATED) to
+            # flush ahead of close without blocking forever on a stalled peer.
+            writer = conn.writer_thread
+            with contextlib.suppress(queue.Full):
+                conn.outbox.put_nowait(_OutboundFrame(opcode=0x8, payload=struct.pack("!H", code)))
+            with contextlib.suppress(queue.Full):
+                conn.outbox.put_nowait(None)
+            if writer is not threading.current_thread():
+                writer.join(timeout=min(0.5, self._config.write_timeout_s))
+            if conn.closed:
+                return
         conn.closed = True
-        try:
-            with conn.send_lock:
-                write_frame(conn.sock, 0x8, struct.pack("!H", code))
-        except OSError:
-            pass
+        with contextlib.suppress(queue.Full):
+            conn.outbox.put_nowait(None)
+        if not force and conn.send_lock.acquire(blocking=False):
+            try:
+                with contextlib.suppress(OSError):
+                    write_frame(conn.sock, 0x8, struct.pack("!H", code))
+            finally:
+                conn.send_lock.release()
         with contextlib.suppress(OSError):
             conn.sock.shutdown(socket.SHUT_RDWR)
         with contextlib.suppress(OSError):

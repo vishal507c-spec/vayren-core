@@ -16,8 +16,8 @@
 use crate::protocol::{self, msg, ClientEnvelope, ProtocolError, ServerMessage};
 use std::fmt;
 use std::io;
-use std::net::TcpStream;
-use std::time::Duration;
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::time::{Duration, Instant};
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 
 /// Default deadline for the hello → welcome → snapshot handshake.
@@ -29,8 +29,11 @@ pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
     Connecting,
+    Authenticating,
     Connected,
     Reconnecting,
+    Stale,
+    Offline,
     Disconnected,
     Error,
 }
@@ -68,6 +71,9 @@ pub enum ClientEvent {
     Snapshot {
         sections: serde_json::Value,
         resync: bool,
+        stale: bool,
+        stale_reason: Option<String>,
+        snapshot_age_ms: Option<f64>,
     },
     /// Changed sections since the last snapshot (ordered by `seq`).
     StateUpdate {
@@ -125,6 +131,109 @@ fn set_read_timeout(socket: &mut Socket, timeout: Option<Duration>) -> io::Resul
         MaybeTlsStream::Rustls(stream) => stream.get_mut().set_read_timeout(timeout),
         _ => Ok(()),
     }
+}
+
+fn set_write_timeout(socket: &mut Socket, timeout: Option<Duration>) -> io::Result<()> {
+    match socket.get_mut() {
+        MaybeTlsStream::Plain(stream) => stream.set_write_timeout(timeout),
+        MaybeTlsStream::Rustls(stream) => stream.get_mut().set_write_timeout(timeout),
+        _ => Ok(()),
+    }
+}
+
+fn map_handshake_err(err: tungstenite::Error) -> ClientError {
+    match err {
+        tungstenite::Error::Io(io_err)
+            if io_err.kind() == io::ErrorKind::TimedOut
+                || io_err.kind() == io::ErrorKind::WouldBlock =>
+        {
+            ClientError::Timeout
+        }
+        other => ClientError::Transport(other.to_string()),
+    }
+}
+
+fn connect_socket_with_timeout(url: &str, deadline: Instant) -> Result<Socket, ClientError> {
+    let uri: tungstenite::http::Uri = url
+        .parse()
+        .map_err(|err| ClientError::Transport(format!("invalid URL '{url}': {err}")))?;
+    let scheme = uri.scheme_str().unwrap_or("");
+    let default_port = match scheme {
+        "wss" => 443,
+        "ws" => 80,
+        _ => {
+            return Err(ClientError::Transport(format!(
+                "unsupported scheme '{scheme}'"
+            )))
+        }
+    };
+    let host = uri
+        .host()
+        .ok_or_else(|| ClientError::Transport(format!("missing host in '{url}'")))?;
+    let host_clean = host.trim_start_matches('[').trim_end_matches(']');
+    let port = uri.port_u16().unwrap_or(default_port);
+    let addrs: Vec<SocketAddr> = (host_clean, port)
+        .to_socket_addrs()
+        .map_err(|err| ClientError::Transport(format!("resolve {host_clean}:{port}: {err}")))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(ClientError::Transport(format!(
+            "no addresses resolved for {host_clean}:{port}"
+        )));
+    }
+
+    let mut last_err: Option<ClientError> = None;
+    let total = addrs.len();
+    for (idx, addr) in addrs.iter().enumerate() {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return Err(last_err.unwrap_or(ClientError::Timeout));
+        };
+        let left = (total - idx) as u32;
+        let slice = (remaining / left)
+            .max(Duration::from_millis(250))
+            .min(remaining);
+        match TcpStream::connect_timeout(addr, slice) {
+            Ok(stream) => {
+                let _ = stream.set_nodelay(true);
+                let rem_hs = deadline
+                    .checked_duration_since(Instant::now())
+                    .ok_or(ClientError::Timeout)?;
+                stream
+                    .set_read_timeout(Some(rem_hs))
+                    .map_err(|err| ClientError::Transport(err.to_string()))?;
+                stream
+                    .set_write_timeout(Some(rem_hs))
+                    .map_err(|err| ClientError::Transport(err.to_string()))?;
+                return match tungstenite::client_tls(url, stream) {
+                    Ok((socket, _response)) => Ok(socket),
+                    Err(tungstenite::HandshakeError::Interrupted(mut mid)) => loop {
+                        if deadline.checked_duration_since(Instant::now()).is_none() {
+                            return Err(ClientError::Timeout);
+                        }
+                        match mid.handshake() {
+                            Ok((socket, _)) => return Ok(socket),
+                            Err(tungstenite::HandshakeError::Interrupted(next_mid)) => {
+                                mid = next_mid;
+                                std::thread::sleep(Duration::from_millis(5));
+                            }
+                            Err(tungstenite::HandshakeError::Failure(err)) => {
+                                return Err(map_handshake_err(err));
+                            }
+                        }
+                    },
+                    Err(tungstenite::HandshakeError::Failure(err)) => Err(map_handshake_err(err)),
+                };
+            }
+            Err(err) => {
+                last_err = Some(if err.kind() == io::ErrorKind::TimedOut {
+                    ClientError::Timeout
+                } else {
+                    ClientError::Transport(err.to_string())
+                });
+            }
+        }
+    }
+    Err(last_err.unwrap_or(ClientError::Timeout))
 }
 
 fn read_text(socket: &mut Socket) -> Result<Option<String>, ClientError> {
@@ -197,6 +306,8 @@ pub struct RemoteClient {
     /// reads this to decide whether a control command is even admissible, so
     /// a `read` credential shows an honest refusal instead of a dead button.
     pub role: String,
+    /// Latest backend `health` payload received in a `pong` heartbeat.
+    pub last_pong_health: Option<serde_json::Value>,
 }
 
 impl RemoteClient {
@@ -229,30 +340,68 @@ impl RemoteClient {
         token: &str,
         timeout: Duration,
     ) -> Result<(Self, ClientEvent, ClientEvent), ClientError> {
+        let deadline = Instant::now() + timeout;
         Self::check_url(url)?;
         ensure_tls_provider();
-        let (mut socket, _response) =
-            tungstenite::connect(url).map_err(|err| ClientError::Transport(err.to_string()))?;
-        set_read_timeout(&mut socket, Some(timeout))
-            .map_err(|err| ClientError::Transport(err.to_string()))?;
+        let socket = connect_socket_with_timeout(url, deadline)?;
         let mut client = Self {
             socket,
             state: ConnectionState::Connecting,
             last_seq: None,
             role: String::new(),
+            last_pong_health: None,
         };
+        client.state = ConnectionState::Authenticating;
+        let rem_hello = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or(ClientError::Timeout)?
+            .max(Duration::from_millis(1));
+        set_write_timeout(&mut client.socket, Some(rem_hello))
+            .map_err(|err| ClientError::Transport(err.to_string()))?;
         client.send_envelope(&msg::hello(token))?;
-        let welcome = client.await_type("welcome", timeout)?;
+
+        let rem_welcome = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or(ClientError::Timeout)?;
+        let welcome = match client.await_type("welcome", rem_welcome) {
+            Ok(ev) => ev,
+            Err(err) => {
+                client.state = if matches!(err, ClientError::Timeout) {
+                    ConnectionState::Offline
+                } else {
+                    ConnectionState::Error
+                };
+                return Err(err);
+            }
+        };
         // Record the granted role BEFORE the socket is usable for commands:
         // the shell gates START/STOP on it, and an unparsed welcome must
         // fail closed (empty role ⇒ no commands).
         if let ClientEvent::Welcome { role, .. } = &welcome {
             client.role = role.clone();
         }
-        let snapshot = client.await_type("snapshot", timeout)?;
-        client.state = ConnectionState::Connected;
-        set_read_timeout(&mut client.socket, None)
-            .map_err(|err| ClientError::Transport(err.to_string()))?;
+        // Receiving `welcome` means authentication succeeded, NOT snapshot sync:
+        // stay Authenticating until an authoritative `snapshot` arrives.
+        let rem_snapshot = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or(ClientError::Timeout)?;
+        let snapshot = match client.await_type("snapshot", rem_snapshot) {
+            Ok(ev) => ev,
+            Err(err) => {
+                client.state = if matches!(err, ClientError::Timeout) {
+                    ConnectionState::Offline
+                } else {
+                    ConnectionState::Error
+                };
+                return Err(err);
+            }
+        };
+        client.state = match &snapshot {
+            ClientEvent::Snapshot { stale: true, .. } => ConnectionState::Stale,
+            _ => ConnectionState::Connected,
+        };
+        let _ = set_read_timeout(&mut client.socket, None);
+        let _ = set_write_timeout(&mut client.socket, Some(HANDSHAKE_TIMEOUT));
         Ok((client, welcome, snapshot))
     }
 
@@ -303,11 +452,18 @@ impl RemoteClient {
         self.send_envelope(&msg::command(action, params, request_id))
     }
 
-    /// Pump one arrival (auto-answers pings, tracks `last_seq`).
+    /// Pump one arrival (auto-answers pings, tracks `last_seq` within cumulative `idle`).
     pub fn next(&mut self, idle: Duration) -> Result<ClientEvent, ClientError> {
-        set_read_timeout(&mut self.socket, Some(idle))
-            .map_err(|err| ClientError::Transport(err.to_string()))?;
+        let deadline = Instant::now() + idle;
         loop {
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return Err(ClientError::Timeout);
+            };
+            set_read_timeout(
+                &mut self.socket,
+                Some(remaining.max(Duration::from_millis(1))),
+            )
+            .map_err(|err| ClientError::Transport(err.to_string()))?;
             let text = match read_text(&mut self.socket)? {
                 Some(text) => text,
                 None => continue,
@@ -316,7 +472,21 @@ impl RemoteClient {
             if let Some(seq) = message.seq {
                 self.last_seq = Some(self.last_seq.map_or(seq, |prev| prev.max(seq)));
             }
-            return Ok(classify(message));
+            if message.msg_type == "pong" {
+                self.last_pong_health = message.payload.get("health").cloned();
+            }
+            let ev = classify(message);
+            match &ev {
+                ClientEvent::Snapshot { stale: true, .. } => {
+                    self.state = ConnectionState::Stale;
+                }
+                ClientEvent::Snapshot { stale: false, .. } | ClientEvent::StateUpdate { .. } => {
+                    self.state = ConnectionState::Connected;
+                }
+                ClientEvent::Closed => self.state = ConnectionState::Disconnected,
+                _ => {}
+            }
+            return Ok(ev);
         }
     }
 
@@ -327,30 +497,47 @@ impl RemoteClient {
 
     fn send_envelope(&mut self, envelope: &ClientEnvelope) -> Result<(), ClientError> {
         let text = envelope.encode().map_err(ClientError::Protocol)?;
+        let _ = set_write_timeout(&mut self.socket, Some(HANDSHAKE_TIMEOUT));
         self.socket
             .send(Message::text(text))
             .map_err(|err| ClientError::Transport(err.to_string()))
     }
 
-    fn await_type(&mut self, want: &str, _timeout: Duration) -> Result<ClientEvent, ClientError> {
+    fn await_type(&mut self, want: &str, timeout: Duration) -> Result<ClientEvent, ClientError> {
+        let deadline = Instant::now() + timeout;
         loop {
-            let text = read_text(&mut self.socket)?.ok_or(ClientError::Closed)?;
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return Err(ClientError::Timeout);
+            };
+            set_read_timeout(
+                &mut self.socket,
+                Some(remaining.max(Duration::from_millis(1))),
+            )
+            .map_err(|err| ClientError::Transport(err.to_string()))?;
+            let text = match read_text(&mut self.socket)? {
+                Some(text) => text,
+                // Control frames (WS Ping / Pong) must never abort the handshake.
+                None => continue,
+            };
             let message = protocol::decode_server(&text).map_err(ClientError::Protocol)?;
+            if let Some(seq) = message.seq {
+                self.last_seq = Some(self.last_seq.map_or(seq, |prev| prev.max(seq)));
+            }
             if message.msg_type == "error" {
                 let code = message
                     .payload
                     .get("code")
                     .and_then(|c| c.as_str())
                     .unwrap_or("SERVER_ERROR");
-                return Err(ClientError::Auth(format!(
-                    "{}: {}",
-                    code,
-                    message
-                        .payload
-                        .get("detail")
-                        .and_then(|d| d.as_str())
-                        .unwrap_or("")
-                )));
+                let detail = message
+                    .payload
+                    .get("detail")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
+                if matches!(code, "AUTH_FAILED" | "NOT_AUTHENTICATED" | "NOT_AUTHORIZED") {
+                    return Err(ClientError::Auth(format!("{code}: {detail}")));
+                }
+                return Err(ClientError::Protocol(ProtocolError::new(code, detail)));
             }
             if message.msg_type == want {
                 return Ok(classify(message));
@@ -386,6 +573,21 @@ fn classify(message: ServerMessage) -> ClientEvent {
                 .get("resync")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            stale: message
+                .payload
+                .get("stale")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            stale_reason: message
+                .payload
+                .get("stale_reason")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
+            snapshot_age_ms: message
+                .payload
+                .get("snapshot_age_ms")
+                .and_then(|v| v.as_f64()),
         },
         "state_update" => ClientEvent::StateUpdate {
             sections: message

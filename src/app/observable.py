@@ -159,14 +159,26 @@ class WorkerThread:
 
 
 class IntervalTimer:
-    """Repeating timer with main-thread delivery."""
+    """Repeating timer with coalesced main-thread delivery.
+
+    Coalesces overlapping firings so a temporary slow tick or blocking venue call
+    never builds an unbounded backlog of stale ticks in ``_QUEUE``.
+    """
 
     def __init__(self, interval_ms: int, on_tick: Callable[[], None]) -> None:
         self._interval_s = max(1, int(interval_ms)) / 1000.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._pending = threading.Event()
+        self._on_tick = on_tick
         self._fired = _BoundSignal()
-        self._fired.connect(on_tick)
+        self._fired.connect(self._deliver_tick)
+
+    def _deliver_tick(self) -> None:
+        try:
+            self._on_tick()
+        finally:
+            self._pending.clear()
 
     def start(self) -> None:
         """Begin ticking (no-op while already ticking).
@@ -185,6 +197,7 @@ class IntervalTimer:
             stale.join(timeout=self._interval_s)
         stop = threading.Event()
         self._stop = stop
+        self._pending.clear()
         self._thread = threading.Thread(
             target=self._loop,
             args=(stop,),
@@ -219,7 +232,9 @@ class IntervalTimer:
         while not stop.is_set():
             if stop.wait(self._interval_s):
                 return
-            self._fired.emit()
+            if not self._pending.is_set():
+                self._pending.set()
+                self._fired.emit()
 
 
 def pump_events(limit: int = 4096, allow_any_thread: bool = False) -> int:

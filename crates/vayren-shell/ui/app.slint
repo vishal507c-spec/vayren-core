@@ -7,7 +7,7 @@
 import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton } from "components.slint";
 import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset, RankWindow } from "lab.slint";
-import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
+import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlStock } from "market.slint";
 import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
 import { PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
 import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers, LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveEligibility, LiveEligibilityRow, LiveSelectedStock, LiveFooter, LiveRemoteGateway } from "live.slint";
@@ -253,18 +253,8 @@ export component AppWindow inherits Window {
     callback market-dl-retry();
     callback market-dl-view-coverage();
     callback market-dl-error-details();
-    callback market-dl-advanced();
     callback market-dl-log-toggle();
     callback market-dl-log-clear();
-    callback market-dl-broker(string);
-    callback market-dl-open-creds();
-    callback market-dl-close-creds();
-    callback market-dl-cred-field(string, string);
-    callback market-dl-cred-reveal(string);
-    callback market-dl-cred-test();
-    callback market-dl-cred-save();
-    callback market-dl-cred-clear();
-    callback market-dl-cred-confirm(bool);
 
     in-out property <ShellScreen> active-screen: ShellScreen.broker;
     in-out property <string> screen-title: "BROKER";
@@ -428,19 +418,12 @@ export component AppWindow inherits Window {
     in-out property <string> market-dl-to-display: "";
     in-out property <DlPlan> market-dl-plan;
     in-out property <DlStatus> market-dl-status;
-    in-out property <[string]> market-dl-brokers;
-    in-out property <int> market-dl-broker-index: 0;
     in-out property <[string]> market-dl-log;
     in-out property <bool> market-dl-log-expanded: false;
     in-out property <bool> market-dl-cal-open: false;
     in-out property <string> market-dl-cal-title: "";
     in-out property <[DlCalDay]> market-dl-cal-days;
     in-out property <[string]> market-dl-weekdays;
-    in-out property <bool> market-dl-cred-open: false;
-    in-out property <[DlCredField]> market-dl-cred-fields;
-    in-out property <bool> market-dl-cred-has-stored: false;
-    in-out property <string> market-dl-cred-status: "";
-    in-out property <bool> market-dl-confirm-clear: false;
 
     // Chart viewport zoom (Rust-owned state; Slint only renders + reports
     // the Reset Zoom action).
@@ -779,19 +762,12 @@ export component AppWindow inherits Window {
                     dl-to-display: root.market-dl-to-display;
                     dl-plan: root.market-dl-plan;
                     dl-status: root.market-dl-status;
-                    dl-brokers: root.market-dl-brokers;
-                    dl-broker-index: root.market-dl-broker-index;
                     dl-log: root.market-dl-log;
                     dl-log-expanded: root.market-dl-log-expanded;
                     dl-cal-open: root.market-dl-cal-open;
                     dl-cal-title: root.market-dl-cal-title;
                     dl-cal-days: root.market-dl-cal-days;
                     dl-weekdays: root.market-dl-weekdays;
-                    dl-cred-open: root.market-dl-cred-open;
-                    dl-cred-fields: root.market-dl-cred-fields;
-                    dl-cred-has-stored: root.market-dl-cred-has-stored;
-                    dl-cred-status: root.market-dl-cred-status;
-                    dl-confirm-clear: root.market-dl-confirm-clear;
                     wide: root.width >= 1180px;
                     medium: root.width >= 820px;
                     panel-toggle() => { root.market-panel-toggle(); }
@@ -848,18 +824,8 @@ export component AppWindow inherits Window {
                     dl-retry() => { root.market-dl-retry(); }
                     dl-view-coverage() => { root.market-dl-view-coverage(); }
                     dl-error-details() => { root.market-dl-error-details(); }
-                    dl-advanced() => { root.market-dl-advanced(); }
                     dl-log-toggle() => { root.market-dl-log-toggle(); }
                     dl-log-clear() => { root.market-dl-log-clear(); }
-                    dl-broker(s) => { root.market-dl-broker(s); }
-                    dl-open-creds() => { root.market-dl-open-creds(); }
-                    dl-close-creds() => { root.market-dl-close-creds(); }
-                    dl-cred-field(k, v) => { root.market-dl-cred-field(k, v); }
-                    dl-cred-reveal(k) => { root.market-dl-cred-reveal(k); }
-                    dl-cred-test() => { root.market-dl-cred-test(); }
-                    dl-cred-save() => { root.market-dl-cred-save(); }
-                    dl-cred-clear() => { root.market-dl-cred-clear(); }
-                    dl-cred-confirm(yes) => { root.market-dl-cred-confirm(yes); }
                 }
                 if !root.screen-pending && root.active-screen == ShellScreen.broker: BrokerConnectionWorkspace {
                     width: 100%;

@@ -41,9 +41,16 @@ fn main() {
                 connection_id,
                 role,
             },
-            ClientEvent::Snapshot { sections, resync },
+            ClientEvent::Snapshot {
+                sections,
+                resync,
+                stale,
+                ..
+            },
         ) => {
-            println!("welcome: connection {connection_id} role {role} resync={resync}");
+            println!(
+                "welcome: connection {connection_id} role {role} resync={resync} stale={stale}"
+            );
             for line in summarize_snapshot(sections) {
                 println!("snapshot: {line}");
             }

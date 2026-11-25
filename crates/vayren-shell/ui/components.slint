@@ -50,7 +50,7 @@ export component VButton inherits Rectangle {
         return !root.enabled ? VayrenPalette.faint
             : root.variant == 0 ? VayrenPalette.accent-text
             : root.variant == 1 ? (ta.has-hover ? VayrenPalette.text-bright : VayrenPalette.accent)
-            : root.variant == 3 ? (ta.has-hover ? VayrenPalette.text-bright : VayrenPalette.accent-text)
+            : root.variant == 3 ? VayrenPalette.text-bright
             : ta.has-hover ? VayrenPalette.text-bright : VayrenPalette.muted;
     }
 
@@ -70,6 +70,8 @@ export component VButton inherits Rectangle {
     }
     VerticalLayout {
         alignment: center;
+        padding-left: VayrenDesign.sp-md;
+        padding-right: VayrenDesign.sp-md;
         padding-top: (ta.pressed && root.enabled) ? 1px : 0px;
         animate padding-top { duration: 50ms; easing: ease-out; }
         Text {
@@ -79,6 +81,7 @@ export component VButton inherits Rectangle {
             font-weight: 700;
             horizontal-alignment: center;
             vertical-alignment: center;
+            overflow: elide;
             animate color { duration: 120ms; easing: ease-out; }
         }
     }
@@ -234,9 +237,11 @@ export component VBanner inherits Rectangle {
     border-width: 1px;
     border-color: VayrenPalette.hairline;
     border-radius: VayrenDesign.radius-sm;
+    clip: true;
 
     HorizontalLayout {
         spacing: VayrenDesign.sp-md;
+        padding-right: VayrenDesign.sp-md;
         Rectangle {
             width: 3px;
             background: root.edge();
@@ -247,6 +252,7 @@ export component VBanner inherits Rectangle {
             font-size: VayrenDesign.fs-small;
             vertical-alignment: center;
             horizontal-stretch: 1;
+            overflow: elide;
         }
         if root.action-label != "": VButton {
             label: root.action-label;

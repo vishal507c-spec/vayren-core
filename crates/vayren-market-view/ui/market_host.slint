@@ -21,7 +21,6 @@ import {
     DlPlan,
     DlStatus,
     DlCalDay,
-    DlCredField,
     DlStock,
 } from "../../vayren-shell/ui/market.slint";
 
@@ -86,19 +85,12 @@ export component MarketHostWindow inherits Window {
     in-out property <string> dl-to-display;
     in-out property <DlPlan> dl-plan;
     in-out property <DlStatus> dl-status;
-    in-out property <[string]> dl-brokers;
-    in-out property <int> dl-broker-index: 0;
     in-out property <[string]> dl-log;
     in-out property <bool> dl-log-expanded: false;
     in-out property <bool> dl-cal-open: false;
     in-out property <string> dl-cal-title;
     in-out property <[DlCalDay]> dl-cal-days;
     in-out property <[string]> dl-weekdays;
-    in-out property <bool> dl-cred-open: false;
-    in-out property <[DlCredField]> dl-cred-fields;
-    in-out property <bool> dl-cred-has-stored: false;
-    in-out property <string> dl-cred-status;
-    in-out property <bool> dl-confirm-clear: false;
     callback dl-toggle();
     callback dl-interval(string);
     callback dl-toggle-symbol(string);
@@ -117,18 +109,8 @@ export component MarketHostWindow inherits Window {
     callback dl-retry();
     callback dl-view-coverage();
     callback dl-error-details();
-    callback dl-advanced();
     callback dl-log-toggle();
     callback dl-log-clear();
-    callback dl-broker(string);
-    callback dl-open-creds();
-    callback dl-close-creds();
-    callback dl-cred-field(string, string);
-    callback dl-cred-reveal(string);
-    callback dl-cred-test();
-    callback dl-cred-save();
-    callback dl-cred-clear();
-    callback dl-cred-confirm(bool);
 
     callback panel-toggle();
     callback symbol-selected(string);
@@ -256,19 +238,12 @@ export component MarketHostWindow inherits Window {
         dl-to-display: root.dl-to-display;
         dl-plan: root.dl-plan;
         dl-status: root.dl-status;
-        dl-brokers: root.dl-brokers;
-        dl-broker-index: root.dl-broker-index;
         dl-log: root.dl-log;
         dl-log-expanded: root.dl-log-expanded;
         dl-cal-open: root.dl-cal-open;
         dl-cal-title: root.dl-cal-title;
         dl-cal-days: root.dl-cal-days;
         dl-weekdays: root.dl-weekdays;
-        dl-cred-open: root.dl-cred-open;
-        dl-cred-fields: root.dl-cred-fields;
-        dl-cred-has-stored: root.dl-cred-has-stored;
-        dl-cred-status: root.dl-cred-status;
-        dl-confirm-clear: root.dl-confirm-clear;
         dl-toggle() => { root.dl-toggle(); }
         dl-interval(v) => { root.dl-interval(v); }
         dl-toggle-symbol(s) => { root.dl-toggle-symbol(s); }
@@ -287,17 +262,7 @@ export component MarketHostWindow inherits Window {
         dl-retry() => { root.dl-retry(); }
         dl-view-coverage() => { root.dl-view-coverage(); }
         dl-error-details() => { root.dl-error-details(); }
-        dl-advanced() => { root.dl-advanced(); }
         dl-log-toggle() => { root.dl-log-toggle(); }
         dl-log-clear() => { root.dl-log-clear(); }
-        dl-broker(v) => { root.dl-broker(v); }
-        dl-open-creds() => { root.dl-open-creds(); }
-        dl-close-creds() => { root.dl-close-creds(); }
-        dl-cred-field(k, v) => { root.dl-cred-field(k, v); }
-        dl-cred-reveal(k) => { root.dl-cred-reveal(k); }
-        dl-cred-test() => { root.dl-cred-test(); }
-        dl-cred-save() => { root.dl-cred-save(); }
-        dl-cred-clear() => { root.dl-cred-clear(); }
-        dl-cred-confirm(y) => { root.dl-cred-confirm(y); }
     }
 }

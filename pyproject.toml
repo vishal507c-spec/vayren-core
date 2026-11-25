@@ -50,7 +50,11 @@ line-length = 100
 indent-width = 4
 # 90_brain = docs; 99_archive = legacy reference snapshot (not shipped,
 # not tested, not validated — every other tool already ignores it).
-extend-exclude = ["90_brain", "99_archive"]
+# historical_download_engine.py is a byte-preserved copy of the original
+# standalone engine (only its auth seam changed); reformatting it would no
+# longer be the original file. It is excluded from ruff's lint+format, and
+# governed instead by the 1:1 parity test in src/data/tests.
+extend-exclude = ["90_brain", "99_archive", "src/data/historical_download_engine.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG", "C4", "T10"]

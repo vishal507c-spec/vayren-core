@@ -1435,6 +1435,42 @@ def _progress_emitter():
     return emit
 
 
+# ── historical download console (preserved engine, composition only) ───────
+# The engine runs on its own daemon thread; it never blocks this command loop.
+_DOWNLOAD_SERVICE: Any = None
+
+
+def _ensure_download_service(data_dir: Any = None, broker_manager: Any = None) -> Any:
+    global _DOWNLOAD_SERVICE
+    if _DOWNLOAD_SERVICE is None:
+        from app.services.historical_download_service import HistoricalDownloadService
+
+        _DOWNLOAD_SERVICE = HistoricalDownloadService(str(data_dir or Path.cwd()), broker_manager)
+        _DOWNLOAD_SERVICE.set_progress_emitter(_progress_emitter())
+    return _DOWNLOAD_SERVICE
+
+
+def _download_snapshot() -> dict:
+    """Exact ``download`` section consumed by Rust apply_download_snapshot.
+
+    The selector's universe is re-read from the same per-symbol candle store
+    the MARKET watchlist renders, so the two lists cannot drift.
+    """
+    service = _ensure_download_service()
+    service.refresh_universe_from_store()
+    # SYSTEM is the sole broker authority; re-read it on every snapshot.
+    service.refresh_broker_state()
+    return service.snapshot()
+
+
+def _download_action(command: dict) -> dict:
+    svc = _ensure_download_service()
+    action = command.get("action")
+    wire = action if isinstance(action, str) else str((action or {}).get("wire", ""))
+    outcome = svc.handle_wire(str(wire).strip())
+    return {"snapshot": svc.snapshot(), "outcome": outcome}
+
+
 def _watch_for_cancel(_stdin) -> threading.Thread:
     """Legacy entry point kept for import compatibility; the inbox reader
     supersedes it (single stdin reader, no second iterator)."""
@@ -2363,6 +2399,13 @@ def run_headless_backend(args: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Broker manager startup check failed: %s", exc)
 
+    # Historical download console: the preserved engine is driven by the
+    # broker that is CONNECTED in SYSTEM; no credentials are copied here.
+    try:
+        _ensure_download_service(data_dir, broker_manager)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Historical download service startup failed: %s", exc)
+
     # Ready signal
     response = {
         "type": "ready",
@@ -2405,7 +2448,19 @@ def run_headless_backend(args: argparse.Namespace) -> int:
 
                 elif cmd_type == "get_market_snapshot":
                     snapshot = _market_snapshot(repository, command, str(strategy_dir))
+                    snapshot["download"] = _download_snapshot()
                     result = {"type": "market_snapshot", "data": snapshot}
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "get_download_snapshot":
+                    result = {"type": "download_snapshot", "data": _download_snapshot()}
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "download_action":
+                    payload = _download_action(command)
+                    result = {"type": "download_snapshot", "data": payload["snapshot"]}
                     if not _emit(result):
                         break
 

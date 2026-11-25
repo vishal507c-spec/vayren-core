@@ -451,6 +451,21 @@ class FyersSessionAdapter:
                 break
         self._connected = False
 
+    def cached_health(self) -> tuple[bool, str]:
+        """Non-blocking cached transport health for UI/gateway snapshots.
+
+        Snapshots must never stall behind synchronous REST profile calls or
+        order-socket reconnects. Explicit verification and background health
+        workers continue using :meth:`health`.
+        """
+        if not self._app_id or not self._token:
+            return False, "CREDENTIALS not ready"
+        if not self._connected:
+            return False, "not connected"
+        if self._governor.read_circuit.is_open():
+            return False, "venue circuit open"
+        return True, "ok"
+
     def health(self) -> tuple[bool, str]:
         """Connection-only health (never implies LIVE readiness)."""
         if not self._app_id or not self._token:

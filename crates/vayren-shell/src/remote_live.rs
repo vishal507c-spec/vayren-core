@@ -50,8 +50,14 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 pub const PUMP_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Sub-second poll slice to immediately drain and dispatch control commands without waiting.
 pub const PUMP_POLL_SLICE: Duration = Duration::from_millis(20);
-/// Heartbeat deadline when no traffic is observed.
-pub const PUMP_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+/// Heartbeat cadence when no traffic is observed.
+pub const PUMP_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+/// Maximum wait for a gateway `pong` after sending `ping` before declaring link dead.
+pub const PONG_DEADLINE: Duration = Duration::from_secs(15);
+/// Desktop freshness expiry when no fresh snapshot/update/healthy heartbeat lands.
+pub const SNAPSHOT_STALE_AFTER: Duration = Duration::from_secs(35);
+/// Gateway backend snapshot age threshold (ms) reported in `pong.health` before flagging STALE.
+pub const SERVER_SNAPSHOT_STALE_MS: f64 = 20_000.0;
 
 /// Bounded remote-event buffer (oldest dropped first, totals stay truthful).
 pub const REMOTE_EVENT_CAP: usize = 200;
@@ -1018,12 +1024,22 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     }
 
     state.apply_snapshot(&serde_json::Value::Object(translated));
+    if matches!(
+        state.gateway.status.as_str(),
+        "" | "CONNECTING" | "AUTHENTICATING"
+    ) {
+        state.gateway.status = "CONNECTED".to_string();
+        state.gateway.connected = true;
+        state.gateway.last_error.clear();
+    }
     // Command capability is the ROLE the gateway granted, never an optimistic
     // guess: `bridge_wired` drives `can_start`/`can_stop`, so a
     // `read` credential must stay false (controls honestly inert) while a
     // `trade` credential becomes true (controls live). The gateway re-checks
     // the role on every command, so this is presentation, not authority.
-    state.bridge_wired = state.remote_commands_allowed;
+    state.bridge_wired = state.remote_commands_allowed
+        && state.unreconciled_commands.is_empty()
+        && !state.snapshot_stale;
     if !state.host_mode {
         state.host_mode = true;
     }
@@ -1155,12 +1171,13 @@ pub fn init_remote_state() -> LiveState {
 /// truthfully IS the client link state (CONNECTING → AUTHENTICATING →
 /// CONNECTED on success; OFFLINE while the bootstrap waits on a credential
 /// or transport; RECONNECTING only after a drop).
-const PRE_SNAPSHOT: [&str; 5] = [
+const PRE_SNAPSHOT: [&str; 6] = [
     "",
     "CONNECTING",
     "AUTHENTICATING",
     "OFFLINE",
     "RECONNECTING",
+    "ERROR",
 ];
 
 /// Record a client-link transition. Before the first server snapshot the
@@ -1189,21 +1206,92 @@ pub fn mark_link(state: &mut LiveState, label: &str, detail: &str, reconnects: u
     if label == "CONNECTED" {
         state.gateway.connected = true;
         state.gateway.last_error.clear();
-        state.bridge_wired = state.remote_commands_allowed;
+        state.snapshot_stale = false;
+        state.snapshot_stale_reason.clear();
+        state.bridge_wired =
+            state.remote_commands_allowed && state.unreconciled_commands.is_empty();
+    } else if label == "STALE" {
+        state.gateway.connected = false;
+        state.gateway.last_error = detail.to_string();
+        state.snapshot_stale = true;
+        state.snapshot_stale_reason = detail.to_string();
+        state.bridge_wired = false;
+        state.live_confirmed = false;
     } else {
         state.gateway.connected = false;
         state.gateway.last_error = detail.to_string();
-        // A dropped link can carry no command: fail the controls closed until
-        // the pump reconnects, so START never offers a request that would sit
-        // undelivered in the queue.
+        // A dropped/unverified link can carry no command: fail controls closed
+        // and never leave local LIVE confirmation armed across reconnects.
         state.bridge_wired = false;
+        if matches!(label, "RECONNECTING" | "OFFLINE" | "ERROR") {
+            state.live_confirmed = false;
+        }
         if state.pending_action.is_some() {
             state.pending_action = None;
             state.pending_since = None;
+            if state.unreconciled_commands.is_empty() {
+                state.action_note = Some(format!(
+                    "gateway link lost ({label}) — request not delivered"
+                ));
+            }
+        }
+    }
+}
+
+/// Record commands that were already written on the wire before a disconnect so
+/// they cannot be silently retried or falsely acknowledged prior to snapshot sync.
+pub fn mark_unknown_commands(state: &mut LiveState, actions: &[String]) {
+    for action in actions {
+        let trimmed = action.trim();
+        if !trimmed.is_empty() && !state.unreconciled_commands.iter().any(|a| a == trimmed) {
+            state.unreconciled_commands.push(trimmed.to_string());
+        }
+    }
+    if state.unreconciled_commands.is_empty() {
+        return;
+    }
+    state.pending_action = None;
+    state.pending_since = None;
+    state.bridge_wired = false;
+    state.live_confirmed = false;
+    state.action_note = Some(format!(
+        "connection dropped while awaiting [{}] — outcome UNKNOWN; reconciling snapshot before retry",
+        state.unreconciled_commands.join(", ")
+    ));
+}
+
+/// Apply one gateway `Snapshot` frame with explicit staleness & post-drop reconciliation.
+pub fn apply_remote_snapshot_outcome(
+    state: &mut LiveState,
+    sections: &serde_json::Value,
+    resync: bool,
+    stale: bool,
+    stale_reason: Option<&str>,
+) {
+    apply_remote_sections(state, sections, resync);
+    if stale {
+        state.snapshot_stale = true;
+        state.snapshot_stale_reason = stale_reason
+            .unwrap_or("gateway returned stale snapshot fallback")
+            .to_string();
+        state.bridge_wired = false;
+        state.live_confirmed = false;
+        state.gateway.status = "STALE".to_string();
+        state.gateway.connected = false;
+    } else {
+        state.snapshot_stale = false;
+        state.snapshot_stale_reason.clear();
+        if !state.unreconciled_commands.is_empty() {
+            let reconciled = std::mem::take(&mut state.unreconciled_commands);
+            state.pending_action = None;
+            state.pending_since = None;
             state.action_note = Some(format!(
-                "gateway link lost ({label}) — request not delivered"
+                "reconciled [{}] from authoritative gateway snapshot (session: {}) — review before retry",
+                reconciled.join(", "),
+                state.session.label(),
             ));
         }
+        state.bridge_wired = state.remote_commands_allowed;
     }
 }
 
@@ -1215,7 +1303,9 @@ pub fn mark_link(state: &mut LiveState, label: &str, detail: &str, reconnects: u
 /// a visible refusal rather than a silently dead button.
 pub fn apply_role(state: &mut LiveState, role: &str) {
     state.remote_commands_allowed = role == vayren_remote_client::ROLE_TRADE;
-    state.bridge_wired = state.remote_commands_allowed;
+    state.bridge_wired = state.remote_commands_allowed
+        && state.unreconciled_commands.is_empty()
+        && !state.snapshot_stale;
     state.action_note = if state.remote_commands_allowed {
         None
     } else {
@@ -1236,6 +1326,9 @@ pub enum RemoteUiUpdate {
     Snapshot {
         sections: serde_json::Value,
         resync: bool,
+        stale: bool,
+        stale_reason: Option<String>,
+        snapshot_age_ms: Option<f64>,
     },
     StateUpdate {
         sections: serde_json::Value,
@@ -1274,6 +1367,10 @@ pub enum RemoteUiUpdate {
         detail: String,
         payload: serde_json::Value,
     },
+    /// Socket dropped while commands were in flight — must reconcile via fresh snapshot.
+    CommandUnknown {
+        actions: Vec<String>,
+    },
 }
 
 /// A control command the UI thread wants the pump thread to send. The pump
@@ -1296,6 +1393,17 @@ pub fn dispatch_pending_actions(state: &mut LiveState, command_tx: &mpsc::Sender
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        if action.is_empty() {
+            continue;
+        }
+        let is_read_only = matches!(action.as_str(), "refresh" | "server_op" | "broker_status");
+        if !state.unreconciled_commands.is_empty() && !is_read_only {
+            state.action_note = Some(format!(
+                "command outcome UNKNOWN ([{}]) — waiting for authoritative snapshot before sending '{action}'",
+                state.unreconciled_commands.join(", ")
+            ));
+            continue;
+        }
         let mut params = serde_json::Map::new();
         if let Some(map) = value.as_object() {
             for (key, val) in map {
@@ -1303,9 +1411,6 @@ pub fn dispatch_pending_actions(state: &mut LiveState, command_tx: &mpsc::Sender
                     params.insert(key.clone(), val.clone());
                 }
             }
-        }
-        if action.is_empty() {
-            continue;
         }
         if command_tx
             .send(RemoteCommand {
@@ -1320,20 +1425,41 @@ pub fn dispatch_pending_actions(state: &mut LiveState, command_tx: &mpsc::Sender
     }
 }
 
-/// Blocking initial connect: hello → welcome → snapshot → subscribe.
-/// Resolves the token inside, drops it before returning, and never logs it.
-/// Errors name the STAGE only, never the credential.
-pub fn initial_connect(url: &str) -> Result<(RemoteClient, String, serde_json::Value), String> {
+struct ConnectSnapshot {
+    client: RemoteClient,
+    role: String,
+    sections: serde_json::Value,
+    stale: bool,
+    stale_reason: Option<String>,
+    snapshot_age_ms: Option<f64>,
+}
+
+fn initial_connect_detailed(url: &str) -> Result<ConnectSnapshot, String> {
     let token = resolve_remote_token().map_err(|err| format!("remote token: {err}"))?;
     let (mut client, welcome, snapshot) = RemoteClient::connect(url, &token, HANDSHAKE_TIMEOUT)
-        .map_err(|err| format!("remote connect failed: {err}"))?;
+        .map_err(|err| match &err {
+            ClientError::Protocol(pe) => format!("remote protocol [{}]: {}", pe.code, pe.detail),
+            ClientError::Auth(msg) => format!("remote auth: {msg}"),
+            other => format!("remote connect failed: {other}"),
+        })?;
     drop(token);
     let role = match &welcome {
         ClientEvent::Welcome { role, .. } => role.clone(),
         other => return Err(format!("remote handshake: expected welcome, got {other:?}")),
     };
-    let sections = match &snapshot {
-        ClientEvent::Snapshot { sections, .. } => sections.clone(),
+    let (sections, stale, stale_reason, snapshot_age_ms) = match &snapshot {
+        ClientEvent::Snapshot {
+            sections,
+            stale,
+            stale_reason,
+            snapshot_age_ms,
+            ..
+        } => (
+            sections.clone(),
+            *stale,
+            stale_reason.clone(),
+            *snapshot_age_ms,
+        ),
         other => {
             return Err(format!(
                 "remote handshake: expected snapshot, got {other:?}"
@@ -1343,7 +1469,22 @@ pub fn initial_connect(url: &str) -> Result<(RemoteClient, String, serde_json::V
     client
         .subscribe(&[], None)
         .map_err(|err| format!("remote subscribe failed: {err}"))?;
-    Ok((client, role, sections))
+    Ok(ConnectSnapshot {
+        client,
+        role,
+        sections,
+        stale,
+        stale_reason,
+        snapshot_age_ms,
+    })
+}
+
+/// Blocking initial connect: hello → welcome → snapshot → subscribe.
+/// Resolves the token inside, drops it before returning, and never logs it.
+/// Errors name the STAGE only, never the credential.
+pub fn initial_connect(url: &str) -> Result<(RemoteClient, String, serde_json::Value), String> {
+    let ok = initial_connect_detailed(url)?;
+    Ok((ok.client, ok.role, ok.sections))
 }
 
 /// Pre-connect bootstrap for the packaged client: the window opens FIRST
@@ -1381,40 +1522,55 @@ pub fn spawn_remote_bootstrap(
         loop {
             let _ = tx.send(RemoteUiUpdate::Link {
                 label: "AUTHENTICATING".to_string(),
-                detail: "proving credential...".to_string(),
+                detail: "proving credential & awaiting initial snapshot...".to_string(),
                 reconnects,
             });
-            match initial_connect(&url) {
-                Ok((client, role, sections)) => {
+            match initial_connect_detailed(&url) {
+                Ok(opened) => {
+                    let role = opened.role;
+                    let stale = opened.stale;
+                    let stale_reason = opened.stale_reason.clone();
                     let _ = tx.send(RemoteUiUpdate::Role { role: role.clone() });
+                    let _ = tx.send(RemoteUiUpdate::Snapshot {
+                        sections: opened.sections,
+                        resync: false,
+                        stale,
+                        stale_reason: stale_reason.clone(),
+                        snapshot_age_ms: opened.snapshot_age_ms,
+                    });
                     let _ = tx.send(RemoteUiUpdate::Link {
-                        label: "CONNECTED".to_string(),
-                        detail: format!("role {role}"),
+                        label: if stale { "STALE" } else { "CONNECTED" }.to_string(),
+                        detail: if stale {
+                            stale_reason.unwrap_or_else(|| "gateway warm cache stale".to_string())
+                        } else {
+                            format!("role {role}")
+                        },
                         reconnects,
                     });
                     let _ = tx.send(RemoteUiUpdate::Heartbeat {
                         rtt_ms: None,
                         timestamp: current_time_str(),
                     });
-                    let _ = tx.send(RemoteUiUpdate::Snapshot {
-                        sections,
-                        resync: false,
-                    });
-                    spawn_remote_pump(client, url, tx, commands);
+                    spawn_remote_pump(opened.client, url, tx, commands);
                     return;
                 }
                 Err(err) => {
                     reconnects += 1;
                     let wait = backoff.next_wait();
-                    let detail = if err.starts_with("remote token:") {
-                        enrollment_note(Enrollment::Missing).to_string()
-                    } else if err.contains("AUTH_FAILED") {
-                        enrollment_note(Enrollment::Rejected).to_string()
+                    let (label, detail) = if err.starts_with("remote token:") {
+                        ("OFFLINE", enrollment_note(Enrollment::Missing).to_string())
+                    } else if err.contains("AUTH_FAILED") || err.starts_with("remote auth:") {
+                        ("OFFLINE", enrollment_note(Enrollment::Rejected).to_string())
+                    } else if err.starts_with("remote protocol [") {
+                        ("ERROR", format!("{err} — retrying in {}s", wait.as_secs()))
                     } else {
-                        format!("transport down — retrying in {}s", wait.as_secs())
+                        (
+                            "OFFLINE",
+                            format!("transport down — retrying in {}s", wait.as_secs()),
+                        )
                     };
                     let _ = tx.send(RemoteUiUpdate::Link {
-                        label: "OFFLINE".to_string(),
+                        label: label.to_string(),
                         detail,
                         reconnects,
                     });
@@ -1426,16 +1582,8 @@ pub fn spawn_remote_bootstrap(
 }
 
 /// Own the connected client on a worker thread: pump arrivals to the UI,
-/// heartbeat on idle, and reconnect with `subscribe{last_seq}` on drops
-/// (the gateway replays missed events or answers `resync: true`).
-/// This function never sends a command and never reads the token store
-/// except to re-resolve for a fresh `hello` after a drop.
-/// Own the connected client on a worker thread: pump arrivals to the UI,
-/// send control commands the UI asked for, heartbeat on idle, and reconnect
-/// with `subscribe{last_seq}` on drops (the gateway replays missed events or
-/// answers `resync: true`). Command sends reuse one monotonic `request_id` per
-/// action so a gateway-side retry can never double-apply. The token is
-/// re-resolved only for a fresh `hello` after a drop.
+/// send control commands the UI asked for, heartbeat on idle, verify pong +
+/// snapshot freshness, and reconnect with `subscribe{last_seq}` on drops.
 pub fn spawn_remote_pump(
     mut client: RemoteClient,
     url: String,
@@ -1449,14 +1597,20 @@ pub fn spawn_remote_pump(
         // gateway replays its cached result) while a second click gets a new
         // one (it is a genuinely new intent).
         let mut request_seq: u64 = 0;
+        let initial_stale = client.state() == vayren_remote_client::ConnectionState::Stale;
         let pump = |client: &mut RemoteClient,
                     tx: &mpsc::Sender<RemoteUiUpdate>,
                     commands: &mpsc::Receiver<RemoteCommand>,
-                    request_seq: &mut u64| {
+                    request_seq: &mut u64,
+                    reconnects: usize,
+                    start_stale: bool|
+         -> Vec<String> {
             let mut in_flight: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
             let mut last_ping: Option<std::time::Instant> = None;
             let mut last_outbound_ping = std::time::Instant::now();
+            let mut last_fresh_snapshot = std::time::Instant::now();
+            let mut reported_stale = start_stale;
             loop {
                 // Drain queued commands before blocking on the socket: a START
                 // pressed between two frames must not wait for the next one.
@@ -1477,15 +1631,59 @@ pub fn spawn_remote_pump(
                     }
                 }
                 match client.next(PUMP_POLL_SLICE) {
-                    Ok(ClientEvent::Snapshot { sections, resync }) => {
-                        let _ = tx.send(RemoteUiUpdate::Snapshot { sections, resync });
+                    Ok(ClientEvent::Snapshot {
+                        sections,
+                        resync,
+                        stale,
+                        stale_reason,
+                        snapshot_age_ms,
+                    }) => {
+                        let reason_note = stale_reason
+                            .clone()
+                            .unwrap_or_else(|| "gateway returned stale snapshot".to_string());
+                        let _ = tx.send(RemoteUiUpdate::Snapshot {
+                            sections,
+                            resync,
+                            stale,
+                            stale_reason,
+                            snapshot_age_ms,
+                        });
+                        if stale {
+                            if !reported_stale {
+                                reported_stale = true;
+                                let _ = tx.send(RemoteUiUpdate::Link {
+                                    label: "STALE".to_string(),
+                                    detail: reason_note,
+                                    reconnects,
+                                });
+                            }
+                        } else {
+                            last_fresh_snapshot = std::time::Instant::now();
+                            if reported_stale {
+                                reported_stale = false;
+                                let _ = tx.send(RemoteUiUpdate::Link {
+                                    label: "CONNECTED".to_string(),
+                                    detail: "authoritative snapshot synchronized".to_string(),
+                                    reconnects,
+                                });
+                            }
+                        }
                         let _ = tx.send(RemoteUiUpdate::Heartbeat {
                             rtt_ms: None,
                             timestamp: current_time_str(),
                         });
                     }
                     Ok(ClientEvent::StateUpdate { sections, .. }) => {
+                        last_fresh_snapshot = std::time::Instant::now();
                         let _ = tx.send(RemoteUiUpdate::StateUpdate { sections });
+                        if reported_stale {
+                            reported_stale = false;
+                            let _ = tx.send(RemoteUiUpdate::Link {
+                                label: "CONNECTED".to_string(),
+                                detail: "stream recovered".to_string(),
+                                reconnects,
+                            });
+                        }
                         let _ = tx.send(RemoteUiUpdate::Heartbeat {
                             rtt_ms: None,
                             timestamp: current_time_str(),
@@ -1498,6 +1696,45 @@ pub fn spawn_remote_pump(
                         let rtt = last_ping
                             .take()
                             .map(|t0| t0.elapsed().as_secs_f64() * 1000.0);
+                        let age_ms = client
+                            .last_pong_health
+                            .as_ref()
+                            .and_then(|h| h.get("snapshot_age_ms"))
+                            .and_then(|v| v.as_f64());
+                        if let Some(age) = age_ms {
+                            if age >= SERVER_SNAPSHOT_STALE_MS {
+                                if !reported_stale {
+                                    reported_stale = true;
+                                    let _ = tx.send(RemoteUiUpdate::Link {
+                                        label: "STALE".to_string(),
+                                        detail: format!(
+                                            "gateway snapshot aged {:.1}s",
+                                            age / 1000.0
+                                        ),
+                                        reconnects,
+                                    });
+                                }
+                            } else {
+                                last_fresh_snapshot = std::time::Instant::now();
+                                if reported_stale {
+                                    reported_stale = false;
+                                    let _ = tx.send(RemoteUiUpdate::Link {
+                                        label: "CONNECTED".to_string(),
+                                        detail: "fresh heartbeat verified".to_string(),
+                                        reconnects,
+                                    });
+                                }
+                            }
+                        } else if !reported_stale
+                            && last_fresh_snapshot.elapsed() >= SNAPSHOT_STALE_AFTER
+                        {
+                            reported_stale = true;
+                            let _ = tx.send(RemoteUiUpdate::Link {
+                                label: "STALE".to_string(),
+                                detail: "no fresh snapshot within freshness window".to_string(),
+                                reconnects,
+                            });
+                        }
                         let _ = tx.send(RemoteUiUpdate::Heartbeat {
                             rtt_ms: rtt,
                             timestamp: current_time_str(),
@@ -1628,7 +1865,25 @@ pub fn spawn_remote_pump(
                     Ok(ClientEvent::Closed) => break,
                     Ok(ClientEvent::Welcome { .. }) => {}
                     Err(ClientError::Timeout) => {
-                        if last_outbound_ping.elapsed() >= PUMP_HEARTBEAT_INTERVAL {
+                        if last_ping.is_some_and(|sent| sent.elapsed() >= PONG_DEADLINE) {
+                            eprintln!(
+                                "remote pump: heartbeat pong deadline exceeded — reconnecting"
+                            );
+                            break;
+                        }
+                        if !reported_stale && last_fresh_snapshot.elapsed() >= SNAPSHOT_STALE_AFTER
+                        {
+                            reported_stale = true;
+                            let _ = tx.send(RemoteUiUpdate::Link {
+                                label: "STALE".to_string(),
+                                detail: "snapshot freshness expired — awaiting gateway update"
+                                    .to_string(),
+                                reconnects,
+                            });
+                        }
+                        if last_ping.is_none()
+                            && last_outbound_ping.elapsed() >= PUMP_HEARTBEAT_INTERVAL
+                        {
                             last_ping = Some(std::time::Instant::now());
                             last_outbound_ping = std::time::Instant::now();
                             if client.ping().is_err() {
@@ -1644,11 +1899,24 @@ pub fn spawn_remote_pump(
                     Err(_) => break,
                 }
             }
+            in_flight.into_values().collect()
         };
-        pump(&mut client, &tx, &commands, &mut request_seq);
+        let mut dropped_in_flight = pump(
+            &mut client,
+            &tx,
+            &commands,
+            &mut request_seq,
+            reconnects,
+            initial_stale,
+        );
         // Reconnect loop: re-resolve the token per attempt (never retained),
-        // resume from the last delivered seq, honour resync when asked.
+        // resume from the last delivered seq, reconcile any unknown-outcome commands.
         loop {
+            if !dropped_in_flight.is_empty() {
+                let _ = tx.send(RemoteUiUpdate::CommandUnknown {
+                    actions: std::mem::take(&mut dropped_in_flight),
+                });
+            }
             reconnects += 1;
             let wait = backoff.next_wait();
             let _ = tx.send(RemoteUiUpdate::Link {
@@ -1657,24 +1925,52 @@ pub fn spawn_remote_pump(
                 reconnects,
             });
             std::thread::sleep(wait);
+            let _ = tx.send(RemoteUiUpdate::Link {
+                label: "AUTHENTICATING".to_string(),
+                detail: "re-authenticating and awaiting fresh snapshot...".to_string(),
+                reconnects,
+            });
             let last_seq = client.last_seq;
             let token = match resolve_remote_token() {
                 Ok(token) => token,
                 Err(err) => {
                     eprintln!("remote pump: reconnect without token: {err}");
+                    let _ = tx.send(RemoteUiUpdate::Link {
+                        label: "OFFLINE".to_string(),
+                        detail: enrollment_note(Enrollment::Missing).to_string(),
+                        reconnects,
+                    });
                     continue;
                 }
             };
             match RemoteClient::connect(&url, &token, HANDSHAKE_TIMEOUT) {
-                Ok((mut fresh, welcome, snapshot)) => {
+                Ok(opened) => {
                     drop(token);
+                    let (mut fresh, welcome, snapshot) = opened;
                     backoff.reset();
                     if fresh.subscribe(&[], last_seq).is_err() {
                         continue;
                     }
                     client = fresh;
-                    if let ClientEvent::Snapshot { sections, resync } = snapshot {
-                        let _ = tx.send(RemoteUiUpdate::Snapshot { sections, resync });
+                    let mut snap_stale = false;
+                    let mut snap_reason: Option<String> = None;
+                    if let ClientEvent::Snapshot {
+                        sections,
+                        resync,
+                        stale,
+                        stale_reason,
+                        snapshot_age_ms,
+                    } = snapshot
+                    {
+                        snap_stale = stale;
+                        snap_reason = stale_reason.clone();
+                        let _ = tx.send(RemoteUiUpdate::Snapshot {
+                            sections,
+                            resync,
+                            stale,
+                            stale_reason,
+                            snapshot_age_ms,
+                        });
                     }
                     let _ = tx.send(RemoteUiUpdate::Role {
                         role: match &welcome {
@@ -1683,19 +1979,44 @@ pub fn spawn_remote_pump(
                         },
                     });
                     let _ = tx.send(RemoteUiUpdate::Link {
-                        label: "CONNECTED".to_string(),
-                        detail: "resumed".to_string(),
+                        label: if snap_stale { "STALE" } else { "CONNECTED" }.to_string(),
+                        detail: if snap_stale {
+                            snap_reason.unwrap_or_else(|| "gateway warm cache stale".to_string())
+                        } else {
+                            "resumed".to_string()
+                        },
                         reconnects,
                     });
                     let _ = tx.send(RemoteUiUpdate::Heartbeat {
                         rtt_ms: None,
                         timestamp: current_time_str(),
                     });
-                    pump(&mut client, &tx, &commands, &mut request_seq);
+                    dropped_in_flight = pump(
+                        &mut client,
+                        &tx,
+                        &commands,
+                        &mut request_seq,
+                        reconnects,
+                        snap_stale,
+                    );
                 }
                 Err(err) => {
                     drop(token);
                     eprintln!("remote pump: reconnect failed: {err}");
+                    let (label, detail) = match &err {
+                        ClientError::Auth(_) => {
+                            ("OFFLINE", enrollment_note(Enrollment::Rejected).to_string())
+                        }
+                        ClientError::Protocol(pe) => {
+                            ("ERROR", format!("[{}] {} — retrying", pe.code, pe.detail))
+                        }
+                        _ => ("RECONNECTING", format!("reconnect failed: {err}")),
+                    };
+                    let _ = tx.send(RemoteUiUpdate::Link {
+                        label: label.to_string(),
+                        detail,
+                        reconnects,
+                    });
                 }
             }
         }
@@ -2629,5 +2950,55 @@ mod tests {
             .insert("as_of".to_string(), json!("   "));
         apply_remote_sections(&mut state, &sections, false);
         assert_eq!(state.snapshot_time, "2026-10-23T15:35:00+00:00");
+    }
+
+    #[test]
+    fn stale_snapshot_and_unknown_command_reconcile_safely_on_reconnect() {
+        let mut state = init_remote_state();
+        apply_role(&mut state, "trade");
+        let mut sec = sections();
+        sec["mode"] = json!("LIVE");
+        sec["blockers"] = json!([]);
+        sec["positions"] = json!([{"symbol": "NSE:KAYNES", "side": "SELL", "quantity": 10}]);
+        apply_remote_snapshot_outcome(&mut state, &sec, false, false, None);
+        state.live_confirmed = true;
+        assert!(state.bridge_wired);
+        assert!(!state.snapshot_stale);
+        assert_eq!(state.positions.len(), 1);
+
+        // Stale snapshot preserves data, clears live_confirmed, and locks controls.
+        apply_remote_snapshot_outcome(&mut state, &sec, false, true, Some("backend warm cache"));
+        assert!(state.snapshot_stale);
+        assert!(!state.bridge_wired);
+        assert!(!state.live_confirmed);
+        assert_eq!(state.gateway.status, "STALE");
+        assert_eq!(state.positions.len(), 1);
+
+        // Connection drops while a command is already in flight on the wire.
+        mark_unknown_commands(&mut state, &["start".to_string()]);
+        mark_link(&mut state, "RECONNECTING", "link lost", 1);
+        assert_eq!(state.unreconciled_commands, vec!["start".to_string()]);
+        assert!(!state.bridge_wired);
+        assert!(!state.live_confirmed);
+
+        // Link reports CONNECTED before authoritative snapshot arrives: stays locked!
+        mark_link(&mut state, "CONNECTED", "resumed", 1);
+        assert!(!state.bridge_wired);
+
+        // Attempting to dispatch another mutating command before reconciliation refuses safely.
+        let (tx, rx) = mpsc::channel();
+        state.push_host_action(json!({"action": "start"}));
+        dispatch_pending_actions(&mut state, &tx);
+        assert!(rx.try_recv().is_err());
+
+        // Fresh non-stale authoritative snapshot reconciles & re-enables trade role controls.
+        apply_remote_snapshot_outcome(&mut state, &sec, true, false, None);
+        assert!(!state.snapshot_stale);
+        assert!(state.unreconciled_commands.is_empty());
+        assert!(state.bridge_wired);
+        assert!(state
+            .action_note
+            .as_deref()
+            .is_some_and(|n| n.contains("reconciled [start]")));
     }
 }

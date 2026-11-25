@@ -86,6 +86,24 @@
       "migration_target": "crates/vayren-core/src/download.rs",
       "migration_condition": "When the DATA_PROCESSING/STORAGE slice is migrated, move the SQLite write into the Rust kernel (would require a SQLite dependency for the std-only vayren-core crate); until then this remains the terminal IO layer beneath the Rust kernel."
     },
+    "src/data/download_schema_compat.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Non-destructive pre-flight repair for legacy history_boundaries schemas in candle DBs (adds boundary_date/verified/verified_at after a one-time backup). Kept outside the preserved engine so its verified core bytes stay unchanged; no download rules or dates are invented.",
+      "migration_target": "crates/vayren-core/src/download.rs",
+      "migration_condition": "When the DATA_PROCESSING/DOWNLOAD slice is migrated, fold this schema compatibility step into the Rust SQLite storage layer."
+    },
+    "src/data/download_broker_adapter.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Minimal KiteConnect-shaped adapter for the preserved historical engine: supplies exactly instruments()/historical_data() from the broker CONNECTED in VAYREN SYSTEM (Zerodha auth session or authenticated FYERS adapter). Adds no download rules, no credentials and no second authority; all orchestration stays in the preserved engine. File role: broker API seam (no migrated authority)",
+      "migration_target": "crates/vayren-core/src/download.rs",
+      "migration_condition": "When the DATA_PROCESSING/DOWNLOAD slice is migrated, fold this two-call adapter into the Rust provider seam; until then it is the terminal broker-API layer beneath the preserved engine."
+    },
+    "src/data/historical_download_engine.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Verbatim preservation of the user's original standalone historical download engine (1775 lines) with ONE change: its own Zerodha Selenium credentials/auth were replaced by the broker CONNECTED in VAYREN SYSTEM. Every download rule, scan, queue, chunk sweep, boundary write, retry and execution sequence is byte-preserved and pinned by the 1:1 parity test. Embedded credentials were NOT copied into the application. File role: preserved legacy engine (no migrated authority)",
+      "migration_target": "crates/vayren-core/src/download_engine.rs",
+      "migration_condition": "Migrate only on an explicit user-approved port of the preserved engine's rules to the Rust kernel; until then this file is the behavioural source of truth for the Historical Download console."
+    },
     "src/data/native_download.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Rust-backed ctypes bridge for the whole download kernel (vy_cal_*, vy_dl_*, vy_sym_filename, vy_ts_*): converts naive wall-clock datetimes to the seconds the kernel expects, crosses a holiday set as one NUL-joined blob, and reads the kernel's one-line verdict documents back. Since 2026-09-20 it also carries validate_range (end-of-day window plus both failure reasons) and job_rank (queue priority). Holds no rule of its own - trading-day vocabulary, market-hours window, target window, coverage verdict, stored candle-key shape, on-disk filename token, chunk plan, queued job ranges and date bounds all live in crates/vayren-core/src/download.rs. File role: bridge (no authority)",

@@ -148,6 +148,11 @@ BRIDGE_DENIED_CALLS = {
 # `native_*` (e.g. a bridge renamed, or the cdylib loader package itself).
 BRIDGE_CONTENT_MODULES = {"ctypes", "cffi"}
 BRIDGE_CONTENT_DOTTED = ("core.native",)
+# The preserved historical download engine imports ctypes ONLY for Windows PID
+# liveness (OpenProcess/CloseHandle in _pid_alive). It is a worker, not an FFI
+# marshal-delegate-return bridge; its sqlite/thread IO belongs to its own
+# domain. Exempt this one file from the content-based bridge heuristic.
+BRIDGE_CONTENT_EXEMPT = {"src/data/historical_download_engine.py"}
 
 # UI token authority: hex color literals live ONLY here.
 PALETTE_FILE = "crates/vayren-shell/ui/palette.slint"
@@ -576,6 +581,8 @@ def _is_bridge(rel: str, tree: ast.AST) -> bool:
     imports ctypes/cffi or reaches `core.native`; the filename alone let those
     escape the boundary rules entirely.
     """
+    if rel in BRIDGE_CONTENT_EXEMPT:
+        return False
     if Path(rel).name.startswith("native_"):
         return True
     for node in ast.walk(tree):

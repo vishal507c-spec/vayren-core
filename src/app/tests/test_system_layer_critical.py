@@ -12,6 +12,7 @@ Pins the specific P0 defects:
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -151,7 +152,16 @@ def test_save_credentials_reports_missing_backend(tmp_path: Path) -> None:
 
 def test_connect_handler_does_not_sleep(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sleeps: list[float] = []
-    monkeypatch.setattr(time, "sleep", lambda *_args: sleeps.append(1.0))
+    caller_tid = threading.get_ident()
+    real_sleep = time.sleep
+
+    def _guard_sleep(seconds: float) -> None:
+        if threading.get_ident() == caller_tid:
+            sleeps.append(float(seconds))
+        else:
+            real_sleep(seconds)
+
+    monkeypatch.setattr(time, "sleep", _guard_sleep)
     manager = _manager([_venue("zerodha")])
     manager.connect_broker.return_value = (True, "connection started", {})
     manager.state.return_value = {"status": BrokerStatus.AUTHENTICATING}

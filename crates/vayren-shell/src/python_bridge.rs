@@ -130,6 +130,12 @@ pub enum BackendCommand {
         timeframe: Option<String>,
         limit: Option<i64>,
     },
+    GetDownloadSnapshot,
+    /// One Historical-Download console wire (`dl:*`), applied by the
+    /// composition service that owns the preserved Python engine.
+    DownloadAction {
+        action: serde_json::Value,
+    },
     GetSystemSnapshot {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         selected_id: Option<String>,
@@ -231,6 +237,7 @@ pub enum BackendResponse {
     Ready { data: ReadyData },
     SymbolsListed { data: SymbolsData },
     MarketSnapshot { data: serde_json::Value },
+    DownloadSnapshot { data: serde_json::Value },
     SystemSnapshot { data: serde_json::Value },
     PortfolioSnapshot { data: serde_json::Value },
     LiveSnapshot { data: serde_json::Value },
@@ -672,6 +679,32 @@ mod tests {
         let cmd = BackendCommand::ListSymbols;
         let json = serde_json::to_string(&cmd).unwrap();
         assert_eq!(json, r#"{"type":"list_symbols"}"#);
+    }
+
+    #[test]
+    fn test_download_command_and_response_wire_shape() {
+        let cmd = BackendCommand::DownloadAction {
+            action: serde_json::Value::String("dl:download".to_string()),
+        };
+        assert_eq!(
+            serde_json::to_string(&cmd).unwrap(),
+            r#"{"type":"download_action","action":"dl:download"}"#
+        );
+        let snapshot = BackendCommand::GetDownloadSnapshot;
+        assert_eq!(
+            serde_json::to_string(&snapshot).unwrap(),
+            r#"{"type":"get_download_snapshot"}"#
+        );
+        let response: BackendResponse = serde_json::from_str(
+            r#"{"type":"download_snapshot","data":{"busy":false,"interval_items":["1m"]}}"#,
+        )
+        .unwrap();
+        match response {
+            BackendResponse::DownloadSnapshot { data } => {
+                assert_eq!(data["interval_items"][0], "1m");
+            }
+            _ => panic!("Expected DownloadSnapshot response"),
+        }
     }
 
     #[test]

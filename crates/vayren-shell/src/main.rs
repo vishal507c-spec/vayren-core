@@ -43,6 +43,7 @@ use vayren_shell::broker_connection::{BrokerWorkspace, ConnectionState};
 use vayren_shell::lab;
 use vayren_shell::live;
 use vayren_shell::market;
+use vayren_shell::market_download;
 use vayren_shell::portfolio;
 use vayren_shell::python_bridge::{BackendCommand, BackendResponse, PythonBackend};
 use vayren_shell::research_state;
@@ -944,6 +945,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[derive(Debug)]
     enum FetchResult {
         Market(u64, Option<serde_json::Value>),
+        /// Historical-Download snapshot from the composition service.
+        Download(u64, Option<serde_json::Value>),
         LabSelect(u64, Option<serde_json::Value>),
         LabRun(u64, Option<serde_json::Value>),
         LabCoverage(u64, Option<serde_json::Value>),
@@ -957,6 +960,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         /// the new run, showing a completed count that belongs to a backtest
         /// the user no longer has on screen.
         LabProgress(u64, serde_json::Value),
+        /// Live log/done frames streamed by the preserved download engine.
+        DownloadProgress(u64, serde_json::Value),
         /// Broker select/refresh answers: moved OFF the UI thread (the old
         /// handlers blocked on `lock_send` inside the callback, freezing the
         /// window for the whole backend round-trip).
@@ -970,6 +975,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let (fetch_tx, fetch_rx) = mpsc::channel::<FetchResult>();
     let market_seq = Arc::new(AtomicU64::new(0));
+    let download_seq = Arc::new(AtomicU64::new(0));
     let live_seq = Arc::new(AtomicU64::new(0));
     let lab_coverage_seq = Arc::new(AtomicU64::new(0));
     let lab_select_seq = Arc::new(AtomicU64::new(0));
@@ -986,6 +992,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let data = match PythonBackend::lock_send(&backend, command) {
                 Ok(response) => match response {
                     BackendResponse::MarketSnapshot { data }
+                    | BackendResponse::DownloadSnapshot { data }
                     | BackendResponse::LabSnapshot { data }
                     | BackendResponse::LabCoverage { data }
                     | BackendResponse::SystemSnapshot { data } => Some(data),
@@ -1230,6 +1237,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let remote_rx = if let Some(url) = remote_gateway_url {
         live_state.borrow_mut().gateway.url = url.clone();
         live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
+        ui.set_server_status(slint::SharedString::from("CONNECTING"));
+        ui.set_server_status_tone(2);
+        ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
+        ui.set_worker_status_tone(0);
         let (remote_tx, remote_rx) = mpsc::channel::<vayren_shell::remote_live::RemoteUiUpdate>();
         // Control commands cross to the pump thread (it owns the socket) and
         // come back as CommandAck. The gateway authorizes each one.
@@ -1318,10 +1329,72 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     });
+    // Historical-Download wires are forwarded to the composition service,
+    // which runs the preserved Python engine against the SYSTEM-connected
+    // broker. The Slint panel and its projection are unchanged.
+    let fetch_download: Rc<dyn Fn(String)> = Rc::new({
+        let backend = Arc::clone(&backend);
+        let tx = fetch_tx.clone();
+        let seq = Arc::clone(&download_seq);
+        let remote = remote_command_tx.clone();
+        move |wire: String| {
+            // In packaged-remote mode the authoritative broker connection
+            // lives on EC2, so the preserved engine must run there too.
+            if let Some(sender) = remote.as_ref() {
+                let _ = sender.send(vayren_shell::remote_live::RemoteCommand {
+                    action: "download_action".to_string(),
+                    params: serde_json::json!({ "wire": wire }),
+                });
+                return;
+            }
+            let id = seq.fetch_add(1, Ordering::SeqCst) + 1;
+            let command = BackendCommand::DownloadAction {
+                action: serde_json::Value::String(wire),
+            };
+            let backend = Arc::clone(&backend);
+            let progress_tx = tx.clone();
+            let error_tx = tx.clone();
+            let result_tx = tx.clone();
+            std::thread::spawn(move || {
+                // The engine streams its own log lines as `lab_progress`
+                // frames; the streaming reader keeps them out of the command
+                // response (the plain reader would fail to parse them).
+                let data = PythonBackend::lock_send_streaming(
+                    &backend,
+                    command,
+                    move |event| {
+                        let _ = progress_tx.send(FetchResult::DownloadProgress(id, event));
+                    },
+                    move |message| {
+                        let _ = error_tx.send(FetchResult::DownloadProgress(
+                            id,
+                            serde_json::json!({"kind": "log", "line": message}),
+                        ));
+                    },
+                );
+                let payload = match data {
+                    Ok(BackendResponse::DownloadSnapshot { data }) => Some(data),
+                    Ok(BackendResponse::Error { data }) => {
+                        eprintln!("Download failed: {}", data.message);
+                        None
+                    }
+                    Ok(other) => {
+                        eprintln!("Download unexpected response ({other:?})");
+                        None
+                    }
+                    Err(err) => {
+                        eprintln!("Download failed: {err}");
+                        None
+                    }
+                };
+                let _ = result_tx.send(FetchResult::Download(id, payload));
+            });
+        }
+    });
     let market_state = Rc::new(RefCell::new(market_state));
     let current_workspace = Rc::new(RefCell::new(connection_workspace));
     shell::apply_market(&ui, &market_state.borrow());
-    shell::wire_market(&ui, market_state.clone(), fetch_market);
+    shell::wire_market(&ui, market_state.clone(), fetch_market, fetch_download);
     // Fetch-result pump: drains worker snapshots on the UI thread (50ms —
     // far below a frame budget, far above fetch latency). Latest-wins per
     // kind: a slow earlier request never overwrites a newer arrival.
@@ -1336,6 +1409,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let tx = fetch_tx.clone();
         let live_seq = Arc::clone(&live_seq);
         let mut last_market: u64 = 0;
+        let mut last_download: u64 = 0;
         let mut last_live: u64 = 0;
         // In-flight live answers (poll + actions) bound the backend load:
         // a new poll never starts while an answer is still travelling, so
@@ -1423,7 +1497,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // every LIVE control a silent no-op.
                 if let Some((rx, command_tx)) = remote_rx.as_ref() {
                     use vayren_shell::remote_live::{
-                        apply_remote_sections, mark_link, push_remote_event, RemoteUiUpdate,
+                        apply_remote_sections, apply_remote_snapshot_outcome, mark_link,
+                        push_remote_event, RemoteUiUpdate,
                     };
                     let mut dirty = false;
                     for update in rx.try_iter() {
@@ -1435,45 +1510,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                                 dirty = true;
                             }
-                            RemoteUiUpdate::Snapshot { sections, resync } => {
+                            RemoteUiUpdate::Snapshot {
+                                sections,
+                                resync,
+                                stale,
+                                stale_reason,
+                                ..
+                            } => {
                                 if resync {
                                     println!("Remote resync: replacing state with fresh snapshot");
                                 }
-                                if let Some(worker) = sections.get("worker").and_then(|w| w.as_object()) {
-                                    let status = worker.get("status").and_then(|s| s.as_str()).unwrap_or("STOPPED");
-                                    let running = worker.get("running").and_then(|r| r.as_bool()).unwrap_or(false);
-                                    ui.set_worker_status(slint::SharedString::from(status));
-                                    ui.set_worker_status_tone(if running { 1 } else if status == "ERROR" { 3 } else { 2 });
-                                    ui.set_server_status(slint::SharedString::from("CONNECTED"));
-                                    ui.set_server_status_tone(1);
-                                }
-                                if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
-                                    let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
-                                    ui.set_server_code_status(slint::SharedString::from(status));
-                                }
-                                apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
+                                apply_remote_snapshot_header_ui(
+                                    &ui,
+                                    &mut live_state.borrow_mut(),
+                                    &sections,
+                                    stale,
+                                );
+                                apply_remote_snapshot_outcome(
+                                    &mut live_state.borrow_mut(),
+                                    &sections,
+                                    resync,
+                                    stale,
+                                    stale_reason.as_deref(),
+                                );
                                 sync_broker_ui(&ui, &sections, &timer_broker_form);
+                                if let Some(dl) = sections.get("download") {
+                                    market_download::apply_download_snapshot(
+                                        &mut market_state.borrow_mut().download,
+                                        dl,
+                                    );
+                                    shell::apply_market(&ui, &market_state.borrow());
+                                }
                                 dirty = true;
                             }
                             RemoteUiUpdate::StateUpdate { sections } => {
-                                if let Some(worker) = sections.get("worker").and_then(|w| w.as_object()) {
-                                    let status = worker.get("status").and_then(|s| s.as_str()).unwrap_or("STOPPED");
-                                    let running = worker.get("running").and_then(|r| r.as_bool()).unwrap_or(false);
-                                    ui.set_worker_status(slint::SharedString::from(status));
-                                    ui.set_worker_status_tone(if running { 1 } else if status == "ERROR" { 3 } else { 2 });
-                                    ui.set_server_status(slint::SharedString::from("CONNECTED"));
-                                    ui.set_server_status_tone(1);
+                                apply_remote_snapshot_header_ui(
+                                    &ui,
+                                    &mut live_state.borrow_mut(),
+                                    &sections,
+                                    false,
+                                );
+                                {
+                                    let mut st = live_state.borrow_mut();
+                                    st.snapshot_stale = false;
+                                    st.snapshot_stale_reason.clear();
+                                    apply_remote_sections(&mut st, &sections, false);
                                 }
-                                if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
-                                    let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
-                                    ui.set_server_code_status(slint::SharedString::from(status));
-                                }
-                                if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
-                                    let status = sc.get("status").and_then(|v| v.as_str()).unwrap_or("SERVER CODE: NOT UPDATED");
-                                    ui.set_server_code_status(slint::SharedString::from(status));
-                                }
-                                apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
                                 sync_broker_ui(&ui, &sections, &timer_broker_form);
+                                if let Some(dl) = sections.get("download") {
+                                    market_download::apply_download_snapshot(
+                                        &mut market_state.borrow_mut().download,
+                                        dl,
+                                    );
+                                    shell::apply_market(&ui, &market_state.borrow());
+                                }
                                 dirty = true;
                             }
                             RemoteUiUpdate::StreamEvent { name, payload } => {
@@ -1486,15 +1576,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 reconnects,
                             } => {
                                 eprintln!("remote UI: link {label} ({detail})");
-                                if label == "OFFLINE" {
-                                    ui.set_server_status(slint::SharedString::from("OFFLINE"));
-                                    ui.set_server_status_tone(3);
-                                    ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
-                                    ui.set_worker_status_tone(0);
-                                    ui.set_server_code_status(slint::SharedString::from("SERVER CODE: NOT UPDATED"));
-                                    live_state.borrow_mut().server_code_status = "SERVER CODE: NOT UPDATED".to_string();
+                                if label == "OFFLINE" || label == "ERROR" {
+                                    // Historical Download must never sit on a
+                                    // silent no-op when the gateway is down.
+                                    {
+                                        let mut market = market_state.borrow_mut();
+                                        market.download.plan.error = format!("EC2 connection {label}");
+                                        if market.download.status.mode == "pending" {
+                                            market.download.status.mode = "failed".to_string();
+                                        }
+                                    }
+                                    shell::apply_market(&ui, &market_state.borrow());
                                 }
-                                mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
+                                {
+                                    let mut st = live_state.borrow_mut();
+                                    mark_link(&mut st, &label, &detail, reconnects);
+                                    apply_remote_link_header_ui(&ui, &mut st, &label);
+                                }
+                                dirty = true;
+                            }
+                            RemoteUiUpdate::CommandUnknown { actions } => {
+                                handle_remote_command_unknown_ui(
+                                    &ui,
+                                    &mut live_state.borrow_mut(),
+                                    &server_op_timer_pending,
+                                    &actions,
+                                );
                                 dirty = true;
                             }
                             RemoteUiUpdate::Heartbeat { rtt_ms, timestamp } => {
@@ -1549,6 +1656,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 // and paint the real outcome — never leave the
                                 // button spinning, never imply a start that the
                                 // gateway refused.
+                                if action == "download_action" {
+                                    apply_remote_download_ack(&ui, &market_state, &payload);
+                                    let has_snapshot = payload
+                                        .get("download")
+                                        .map(|v| v.is_object())
+                                        .unwrap_or(false);
+                                    if !has_snapshot {
+                                        // An ack without the authoritative
+                                        // snapshot is NOT success. Show the
+                                        // gateway's real verdict or the exact
+                                        // protocol mismatch.
+                                        let mut market = market_state.borrow_mut();
+                                        market.download.plan.error = if detail.trim().is_empty() {
+                                            "EC2 gateway returned no download snapshot".to_string()
+                                        } else {
+                                            detail.clone()
+                                        };
+                                        if !ok {
+                                            market.download.status.mode = "failed".to_string();
+                                        }
+                                    }
+                                    shell::apply_market(&ui, &market_state.borrow());
+                                }
                                 if action == "server_op" {
                                     apply_server_op_ack(
                                         &ui,
@@ -1557,6 +1687,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         &payload,
                                         &server_op_timer_pending,
                                     );
+                                    live_state.borrow_mut().server_code_status =
+                                        ui.get_server_code_status().to_string();
                                 }
                                 if action == "select_broker" {
                                     ui.set_conn_default_saving(false);
@@ -1744,6 +1876,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     next_live_poll = std::time::Instant::now() + std::time::Duration::from_secs(1);
                 }
                 let mut latest_market: Option<(u64, Option<serde_json::Value>)> = None;
+                let mut latest_download: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_select: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_run: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_coverage: Option<(u64, Option<serde_json::Value>)> = None;
@@ -1768,6 +1901,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             {
                                 latest_market = Some((id, data));
                             }
+                        }
+                        FetchResult::Download(id, data) => {
+                            if id > last_download
+                                && latest_download
+                                    .as_ref()
+                                    .map_or(true, |(prev_id, _)| id > *prev_id)
+                            {
+                                latest_download = Some((id, data));
+                            }
+                        }
+                        FetchResult::DownloadProgress(_id, event) => {
+                            let mut state = market_state.borrow_mut();
+                            match event.get("kind").and_then(|v| v.as_str()) {
+                                Some("log") => {
+                                    if let Some(line) = event.get("line").and_then(|v| v.as_str()) {
+                                        state.download.log.push(line.to_string());
+                                        if state.download.log.len() > 200 {
+                                            state.download.log.remove(0);
+                                        }
+                                        state.download.status.progress_note = line.to_string();
+                                    }
+                                }
+                                Some("done") => {
+                                    if let Some(mode) = event.get("mode").and_then(|v| v.as_str()) {
+                                        state.download.status.mode = mode.to_string();
+                                        if mode == "complete" {
+                                            state.download.status.progress_pct = 100.0;
+                                        }
+                                    }
+                                    if let Some(note) = event.get("note").and_then(|v| v.as_str()) {
+                                        state.download.status.progress_note = note.to_string();
+                                    }
+                                }
+                                _ => {}
+                            }
+                            drop(state);
+                            shell::apply_market(&ui, &market_state.borrow());
                         }
                         FetchResult::LabSelect(id, data) => {
                             if id > last_select
@@ -1915,6 +2085,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         shell::apply_market(&ui, &market_state.borrow());
                     }
                 }
+                if let Some((id, data)) = latest_download {
+                    last_download = id;
+                    if let Some(data) = data {
+                        market_download::apply_download_snapshot(
+                            &mut market_state.borrow_mut().download,
+                            &data,
+                        );
+                        shell::apply_market(&ui, &market_state.borrow());
+                    }
+                }
                 if let Some((id, data)) = latest_lab_select {
                     last_select = id;
                     if let Some(data) = data {
@@ -1998,7 +2178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         || (st.session == live::SessionStatus::Running
                             && st.start_epoch_secs.is_some())
                     {
-                        shell::apply_live(&ui, &st);
+                        shell::apply_live_clock_tick(&ui, &st);
                     }
                 }
             },
@@ -2869,17 +3049,166 @@ fn apply_lifecycle_ack(
         } else {
             format!("stop refused — {detail}")
         });
-        state.session = live::SessionStatus::Stopped;
-        state.start_epoch_secs = None;
-        state.lifecycle_stage = "done".into();
-        state.lifecycle_detail = "session stopped".into();
-        state.lifecycle_done = 0;
-        state.lifecycle_total = 0;
+        if ok {
+            state.session = live::SessionStatus::Stopped;
+            state.start_epoch_secs = None;
+            state.lifecycle_stage = "done".into();
+            state.lifecycle_detail = "session stopped".into();
+            state.lifecycle_done = 0;
+            state.lifecycle_total = 0;
+        } else {
+            state.lifecycle_stage = "refused".into();
+            state.lifecycle_detail = detail.to_string();
+        }
     }
     if let Some(snapshot) = payload.get("snapshot") {
         if snapshot.is_object() {
-            vayren_shell::remote_live::apply_remote_sections(state, snapshot, true);
+            vayren_shell::remote_live::apply_remote_sections(state, snapshot, false);
         }
+    }
+}
+
+/// A remote `download_action` ack carries the gateway's authoritative
+/// download snapshot. Apply it immediately: the optimistic checkbox state
+/// alone is not proof that the backend accepted the selection, and waiting
+/// for the next periodic state_update leaves the plan count stale.
+fn apply_remote_download_ack(
+    ui: &vayren_shell::AppWindow,
+    market: &Rc<RefCell<market::MarketState>>,
+    payload: &serde_json::Value,
+) {
+    if let Some(dl) = payload.get("download").filter(|value| value.is_object()) {
+        market_download::apply_download_snapshot(&mut market.borrow_mut().download, dl);
+        shell::apply_market(ui, &market.borrow());
+    }
+}
+
+fn apply_remote_snapshot_header_ui(
+    ui: &vayren_shell::AppWindow,
+    state: &mut vayren_shell::live::LiveState,
+    sections: &serde_json::Value,
+    stale: bool,
+) {
+    if let Some(worker) = sections.get("worker").and_then(|w| w.as_object()) {
+        let status = worker
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("STOPPED");
+        let running = worker
+            .get("running")
+            .and_then(|r| r.as_bool())
+            .unwrap_or(false);
+        if stale {
+            let stale_worker = if running {
+                "RUNNING (STALE)".to_string()
+            } else {
+                format!("{status} (STALE)")
+            };
+            ui.set_worker_status(slint::SharedString::from(stale_worker));
+            ui.set_worker_status_tone(2);
+            ui.set_server_status(slint::SharedString::from("STALE"));
+            ui.set_server_status_tone(2);
+        } else {
+            ui.set_worker_status(slint::SharedString::from(status));
+            ui.set_worker_status_tone(if running {
+                1
+            } else if status == "ERROR" {
+                3
+            } else {
+                2
+            });
+            ui.set_server_status(slint::SharedString::from("CONNECTED"));
+            ui.set_server_status_tone(1);
+        }
+    } else if stale {
+        ui.set_server_status(slint::SharedString::from("STALE"));
+        ui.set_server_status_tone(2);
+    }
+    if let Some(sc) = sections.get("server_code").and_then(|s| s.as_object()) {
+        let status = sc
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("SERVER CODE: NOT UPDATED");
+        ui.set_server_code_status(slint::SharedString::from(status));
+        state.server_code_status = status.to_string();
+    }
+}
+
+fn apply_remote_link_header_ui(
+    ui: &vayren_shell::AppWindow,
+    state: &mut vayren_shell::live::LiveState,
+    label: &str,
+) {
+    match label {
+        "OFFLINE" | "ERROR" => {
+            ui.set_server_status(slint::SharedString::from(label));
+            ui.set_server_status_tone(3);
+            ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
+            ui.set_worker_status_tone(0);
+            ui.set_server_code_status(slint::SharedString::from("SERVER CODE: NOT UPDATED"));
+            state.server_code_status = "SERVER CODE: NOT UPDATED".to_string();
+        }
+        "STALE" => {
+            ui.set_server_status(slint::SharedString::from("STALE"));
+            ui.set_server_status_tone(2);
+            if ui.get_worker_status().as_str() == "RUNNING" {
+                ui.set_worker_status(slint::SharedString::from("RUNNING (STALE)"));
+                ui.set_worker_status_tone(2);
+            }
+        }
+        "CONNECTING" | "AUTHENTICATING" | "RECONNECTING" => {
+            ui.set_server_status(slint::SharedString::from(label));
+            ui.set_server_status_tone(2);
+            if state.snapshot_time.trim().is_empty() {
+                ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
+                ui.set_worker_status_tone(0);
+            } else if ui.get_worker_status().as_str() == "RUNNING" {
+                ui.set_worker_status(slint::SharedString::from("RUNNING (STALE)"));
+                ui.set_worker_status_tone(2);
+            }
+        }
+        "CONNECTED" => {
+            if state.snapshot_stale {
+                ui.set_server_status(slint::SharedString::from("STALE"));
+                ui.set_server_status_tone(2);
+            } else {
+                ui.set_server_status(slint::SharedString::from("CONNECTED"));
+                ui.set_server_status_tone(1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_remote_command_unknown_ui(
+    ui: &vayren_shell::AppWindow,
+    state: &mut vayren_shell::live::LiveState,
+    server_op_pending: &Arc<Mutex<Option<Instant>>>,
+    actions: &[String],
+) {
+    vayren_shell::remote_live::mark_unknown_commands(state, actions);
+    if actions.iter().any(|a| a == "server_op") {
+        if let Ok(mut lock) = server_op_pending.lock() {
+            *lock = None;
+        }
+        ui.set_server_op_busy(false);
+        ui.set_server_op_tone(2);
+        ui.set_server_op_feedback(slint::SharedString::from(
+            "⚠ Link dropped mid-command — outcome UNKNOWN; awaiting snapshot reconciliation",
+        ));
+    }
+    if actions.iter().any(|a| action_is_broker_command(a)) {
+        if let Ok(mut lock) = BROKER_PENDING.lock() {
+            *lock = None;
+        }
+        ui.set_conn_pill_label("UNKNOWN".into());
+        ui.set_conn_pill_tone(2);
+        ui.set_conn_status_message(
+            "⚠ Link dropped mid-broker request — outcome UNKNOWN; awaiting snapshot before retry"
+                .into(),
+        );
+        ui.set_conn_cta_enabled(true);
+        ui.set_conn_form_enabled(true);
     }
 }
 
@@ -3000,7 +3329,7 @@ fn apply_server_op_ack(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             let sha = payload.get("sha256").and_then(|v| v.as_str()).unwrap_or("");
-            let sha_short = if sha.len() >= 8 { &sha[..8] } else { sha };
+            let sha_short: String = sha.chars().take(8).collect();
             let size_kb = size / 1024;
             ui.set_server_op_feedback(slint::SharedString::from(format!(
                 "✓ Backup Verified: {name} ({size_kb} KB, sha256:{sha_short})"
@@ -3032,11 +3361,7 @@ fn apply_server_op_ack(
                     "✓ Logs: 0 errors recorded today.",
                 ));
             } else if !last_log.is_empty() {
-                let snippet = if last_log.len() > 60 {
-                    &last_log[..60]
-                } else {
-                    last_log
-                };
+                let snippet: String = last_log.chars().take(60).collect();
                 ui.set_server_op_feedback(slint::SharedString::from(format!(
                     "✓ Logs: {count} errors. Latest: {snippet}…"
                 )));
@@ -3285,7 +3610,14 @@ fn send_remote_broker_command(
     }
     if !gate.borrow().bridge_wired {
         ui.set_conn_status_message(
-            "Gateway link closed or read-only credential — request not sent.".into(),
+            "Gateway link closed, stale, or read-only credential — request not sent.".into(),
+        );
+        return;
+    }
+    if action != "broker_status" && !gate.borrow().unreconciled_commands.is_empty() {
+        ui.set_conn_status_message(
+            "Previous command outcome UNKNOWN — awaiting post-reconnect snapshot before retry."
+                .into(),
         );
         return;
     }
@@ -3392,8 +3724,8 @@ fn send_remote_broker_command(
 #[allow(dead_code)]
 fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::error::Error>> {
     use vayren_shell::remote_live::{
-        apply_remote_sections, init_remote_state, mark_link, push_remote_event,
-        spawn_remote_bootstrap, RemoteCommand, RemoteUiUpdate,
+        apply_remote_sections, apply_remote_snapshot_outcome, init_remote_state, mark_link,
+        push_remote_event, spawn_remote_bootstrap, RemoteCommand, RemoteUiUpdate,
     };
 
     println!("VAYREN starting (remote graphical client)...");
@@ -3432,6 +3764,10 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
 
     live_state.borrow_mut().gateway.url = url.clone();
     live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
+    ui.set_server_status(slint::SharedString::from("CONNECTING"));
+    ui.set_server_status_tone(2);
+    ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
+    ui.set_worker_status_tone(0);
     let (remote_tx, remote_rx) = mpsc::channel::<RemoteUiUpdate>();
     let (command_tx, command_rx) = mpsc::channel::<RemoteCommand>();
     let remote_live_cmd_tx = command_tx.clone();
@@ -3607,76 +3943,45 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             );
                             dirty = true;
                         }
-                        RemoteUiUpdate::Snapshot { sections, resync } => {
+                        RemoteUiUpdate::Snapshot {
+                            sections,
+                            resync,
+                            stale,
+                            stale_reason,
+                            ..
+                        } => {
                             if resync {
                                 println!("Remote resync: replacing state with fresh snapshot");
                             }
-                            if let Some(worker) = sections.get("worker").and_then(|w| w.as_object())
-                            {
-                                let status = worker
-                                    .get("status")
-                                    .and_then(|s| s.as_str())
-                                    .unwrap_or("STOPPED");
-                                let running = worker
-                                    .get("running")
-                                    .and_then(|r| r.as_bool())
-                                    .unwrap_or(false);
-                                ui.set_worker_status(slint::SharedString::from(status));
-                                ui.set_worker_status_tone(if running {
-                                    1
-                                } else if status == "ERROR" {
-                                    3
-                                } else {
-                                    2
-                                });
-                                ui.set_server_status(slint::SharedString::from("CONNECTED"));
-                                ui.set_server_status_tone(1);
-                            }
-                            if let Some(sc) =
-                                sections.get("server_code").and_then(|s| s.as_object())
-                            {
-                                let status = sc
-                                    .get("status")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("SERVER CODE: NOT UPDATED");
-                                ui.set_server_code_status(slint::SharedString::from(status));
-                            }
-                            apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
+                            apply_remote_snapshot_header_ui(
+                                &ui,
+                                &mut live_state.borrow_mut(),
+                                &sections,
+                                stale,
+                            );
+                            apply_remote_snapshot_outcome(
+                                &mut live_state.borrow_mut(),
+                                &sections,
+                                resync,
+                                stale,
+                                stale_reason.as_deref(),
+                            );
                             sync_broker_ui(&ui, &sections, &broker_form);
                             dirty = true;
                         }
                         RemoteUiUpdate::StateUpdate { sections } => {
-                            if let Some(worker) = sections.get("worker").and_then(|w| w.as_object())
+                            apply_remote_snapshot_header_ui(
+                                &ui,
+                                &mut live_state.borrow_mut(),
+                                &sections,
+                                false,
+                            );
                             {
-                                let status = worker
-                                    .get("status")
-                                    .and_then(|s| s.as_str())
-                                    .unwrap_or("STOPPED");
-                                let running = worker
-                                    .get("running")
-                                    .and_then(|r| r.as_bool())
-                                    .unwrap_or(false);
-                                ui.set_worker_status(slint::SharedString::from(status));
-                                ui.set_worker_status_tone(if running {
-                                    1
-                                } else if status == "ERROR" {
-                                    3
-                                } else {
-                                    2
-                                });
-                                ui.set_server_status(slint::SharedString::from("CONNECTED"));
-                                ui.set_server_status_tone(1);
+                                let mut st = live_state.borrow_mut();
+                                st.snapshot_stale = false;
+                                st.snapshot_stale_reason.clear();
+                                apply_remote_sections(&mut st, &sections, false);
                             }
-                            if let Some(sc) =
-                                sections.get("server_code").and_then(|s| s.as_object())
-                            {
-                                let status = sc
-                                    .get("status")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("SERVER CODE: NOT UPDATED");
-                                ui.set_server_code_status(slint::SharedString::from(status));
-                            }
-                            apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
                             sync_broker_ui(&ui, &sections, &broker_form);
                             dirty = true;
                         }
@@ -3690,18 +3995,20 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             reconnects,
                         } => {
                             eprintln!("remote UI: link {label} ({detail})");
-                            if label == "OFFLINE" {
-                                ui.set_server_status(slint::SharedString::from("OFFLINE"));
-                                ui.set_server_status_tone(3);
-                                ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
-                                ui.set_worker_status_tone(0);
-                                ui.set_server_code_status(slint::SharedString::from(
-                                    "SERVER CODE: NOT UPDATED",
-                                ));
-                                live_state.borrow_mut().server_code_status =
-                                    "SERVER CODE: NOT UPDATED".to_string();
+                            {
+                                let mut st = live_state.borrow_mut();
+                                mark_link(&mut st, &label, &detail, reconnects);
+                                apply_remote_link_header_ui(&ui, &mut st, &label);
                             }
-                            mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
+                            dirty = true;
+                        }
+                        RemoteUiUpdate::CommandUnknown { actions } => {
+                            handle_remote_command_unknown_ui(
+                                &ui,
+                                &mut live_state.borrow_mut(),
+                                &server_op_timer_pending,
+                                &actions,
+                            );
                             dirty = true;
                         }
                         RemoteUiUpdate::Heartbeat { rtt_ms, timestamp } => {
@@ -3848,7 +4155,7 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                         || (st.session == live::SessionStatus::Running
                             && st.start_epoch_secs.is_some())
                     {
-                        shell::apply_live(&ui, &st);
+                        shell::apply_live_clock_tick(&ui, &st);
                     }
                 }
             },

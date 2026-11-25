@@ -454,13 +454,24 @@ component WatchlistTickCell inherits Rectangle {
     clip: true;
 
     property <int> flash-state: 0;
+    property <int> last-dir: 0;
+
+    changed text => {
+        if (self.text == "—") {
+            root.last-dir = 0;
+        }
+    }
 
     changed flash-trigger => {
         if root.flash-trigger > 0 {
+            root.last-dir = 1;
             root.flash-state = 1;
+            decay-timer.running = false;
             decay-timer.running = true;
         } else if root.flash-trigger < 0 {
+            root.last-dir = -1;
             root.flash-state = 2;
+            decay-timer.running = false;
             decay-timer.running = true;
         }
     }
@@ -509,7 +520,9 @@ component WatchlistTickCell inherits Rectangle {
         font-weight: root.font-weight;
         horizontal-alignment: root.text-align;
         vertical-alignment: center;
-        color: root.base-color;
+        color: root.text == "—" ? root.base-color
+            : (root.last-dir > 0 ? VayrenPalette.pos
+            : (root.last-dir < 0 ? VayrenPalette.neg : root.base-color));
     }
 }
 
@@ -527,9 +540,11 @@ component LiveTopCard inherits Rectangle {
     in property <string> sub-text;
     in property <int> sub-tone: 0;
     in property <bool> show-icon: true;
+    in property <bool> clickable: false;
     callback clicked();
 
-    background: card-ta.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel;
+    background: (root.clickable && card-ta.pressed) ? VayrenPalette.pressed
+        : card-ta.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel;
     border-radius: 8px;
     border-width: 1px;
     border-color: card-ta.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-line-deep;
@@ -537,11 +552,11 @@ component LiveTopCard inherits Rectangle {
     max-width: 165px;
     height: 50px;
     clip: true;
-    animate background { duration: 120ms; }
-    animate border-color { duration: 120ms; }
+    animate background { duration: 110ms; easing: ease-out; }
+    animate border-color { duration: 110ms; easing: ease-out; }
 
     card-ta := TouchArea {
-        mouse-cursor: pointer;
+        mouse-cursor: root.clickable ? pointer : default;
         clicked => { root.clicked(); }
     }
 
@@ -610,7 +625,7 @@ component LiveBrokerCapitalCard inherits Rectangle {
     in property <string> last-updated: "";
     callback refresh-requested();
 
-    background: cap-ta.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel;
+    background: cap-ta.pressed ? VayrenPalette.pressed : (cap-ta.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel);
     border-radius: 8px;
     border-width: 1px;
     border-color: root.tone == 1 ? VayrenPalette.live-teal-deep : (cap-ta.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-line-deep);
@@ -618,8 +633,8 @@ component LiveBrokerCapitalCard inherits Rectangle {
     max-width: 205px;
     height: 50px;
     clip: true;
-    animate background { duration: 120ms; }
-    animate border-color { duration: 120ms; }
+    animate background { duration: 110ms; easing: ease-out; }
+    animate border-color { duration: 110ms; easing: ease-out; }
 
     cap-ta := TouchArea {
         mouse-cursor: pointer;
@@ -700,9 +715,11 @@ component LiveBrokerCapitalCard inherits Rectangle {
                 width: 22px;
                 height: 22px;
                 border-radius: 4px;
-                background: refresh-touch.has-hover ? VayrenPalette.hover : transparent;
+                background: refresh-touch.has-hover ? VayrenPalette.row-hover : transparent;
                 border-width: 1px;
-                border-color: refresh-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
+                border-color: refresh-touch.has-hover ? VayrenPalette.live-teal-deep : transparent;
+                animate background { duration: 110ms; easing: ease-out; }
+                animate border-color { duration: 110ms; easing: ease-out; }
 
                 refresh-touch := TouchArea {
                     mouse-cursor: pointer;
@@ -716,6 +733,7 @@ component LiveBrokerCapitalCard inherits Rectangle {
                     font-weight: 700;
                     horizontal-alignment: center;
                     vertical-alignment: center;
+                    animate color { duration: 110ms; easing: ease-out; }
                 }
             }
         }
@@ -751,6 +769,7 @@ component LiveTabHeader inherits Rectangle {
             font-weight: root.active ? 700 : 600;
             horizontal-alignment: center;
             vertical-alignment: center;
+            animate color { duration: 120ms; easing: ease-out; }
         }
 
         Rectangle {
@@ -762,6 +781,7 @@ component LiveTabHeader inherits Rectangle {
             height: 2px;
             border-radius: 1px;
             background: root.active ? VayrenPalette.live-teal : (ta.has-hover ? VayrenPalette.live-line-soft : transparent);
+            animate background { duration: 140ms; easing: ease-out; }
         }
     }
 }
@@ -772,19 +792,24 @@ component LiveTabHeader inherits Rectangle {
 // backend's exact status remains in `order.status` for the details pane.
 component LiveOrderCard inherits Rectangle {
     in property <LiveOrder> order;
+    in property <string> card-key: "";
     in-out property <string> expanded-id;
     callback toggle(string);
 
-    property <bool> expanded: root.expanded-id == root.order.order-id;
+    property <string> effective-id: root.card-key != "" ? root.card-key
+        : (root.order.order-id != "" ? root.order.order-id : (root.order.symbol + "|" + root.order.record-time + "|" + root.order.plain-status));
+    property <bool> expanded: root.effective-id != "" && root.expanded-id == root.effective-id;
 
-    background: root.expanded ? VayrenPalette.hover : (touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep);
+    background: root.expanded ? VayrenPalette.hover : (touch.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel-deep);
     border-width: 1px;
-    border-color: root.expanded ? VayrenPalette.live-line-soft : transparent;
+    border-color: root.expanded ? VayrenPalette.live-line-soft : (touch.has-hover ? VayrenPalette.hairline : transparent);
     border-radius: 4px;
+    animate background { duration: 100ms; easing: ease-out; }
+    animate border-color { duration: 100ms; easing: ease-out; }
 
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.toggle(root.order.order-id); }
+        clicked => { root.toggle(root.effective-id); }
     }
 
     VerticalLayout {
@@ -809,6 +834,12 @@ component LiveOrderCard inherits Rectangle {
                 font-size: 11px;
                 font-weight: 700;
             }
+            Text {
+                text: root.expanded ? "▾" : "▸";
+                color: VayrenPalette.muted;
+                font-size: 10px;
+                vertical-alignment: center;
+            }
         }
 
         Text {
@@ -827,12 +858,14 @@ component LiveOrderCard inherits Rectangle {
                 text: step;
                 color: VayrenPalette.text;
                 font-size: 10px;
+                wrap: word-wrap;
             }
             Text { text: "Technical details"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
             for line in root.order.details: Text {
                 text: line;
                 color: VayrenPalette.text;
                 font-size: 10px;
+                wrap: word-wrap;
             }
         }
     }
@@ -1213,7 +1246,7 @@ property <string> expanded-order-id: "";
     // every surface (banner, badge) already carries the tone colour, so
     // "✕"/"✓" inside the string doubled what the tone already said.
     property <bool> setup-editable: !root.setup.can-stop && !root.setup.pending-start && !root.setup.pending-stop;
-    property <string> start-verdict: (root.setup.session-label == "● RUNNING" || root.setup.can-stop) ? "RUNNING" : (root.setup.pending-start ? "STARTING" : (root.setup.pending-stop ? "STOPPING" : (root.setup.session-label == "● ERROR" ? "ERROR" : (root.blockers.length > 0 ? "START BLOCKED" : "READY TO START"))));
+    property <string> start-verdict: (root.setup.session-label == "● RUNNING" || root.setup.can-stop) ? "RUNNING" : (root.setup.pending-start ? "STARTING" : (root.setup.pending-stop ? "STOPPING" : (root.setup.session-label == "● ERROR" || root.setup.session-label == "✕ ERROR" ? "ERROR" : (root.blockers.length > 0 ? "START BLOCKED" : "READY TO START"))));
     // The exact reason START is unavailable, or the outcome of the last
     // click. Rendered on the LIVE screen so a press is never silent — this
     // is the difference between "nothing happened" and "here is why".
@@ -1225,11 +1258,11 @@ property <string> expanded-order-id: "";
     // model and no keystroke is rewritten mid-edit.
     property <string> event-filter-text: "";
     property <bool> is-narrow-bar: root.width < 1180px;
-    // Responsive desktop scaling: proportional floors ensure the footer status
-    // strip stays on screen on 1366x768 and 1280x720 laptops while maximizing
-    // table visibility.
-    property <length> watchlist-min-h: root.height < 640px ? 140px : (root.height < 720px ? 175px : 210px);
-    property <length> blotter-min-h: root.height < 640px ? 110px : (root.height < 720px ? 145px : 185px);
+    // Responsive desktop scaling driven from window height (`tall-inspector`)
+    // rather than `root.height` to avoid a Slint layout binding loop while
+    // keeping footer status visible on 1366x768 and 1280x720 screens.
+    property <length> watchlist-min-h: root.tall-inspector ? 210px : 155px;
+    property <length> blotter-min-h: root.tall-inspector ? 185px : 130px;
 
     init => {
         Palette.color-scheme = ColorScheme.dark;
@@ -1303,13 +1336,18 @@ property <string> expanded-order-id: "";
                 Rectangle {
                     height: 3px;
                     border-radius: 1.5px;
+                    clip: true;
                     background: VayrenPalette.live-line-soft;
                     Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        height: 100%;
                         width: root.setup.lifecycle-total > 0
                             ? parent.width * (root.setup.lifecycle-done * 1.0 / root.setup.lifecycle-total)
                             : 0px;
                         border-radius: 1.5px;
                         background: VayrenPalette.live-teal;
+                        animate width { duration: 180ms; easing: ease-out; }
                     }
                 }
             }
@@ -1338,6 +1376,7 @@ property <string> expanded-order-id: "";
                 LiveTopCard {
                     icon-char: "B";
                     show-icon: true;
+                    clickable: true;
                     label: "BROKER";
                     value-text: root.bar.broker-label != "" ? root.bar.broker-label : "NOT CONFIGURED";
                     tone: root.bar.broker-tone;
@@ -1402,6 +1441,7 @@ property <string> expanded-order-id: "";
                     background: VayrenPalette.live-panel;
                     border-width: 1px;
                     border-color: root.strategy-selected > 0 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
+                    animate border-color { duration: 120ms; easing: ease-out; }
 
                     HorizontalLayout {
                         padding-left: 8px;
@@ -1466,9 +1506,9 @@ property <string> expanded-order-id: "";
                 VButton {
                     width: 104px;
                     height: 34px;
-                    label: root.setup.pending-start ? "⏳ STARTING…" : (root.bar.note != "" && root.bar.note-tone == 3 ? "⛔ BLOCKED" : "▶ START");
+                    label: root.setup.pending-start ? "⏳ STARTING…" : (!root.setup.start-clickable && root.bar.note != "" && root.bar.note-tone == 3 ? "⛔ BLOCKED" : "▶ START");
                     busy: root.setup.pending-start;
-                    variant: root.bar.note != "" && root.bar.note-tone == 3 ? 3 : 0;
+                    variant: (!root.setup.start-clickable && root.bar.note != "" && root.bar.note-tone == 3) ? 3 : 0;
                     enabled: root.setup.start-clickable;
                     clicked => { root.start-requested(); }
                 }
@@ -1503,6 +1543,7 @@ property <string> expanded-order-id: "";
                     LiveTopCard {
                         icon-char: "B";
                         show-icon: true;
+                        clickable: true;
                         label: "BROKER";
                         value-text: root.bar.broker-label != "" ? root.bar.broker-label : "NOT CONFIGURED";
                         tone: root.bar.broker-tone;
@@ -1573,6 +1614,7 @@ property <string> expanded-order-id: "";
                         background: VayrenPalette.live-panel;
                         border-width: 1px;
                         border-color: root.strategy-selected > 0 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
+                        animate border-color { duration: 120ms; easing: ease-out; }
 
                         HorizontalLayout {
                             padding-left: 8px;
@@ -1638,9 +1680,9 @@ property <string> expanded-order-id: "";
                     VButton {
                         width: 104px;
                         height: 34px;
-                        label: root.setup.pending-start ? "⏳ STARTING…" : (root.bar.note != "" && root.bar.note-tone == 3 ? "⛔ BLOCKED" : "▶ START");
+                        label: root.setup.pending-start ? "⏳ STARTING…" : (!root.setup.start-clickable && root.bar.note != "" && root.bar.note-tone == 3 ? "⛔ BLOCKED" : "▶ START");
                         busy: root.setup.pending-start;
-                        variant: root.bar.note != "" && root.bar.note-tone == 3 ? 3 : 0;
+                        variant: (!root.setup.start-clickable && root.bar.note != "" && root.bar.note-tone == 3) ? 3 : 0;
                         enabled: root.setup.start-clickable;
                         clicked => { root.start-requested(); }
                     }
@@ -1737,10 +1779,12 @@ property <string> expanded-order-id: "";
                                     for chip[c-idx] in root.filter-chips: Rectangle {
                                         height: 20px;
                                         border-radius: 10px;
-                                        background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
+                                        background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : (chip-inline-ta.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel-deep);
                                         border-width: 1px;
-                                        border-color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
-                                        TouchArea {
+                                        border-color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : (chip-inline-ta.has-hover ? VayrenPalette.muted : VayrenPalette.live-line-soft);
+                                        animate background { duration: 100ms; easing: ease-out; }
+                                        animate border-color { duration: 100ms; easing: ease-out; }
+                                        chip-inline-ta := TouchArea {
                                             mouse-cursor: pointer;
                                             clicked => { root.filter-chip-picked(c-idx); }
                                         }
@@ -1748,10 +1792,11 @@ property <string> expanded-order-id: "";
                                             padding-left: 7px; padding-right: 7px; alignment: center;
                                             Text {
                                                 text: chip;
-                                                color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
+                                                color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : (chip-inline-ta.has-hover ? VayrenPalette.text : VayrenPalette.live-ink-mute);
                                                 font-size: 9.5px;
                                                 font-weight: 600;
                                                 vertical-alignment: center;
+                                                animate color { duration: 100ms; easing: ease-out; }
                                             }
                                         }
                                     }
@@ -1767,7 +1812,6 @@ property <string> expanded-order-id: "";
                                     edited(t) => {
                                         root.filter-text = t;
                                         root.watchlist-search-changed(t);
-                                        root.symbol-filter-changed(t);
                                     }
                                 }
                             }
@@ -1786,10 +1830,12 @@ property <string> expanded-order-id: "";
                                     for chip[c-idx] in root.filter-chips: Rectangle {
                                         height: 20px;
                                         border-radius: 10px;
-                                        background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
+                                        background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : (chip-strip-ta.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel-deep);
                                         border-width: 1px;
-                                        border-color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
-                                        TouchArea {
+                                        border-color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : (chip-strip-ta.has-hover ? VayrenPalette.muted : VayrenPalette.live-line-soft);
+                                        animate background { duration: 100ms; easing: ease-out; }
+                                        animate border-color { duration: 100ms; easing: ease-out; }
+                                        chip-strip-ta := TouchArea {
                                             mouse-cursor: pointer;
                                             clicked => { root.filter-chip-picked(c-idx); }
                                         }
@@ -1797,10 +1843,11 @@ property <string> expanded-order-id: "";
                                             padding-left: 7px; padding-right: 7px; alignment: center;
                                             Text {
                                                 text: chip;
-                                                color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
+                                                color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : (chip-strip-ta.has-hover ? VayrenPalette.text : VayrenPalette.live-ink-mute);
                                                 font-size: 9.5px;
                                                 font-weight: 600;
                                                 vertical-alignment: center;
+                                                animate color { duration: 100ms; easing: ease-out; }
                                             }
                                         }
                                     }
@@ -1862,9 +1909,11 @@ property <string> expanded-order-id: "";
                                         for row[r-idx] in root.watchlist: Rectangle {
                                             height: 30px;
                                             border-radius: 4px;
-                                            background: row.selected ? VayrenPalette.live-row-checked : (wl-row-touch.has-hover ? VayrenPalette.hover : (Math.mod(r-idx, 2) == 1 ? VayrenPalette.bg1 : transparent));
+                                            background: row.selected ? VayrenPalette.live-row-checked : (wl-row-touch.has-hover ? VayrenPalette.row-hover : (Math.mod(r-idx, 2) == 1 ? VayrenPalette.bg1 : transparent));
                                             border-width: 1px;
                                             border-color: row.selected ? VayrenPalette.live-teal-deep : (wl-row-touch.has-hover ? VayrenPalette.live-line-soft : transparent);
+                                            animate background { duration: 90ms; easing: ease-out; }
+                                            animate border-color { duration: 90ms; easing: ease-out; }
 
                                             wl-row-touch := TouchArea {
                                                 mouse-cursor: pointer;
@@ -1957,7 +2006,7 @@ property <string> expanded-order-id: "";
                                                 vertical-alignment: center;
                                             }
                                             Text {
-                                                text: root.setup.symbol-total + " tracked";
+                                                text: root.setup.symbol-total;
                                                 color: VayrenPalette.live-ink-dim;
                                                 font-size: 10px;
                                                 vertical-alignment: center;
@@ -1975,9 +2024,11 @@ property <string> expanded-order-id: "";
 
                                         for sym in root.symbols: Rectangle {
                                             height: 26px;
-                                            background: sym.checked ? VayrenPalette.live-row-checked : transparent;
+                                            border-radius: 4px;
+                                            background: sym.checked ? VayrenPalette.live-row-checked : (sym-ta.has-hover ? VayrenPalette.row-hover : transparent);
+                                            animate background { duration: 90ms; easing: ease-out; }
 
-                                            TouchArea {
+                                            sym-ta := TouchArea {
                                                 mouse-cursor: pointer;
                                                 clicked => { root.symbol-toggled(sym.real-index); }
                                             }
@@ -1991,7 +2042,8 @@ property <string> expanded-order-id: "";
                                                     background: sym.checked ? VayrenPalette.live-teal : transparent;
                                                     border-width: 1px;
                                                     border-color: sym.checked ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
-                                                    Text {
+                                                    animate background { duration: 100ms; easing: ease-out; }
+                                                    if sym.checked: Text {
                                                         text: "✓";
                                                         color: VayrenPalette.accent-text;
                                                         font-size: 10px;
@@ -2058,9 +2110,11 @@ property <string> expanded-order-id: "";
                                     // The clear button answers hover the way the
                                     // table rows do (surface + hairline); before
                                     // this only the cursor moved over it.
-                                    background: clear-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep;
+                                    background: clear-touch.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel-deep;
                                     border-width: 1px;
                                     border-color: clear-touch.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-line-faint;
+                                    animate background { duration: 100ms; easing: ease-out; }
+                                    animate border-color { duration: 100ms; easing: ease-out; }
                                     clear-touch := TouchArea {
                                         mouse-cursor: pointer;
                                         clicked => { root.clear-events(); }
@@ -2116,9 +2170,11 @@ property <string> expanded-order-id: "";
                                         for pos in root.positions: Rectangle {
                                             height: 28px;
                                             border-radius: 4px;
-                                            background: pos-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep;
+                                            background: pos-touch.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel-deep;
                                             border-width: 1px;
                                             border-color: pos-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
+                                            animate background { duration: 90ms; easing: ease-out; }
+                                            animate border-color { duration: 90ms; easing: ease-out; }
                                             pos-touch := TouchArea {}
                                             HorizontalLayout {
                                                 padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: stretch;
@@ -2230,8 +2286,9 @@ property <string> expanded-order-id: "";
                                     vertical-scrollbar-policy: as-needed;
                                     VerticalLayout {
                                         spacing: 3px;
-                                        for ord in root.orders-today: LiveOrderCard {
+                                        for ord[ord-idx] in root.orders-today: LiveOrderCard {
                                             order: ord;
+                                            card-key: ord.order-id != "" ? ord.order-id : ("today-" + ord-idx);
                                             expanded-id: root.expanded-order-id;
                                             toggle(id) => { root.expanded-order-id = root.expanded-order-id == id ? "" : id; }
                                         }
@@ -2243,8 +2300,9 @@ property <string> expanded-order-id: "";
                                     vertical-scrollbar-policy: as-needed;
                                     VerticalLayout {
                                         spacing: 3px;
-                                        for ord in root.orders-attention: LiveOrderCard {
+                                        for ord[ord-idx] in root.orders-attention: LiveOrderCard {
                                             order: ord;
+                                            card-key: ord.order-id != "" ? ord.order-id : ("attn-" + ord-idx);
                                             expanded-id: root.expanded-order-id;
                                             toggle(id) => { root.expanded-order-id = root.expanded-order-id == id ? "" : id; }
                                         }
@@ -2256,8 +2314,9 @@ property <string> expanded-order-id: "";
                                     vertical-scrollbar-policy: as-needed;
                                     VerticalLayout {
                                         spacing: 3px;
-                                        for ord in root.orders-history: LiveOrderCard {
+                                        for ord[ord-idx] in root.orders-history: LiveOrderCard {
                                             order: ord;
+                                            card-key: ord.order-id != "" ? ord.order-id : ("hist-" + ord-idx);
                                             expanded-id: root.expanded-order-id;
                                             toggle(id) => { root.expanded-order-id = root.expanded-order-id == id ? "" : id; }
                                         }
@@ -2305,9 +2364,11 @@ property <string> expanded-order-id: "";
                                         for fill in root.fills: Rectangle {
                                             height: 28px;
                                             border-radius: 4px;
-                                            background: fill-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep;
+                                            background: fill-touch.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel-deep;
                                             border-width: 1px;
                                             border-color: fill-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
+                                            animate background { duration: 90ms; easing: ease-out; }
+                                            animate border-color { duration: 90ms; easing: ease-out; }
                                             fill-touch := TouchArea {}
                                             HorizontalLayout {
                                                 padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: stretch;
@@ -2345,9 +2406,11 @@ property <string> expanded-order-id: "";
                                             for cat[idx] in root.event-types: Rectangle {
                                                 height: 22px;
                                                 border-radius: 11px;
-                                                background: root.event-type-index == idx ? VayrenPalette.live-teal-deep : (cat-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep);
+                                                background: root.event-type-index == idx ? VayrenPalette.live-teal-deep : (cat-touch.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel-deep);
                                                 border-width: 1px;
                                                 border-color: root.event-type-index == idx ? VayrenPalette.live-teal : (cat-touch.has-hover ? VayrenPalette.muted : VayrenPalette.live-line-soft);
+                                                animate background { duration: 100ms; easing: ease-out; }
+                                                animate border-color { duration: 100ms; easing: ease-out; }
                                                 cat-touch := TouchArea {
                                             mouse-cursor: pointer;
                                             clicked => { root.event-type-picked(cat); }
@@ -2360,6 +2423,7 @@ property <string> expanded-order-id: "";
                                                         font-size: 10px;
                                                         font-weight: root.event-type-index == idx ? 700 : 600;
                                                         vertical-alignment: center;
+                                                        animate color { duration: 100ms; easing: ease-out; }
                                                     }
                                                 }
                                             }
@@ -2412,9 +2476,11 @@ property <string> expanded-order-id: "";
                                         for ev in root.events: Rectangle {
                                             height: 24px;
                                             border-radius: 4px;
-                                            background: ev-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep;
+                                            background: ev-touch.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel-deep;
                                             border-width: 1px;
                                             border-color: ev-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
+                                            animate background { duration: 90ms; easing: ease-out; }
+                                            animate border-color { duration: 90ms; easing: ease-out; }
                                             ev-touch := TouchArea {}
                                             HorizontalLayout {
                                                 padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: stretch;
@@ -2538,18 +2604,23 @@ property <string> expanded-order-id: "";
                                         width: 22px;
                                         height: 22px;
                                         border-radius: 4px;
-                                        background: VayrenPalette.live-panel-deep;
-                                        TouchArea {
+                                        background: insp-close-ta.has-hover ? VayrenPalette.row-hover : VayrenPalette.live-panel-deep;
+                                        border-width: 1px;
+                                        border-color: insp-close-ta.has-hover ? VayrenPalette.live-line-soft : transparent;
+                                        animate background { duration: 100ms; easing: ease-out; }
+                                        animate border-color { duration: 100ms; easing: ease-out; }
+                                        insp-close-ta := TouchArea {
                                             mouse-cursor: pointer;
                                             clicked => { root.inspector-toggled(); }
                                         }
                                         Text {
                                             text: "›";
-                                            color: VayrenPalette.live-ink;
+                                            color: insp-close-ta.has-hover ? VayrenPalette.live-teal : VayrenPalette.live-ink;
                                             font-size: 14px;
                                             font-weight: 700;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
+                                            animate color { duration: 100ms; easing: ease-out; }
                                         }
                                     }
                                 }
@@ -2630,18 +2701,22 @@ property <string> expanded-order-id: "";
                 y: 0;
                 width: 28px;
                 height: 100%;
-                background: VayrenPalette.bg;
-                TouchArea {
+                background: insp-reopen-ta.has-hover ? VayrenPalette.row-hover : VayrenPalette.bg;
+                border-width: 1px;
+                border-color: insp-reopen-ta.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-line-deep;
+                animate background { duration: 110ms; easing: ease-out; }
+                insp-reopen-ta := TouchArea {
                     mouse-cursor: pointer;
                     clicked => { root.inspector-toggled(); }
                 }
                 Text {
                     text: "‹";
-                    color: VayrenPalette.live-ink;
+                    color: insp-reopen-ta.has-hover ? VayrenPalette.live-teal : VayrenPalette.live-ink;
                     font-size: 14px;
                     font-weight: 700;
                     horizontal-alignment: center;
                     vertical-alignment: center;
+                    animate color { duration: 110ms; easing: ease-out; }
                 }
             }
         }

@@ -449,6 +449,7 @@ class LiveTradingService:
         # across network work, so snapshot() stays responsive.
         self._lifecycle_gen: int = 0
         self._state_lock = threading.Lock()
+        self._tick_lock = threading.Lock()
         # Latest lifecycle progress (stage/detail) for snapshot readers.
         self._lifecycle_progress: dict[str, Any] = {}
         self._restore_config()
@@ -1150,7 +1151,7 @@ class LiveTradingService:
         """UI-facing broker name (venue display label, never a secret)."""
         return self._broker_view()["display"]
 
-    def _broker_view(self) -> dict[str, Any]:
+    def _broker_view(self, manager_snap: dict[str, Any] | None = None) -> dict[str, Any]:
         """Resolved SYSTEM broker facts (safe scalars only, never secrets).
 
         The selection id (``fyers``) stays the venue key; the manager's
@@ -1173,7 +1174,10 @@ class LiveTradingService:
         manager = self._broker_manager
         snap: dict[str, Any] = {}
         brokers: list[dict[str, Any]] = []
-        if manager is not None:
+        if manager_snap is not None:
+            snap = manager_snap
+            brokers = [b for b in snap.get("brokers", []) if isinstance(b, dict)]
+        elif manager is not None:
             try:
                 snap = manager.snapshot() or {}
                 brokers = [b for b in snap.get("brokers", []) if isinstance(b, dict)]
@@ -2129,39 +2133,46 @@ class LiveTradingService:
         """
         if self._status != "RUNNING":
             return
-        now = time.time()
-        failures: list[str] = []
-        now_ist = datetime.now(_VENUE_TZ)
-        # Copy under the handoff lock: STOP swaps/clears _sessions on the
-        # worker thread while this timer thread steps — iterating a
-        # mutating dict would raise. The copy's sessions are already
-        # disarmed by then (disarm precedes teardown), so stepping them is
-        # a no-op for order flow.
-        with self._state_lock:
-            current = list(self._sessions.items())
-        for symbol, session in current:
-            try:
-                session.step(now)
-            except Exception as exc:  # noqa: BLE001 - fail closed, report it
-                failures.append(f"{symbol}: {exc}")
-            with contextlib.suppress(Exception):
-                session.check_tick_invalidation()
-            with contextlib.suppress(Exception):
-                session.eod_sweep(now_ist)
-            with contextlib.suppress(Exception):
-                self._refresh_mark(symbol)
-        if failures:
-            # One broken session means the worker can no longer claim a
-            # healthy run. Stop everything and surface an explicit recovery
-            # state; never leave RUNNING while a session is not stepping.
-            self._degrade("session step failed — " + "; ".join(failures[:3]))
+        if not self._tick_lock.acquire(blocking=False):
             return
-        self._tick_count += 1
-        if self._tick_count % 2 == 0:
-            self._drain_activity()
-        if self._tick_count % 30 == 0:
-            self._persist()
-        self.state_changed.emit()
+        try:
+            if self._status != "RUNNING":
+                return
+            now = time.time()
+            failures: list[str] = []
+            now_ist = datetime.now(_VENUE_TZ)
+            # Copy under the handoff lock: STOP swaps/clears _sessions on the
+            # worker thread while this timer thread steps — iterating a
+            # mutating dict would raise. The copy's sessions are already
+            # disarmed by then (disarm precedes teardown), so stepping them is
+            # a no-op for order flow.
+            with self._state_lock:
+                current = list(self._sessions.items())
+            for symbol, session in current:
+                try:
+                    session.step(now)
+                except Exception as exc:  # noqa: BLE001 - fail closed, report it
+                    failures.append(f"{symbol}: {exc}")
+                with contextlib.suppress(Exception):
+                    session.check_tick_invalidation()
+                with contextlib.suppress(Exception):
+                    session.eod_sweep(now_ist)
+                with contextlib.suppress(Exception):
+                    self._refresh_mark(symbol)
+            if failures:
+                # One broken session means the worker can no longer claim a
+                # healthy run. Stop everything and surface an explicit recovery
+                # state; never leave RUNNING while a session is not stepping.
+                self._degrade("session step failed — " + "; ".join(failures[:3]))
+                return
+            self._tick_count += 1
+            if self._tick_count % 2 == 0:
+                self._drain_activity()
+            if self._tick_count % 150 == 0:
+                self._persist()
+            self.state_changed.emit()
+        finally:
+            self._tick_lock.release()
 
     # ── snapshot (the ONLY data the LIVE tab reads) ─────────────────────
 
@@ -2202,13 +2213,9 @@ class LiveTradingService:
         return facts
 
     def snapshot(self) -> dict[str, Any]:
-        # Timer ticks arrive on the timer thread and queue for main-thread
-        # delivery; the headless loop never pumps, so drain them here — every
-        # snapshot doubles as the delivery point and sessions actually step.
-        from app.observable import pump_events
-
-        with contextlib.suppress(Exception):
-            pump_events(allow_any_thread=True)
+        # Snapshots must stay strictly read-only and non-blocking: never drain
+        # queued timer ticks inline on gateway/UI reader threads (the main runner
+        # event loop pumps ticks at its own cadence).
         if self._status == "RUNNING" and self._worker_started and not self._timer.is_running:
             self._degrade("worker timer is not running")
         blockers = self.validate() if self._status != "RUNNING" else ()
@@ -2244,7 +2251,11 @@ class LiveTradingService:
             with contextlib.suppress(Exception):
                 broker = getattr(first, "_broker", None)
                 if broker is not None:
-                    connected, broker_reason = broker.health()
+                    cached_fn = getattr(broker, "cached_health", None)
+                    if callable(cached_fn):
+                        connected, broker_reason = cast(tuple[bool, str], cached_fn())
+                    else:
+                        connected, broker_reason = broker.health()
             with contextlib.suppress(Exception):
                 kill_halted = bool(first._risk.kill_switch.is_halted())
             with contextlib.suppress(Exception):
@@ -2416,7 +2427,11 @@ class LiveTradingService:
         # SYSTEM broker view: the manager owns auth, LIVE only consumes it.
         # Transitions (connect/disconnect) are recorded once per edge so the
         # stream tells the venue story without per-poll spam.
-        view = self._broker_view()
+        manager_snap: dict[str, Any] = {}
+        if self._broker_manager is not None:
+            with contextlib.suppress(Exception):
+                manager_snap = self._broker_manager.snapshot() or {}
+        view = self._broker_view(manager_snap=manager_snap if manager_snap else None)
         self._note_broker_transitions(view)
         # Session health wins while running; otherwise the SYSTEM manager
         # is the venue truth (idle sessions report "not started").
@@ -2736,12 +2751,8 @@ class LiveTradingService:
             },
             "signals_generated": self._signals_generated,
             "brokers": (
-                [
-                    dict(b)
-                    for b in self._broker_manager.snapshot().get("brokers", [])
-                    if isinstance(b, dict)
-                ]
-                if self._broker_manager is not None
+                [dict(b) for b in manager_snap.get("brokers", []) if isinstance(b, dict)]
+                if manager_snap
                 else []
             ),
             "orders_submitted": orders_submitted,

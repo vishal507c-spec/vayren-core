@@ -42,6 +42,9 @@ pub const ERROR_CODES: &[&str] = &[
     "UNKNOWN_COMMAND",
     "COMMAND_REJECTED",
     "RATE_LIMITED",
+    "SERVER_BUSY",
+    "CIRCUIT_OPEN",
+    "DEADLINE_EXCEEDED",
     "SERVER_ERROR",
 ];
 

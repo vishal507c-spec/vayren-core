@@ -310,24 +310,7 @@ fn set_dl(ui: &MarketHostWindow, d: &mdownload::DownloadView) {
         cov_range: s.cov_range.clone().into(),
         cov_coverage: s.cov_coverage.clone().into(),
         cov_rows: s.cov_rows.clone().into(),
-        provider_name: s.provider_name.clone().into(),
-        provider_status: s.provider_status.clone().into(),
-        provider_label: s.provider_label.clone().into(),
-        provider_detail: s.provider_detail.clone().into(),
-        configure_visible: s.configure_visible,
-        advanced_visible: s.advanced_visible,
-        advanced_open: s.advanced_open,
-        env_visible: s.env_visible,
-        broker_caps: s.broker_caps.clone().into(),
-        broker_error: s.broker_error.clone().into(),
     });
-    ui.set_dl_brokers(model(
-        d.brokers
-            .iter()
-            .map(|s| SharedString::from(s.clone()))
-            .collect(),
-    ));
-    ui.set_dl_broker_index(d.broker_index as i32);
     ui.set_dl_log(model(
         d.log
             .iter()
@@ -354,22 +337,6 @@ fn set_dl(ui: &MarketHostWindow, d: &mdownload::DownloadView) {
             .map(|s| SharedString::from(s.clone()))
             .collect(),
     ));
-    ui.set_dl_cred_open(d.cred_open);
-    ui.set_dl_cred_fields(model(
-        d.cred_fields
-            .iter()
-            .map(|f| DlCredField {
-                key: f.key.clone().into(),
-                label: f.label.clone().into(),
-                secret: f.secret,
-                value: f.value.clone().into(),
-                revealed: f.revealed,
-            })
-            .collect(),
-    ));
-    ui.set_dl_cred_has_stored(d.cred_has_stored);
-    ui.set_dl_cred_status(d.cred_status.clone().into());
-    ui.set_dl_confirm_clear(d.confirm_clear);
 }
 
 /// Report a Slint interaction into the central state, then re-bind the view.
@@ -429,49 +396,19 @@ fn wire_dl(ui: &MarketHostWindow, state: &Rc<RefCell<MarketState>>) {
     dl_unit!(on_dl_retry, DownloadAction::Retry);
     dl_unit!(on_dl_view_coverage, DownloadAction::ViewCoverage);
     dl_unit!(on_dl_error_details, DownloadAction::ToggleErrorDetails);
-    dl_unit!(on_dl_advanced, DownloadAction::ToggleAdvanced);
     dl_unit!(on_dl_log_toggle, DownloadAction::ToggleLog);
     dl_unit!(on_dl_log_clear, DownloadAction::ClearLog);
-    dl_unit!(on_dl_open_creds, DownloadAction::OpenCreds);
-    dl_unit!(on_dl_close_creds, DownloadAction::CloseCreds);
-    dl_unit!(on_dl_cred_test, DownloadAction::CredTest);
-    dl_unit!(on_dl_cred_save, DownloadAction::CredSave);
-    dl_unit!(on_dl_cred_clear, DownloadAction::CredClear);
     dl_str!(on_dl_interval, |v| DownloadAction::Interval(v));
     dl_str!(on_dl_toggle_symbol, |v| DownloadAction::ToggleSymbol(v));
     dl_str!(on_dl_filter_changed, |v| DownloadAction::SetFilter(v));
     dl_str!(on_dl_open_cal, |v| DownloadAction::OpenCal(v));
     dl_str!(on_dl_quick, |v| DownloadAction::QuickRange(v));
-    dl_str!(on_dl_broker, |v| DownloadAction::Broker(v));
-    dl_str!(on_dl_cred_reveal, |v| DownloadAction::CredReveal(v));
     {
         let strong = state.clone();
         let weak = ui.as_weak();
         ui.on_dl_pick_day(move |d: i32| {
             if let Some(ui) = weak.upgrade() {
                 dl_refresh(&ui, &strong, DownloadAction::PickDay(d));
-            }
-        });
-    }
-    {
-        let strong = state.clone();
-        let weak = ui.as_weak();
-        ui.on_dl_cred_confirm(move |yes: bool| {
-            if let Some(ui) = weak.upgrade() {
-                dl_refresh(&ui, &strong, DownloadAction::CredConfirmClear(yes));
-            }
-        });
-    }
-    {
-        let strong = state.clone();
-        let weak = ui.as_weak();
-        ui.on_dl_cred_field(move |k: SharedString, v: SharedString| {
-            if let Some(ui) = weak.upgrade() {
-                dl_refresh(
-                    &ui,
-                    &strong,
-                    DownloadAction::CredField(k.to_string(), v.to_string()),
-                );
             }
         });
     }

@@ -32,10 +32,11 @@ STATUS_NOT_UPDATED = "SERVER CODE: NOT UPDATED"
 DEFAULT_CACHE_TTL_S = 30.0
 GIT_TIMEOUT_S = 5.0
 
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
 _IN_MEMORY_RUNNING_SHA: str | None = None
 _CACHED_STATUS: dict[str, Any] | None = None
 _LAST_CHECKED_MONOTONIC: float = 0.0
+_REFRESH_IN_FLIGHT: bool = False
 
 
 def _is_valid_sha(sha: str | None) -> bool:
@@ -111,12 +112,15 @@ def set_running_sha_for_testing(sha: str | None) -> None:
 def fetch_github_origin_sha(repo_dir: Path) -> str:
     """Fetch the latest commit SHA of origin/main from GitHub (read-only)."""
     try:
+        env = dict(os.environ)
+        env.setdefault("GIT_TERMINAL_PROMPT", "0")
         proc = subprocess.run(
             ["git", "ls-remote", "origin", "refs/heads/main"],
             cwd=str(repo_dir),
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_S,
+            env=env,
             check=False,
         )
         if proc.returncode == 0:
@@ -168,25 +172,9 @@ def evaluate_code_status(
     return STATUS_UPDATED, True, f"All versions in sync: {g[:7]}"
 
 
-def get_server_code_status(
-    repo_dir: str | Path | None = None,
-    force: bool = False,
-    cache_ttl_s: float = DEFAULT_CACHE_TTL_S,
-) -> dict[str, Any]:
-    """Return the verified server code status dictionary.
-
-    Uses cached result if within cache_ttl_s and force is False.
-    """
+def _compute_server_code_status(repo_dir: str | Path | None = None) -> dict[str, Any]:
+    """Run the tri-SHA git check and store the result in cache."""
     global _CACHED_STATUS, _LAST_CHECKED_MONOTONIC
-    now_mono = time.monotonic()
-    with _LOCK:
-        if (
-            not force
-            and _CACHED_STATUS is not None
-            and (now_mono - _LAST_CHECKED_MONOTONIC) < cache_ttl_s
-        ):
-            return dict(_CACHED_STATUS)
-
     resolved = _resolve_repo_dir(repo_dir)
     running_sha = get_running_sha(resolved)
     deployed_sha = _read_head_commit_sha(resolved)
@@ -215,10 +203,81 @@ def get_server_code_status(
     return result
 
 
+def get_server_code_status(
+    repo_dir: str | Path | None = None,
+    force: bool = False,
+    cache_ttl_s: float = DEFAULT_CACHE_TTL_S,
+    *,
+    nonblocking: bool = False,
+) -> dict[str, Any]:
+    """Return the verified server code status dictionary.
+
+    Uses cached result if within cache_ttl_s and force is False. When a stale
+    cached result exists (or ``nonblocking=True`` on a cold cache) and
+    ``force`` is False, returns immediately while a single-flight background
+    worker refreshes it so snapshots never block on ``git ls-remote``.
+    """
+    global _REFRESH_IN_FLIGHT
+    now_mono = time.monotonic()
+    stale_cached: dict[str, Any] | None = None
+    start_bg = False
+    need_cold_nonblocking = False
+    with _LOCK:
+        if (
+            not force
+            and _CACHED_STATUS is not None
+            and (now_mono - _LAST_CHECKED_MONOTONIC) < cache_ttl_s
+        ):
+            return dict(_CACHED_STATUS)
+        if not force and _CACHED_STATUS is not None:
+            stale_cached = dict(_CACHED_STATUS)
+            if not _REFRESH_IN_FLIGHT:
+                _REFRESH_IN_FLIGHT = True
+                start_bg = True
+        elif not force and nonblocking:
+            need_cold_nonblocking = True
+            if not _REFRESH_IN_FLIGHT:
+                _REFRESH_IN_FLIGHT = True
+                start_bg = True
+
+    if need_cold_nonblocking:
+        resolved = _resolve_repo_dir(repo_dir)
+        running_sha = get_running_sha(resolved)
+        deployed_sha = _read_head_commit_sha(resolved)
+        stale_cached = {
+            "status": STATUS_NOT_UPDATED,
+            "updated": False,
+            "github_sha": "",
+            "deployed_sha": deployed_sha,
+            "running_sha": running_sha,
+            "detail": "GitHub origin/main SHA refreshing in background",
+            "last_checked": datetime.datetime.now(datetime.UTC).isoformat(),
+        }
+
+    if stale_cached is not None:
+        if start_bg:
+
+            def _bg_refresh() -> None:
+                global _REFRESH_IN_FLIGHT
+                try:
+                    _compute_server_code_status(repo_dir)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Background server code status refresh failed: %s", exc)
+                finally:
+                    with _LOCK:
+                        _REFRESH_IN_FLIGHT = False
+
+            threading.Thread(target=_bg_refresh, name="server-code-status", daemon=True).start()
+        return stale_cached
+
+    return _compute_server_code_status(repo_dir)
+
+
 def clear_cache_for_testing() -> None:
     """Clear cached state for deterministic unit testing."""
-    global _CACHED_STATUS, _LAST_CHECKED_MONOTONIC, _IN_MEMORY_RUNNING_SHA
+    global _CACHED_STATUS, _LAST_CHECKED_MONOTONIC, _IN_MEMORY_RUNNING_SHA, _REFRESH_IN_FLIGHT
     with _LOCK:
         _CACHED_STATUS = None
         _LAST_CHECKED_MONOTONIC = 0.0
         _IN_MEMORY_RUNNING_SHA = None
+        _REFRESH_IN_FLIGHT = False

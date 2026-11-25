@@ -175,16 +175,6 @@ export struct DlStatus {
     cov-range: string,
     cov-coverage: string,
     cov-rows: string,
-    provider-name: string,
-    provider-status: string,
-    provider-label: string,
-    provider-detail: string,
-    configure-visible: bool,
-    advanced-visible: bool,
-    advanced-open: bool,
-    env-visible: bool,
-    broker-caps: string,
-    broker-error: string,
 }
 
 export struct DlCalDay {
@@ -192,14 +182,6 @@ export struct DlCalDay {
     label: string,
     x: float,
     y: float,
-}
-
-export struct DlCredField {
-    key: string,
-    label: string,
-    secret: bool,
-    value: string,
-    revealed: bool,
 }
 
 export struct DlStock {
@@ -1272,144 +1254,6 @@ component CalendarPopup inherits Rectangle {
     }
 }
 
-component CredFieldRow inherits Rectangle {
-    in property <DlCredField> field;
-    callback changed(string);
-    callback reveal();
-    height: 46px;
-    VerticalLayout {
-        spacing: 2px;
-        Text {
-            text: root.field.label;
-            color: VayrenPalette.faint;
-            font-size: VayrenDesign.fs-label;
-            overflow: elide;
-        }
-        HorizontalLayout {
-            spacing: 4px;
-            Rectangle {
-                horizontal-stretch: 1;
-                LineEdit {
-                    text: root.field.value;
-                    input-type: root.field.secret && !root.field.revealed
-                        ? InputType.password : InputType.text;
-                    edited(v) => { root.changed(v); }
-                }
-            }
-            if root.field.secret: SmallButton {
-                label: root.field.revealed ? "\u{25d8}" : "\u{25d9}";
-                picked => { root.reveal(); }
-            }
-        }
-    }
-}
-
-component CredentialsModal inherits Rectangle {
-    in property <string> title;
-    in property <[DlCredField]> fields;
-    in property <bool> has-stored: false;
-    in property <string> status;
-    in property <bool> confirm: false;
-    in property <bool> test-running: false;
-    callback close();
-    callback field-changed(string, string);
-    callback reveal(string);
-    callback test();
-    callback save();
-    callback clear();
-    callback confirm-result(bool);
-
-    Rectangle {
-        width: 380px;
-        height: 40px + root.fields.length * 48px + 150px;
-        x: (root.width - self.width) / 2;
-        y: (root.height - self.height) / 3;
-        border-radius: VayrenDesign.radius-sm;
-        border-width: 1px;
-        border-color: VayrenPalette.hairline;
-        background: VayrenPalette.surface;
-        VerticalLayout {
-            spacing: 8px;
-            padding: 14px;
-            Text {
-                text: root.title;
-                color: VayrenPalette.text;
-                font-size: VayrenDesign.fs-small;
-                font-weight: 700;
-            }
-            for f in root.fields: CredFieldRow {
-                field: f;
-                changed(v) => { root.field-changed(f.key, v); }
-                reveal() => { root.reveal(f.key); }
-            }
-            SmallButton {
-                label: root.test-running ? "Testing…" : "Test Connection";
-                enabled: !root.test-running;
-                picked => { root.test(); }
-            }
-            Text {
-                text: root.status;
-                color: VayrenPalette.muted;
-                font-size: VayrenDesign.fs-label;
-                font-weight: 600;
-                wrap: word-wrap;
-            }
-            Rectangle { height: 4px; background: transparent; }
-            HorizontalLayout {
-                spacing: 6px;
-                if root.has-stored: SmallButton {
-                    label: "Clear Credentials";
-                    picked => { root.clear(); }
-                }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                SmallButton { label: "Cancel"; picked => { root.close(); } }
-                SmallButton {
-                    label: "Save & Connect";
-                    primary: true;
-                    picked => { root.save(); }
-                }
-            }
-        }
-    }
-    // Clear-confirmation sub-dialog (native; legacy used a message box).
-    if root.confirm: Rectangle {
-        width: 320px;
-        height: 140px;
-        x: (root.width - self.width) / 2;
-        y: (root.height - self.height) / 2;
-        border-radius: VayrenDesign.radius-sm;
-        border-width: 1px;
-        border-color: VayrenPalette.hairline;
-        background: VayrenPalette.surface;
-        VerticalLayout {
-            spacing: 8px;
-            padding: 14px;
-            Text {
-                text: "Remove saved credentials?";
-                color: VayrenPalette.text;
-                font-size: VayrenDesign.fs-small;
-                font-weight: 700;
-            }
-            Text {
-                text: "This will delete the locally stored provider credentials.";
-                color: VayrenPalette.muted;
-                font-size: VayrenDesign.fs-label;
-                wrap: word-wrap;
-            }
-            Rectangle { vertical-stretch: 1; background: transparent; }
-            HorizontalLayout {
-                spacing: 6px;
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                SmallButton { label: "Cancel"; picked => { root.confirm-result(false); } }
-                SmallButton {
-                    label: "Remove";
-                    picked => { root.confirm-result(true); }
-                }
-            }
-        }
-    }
-}
-
 component DownloadDock inherits Rectangle {
     in property <bool> busy: false;
     in property <int> interval-index: 0;
@@ -1425,19 +1269,12 @@ component DownloadDock inherits Rectangle {
     in property <string> to-display;
     in property <DlPlan> plan;
     in property <DlStatus> status;
-    in property <[string]> brokers;
-    in property <int> broker-index: 0;
     in property <[string]> log;
     in property <bool> log-expanded: false;
     in property <bool> cal-open: false;
     in property <string> cal-title;
     in property <[DlCalDay]> cal-days;
     in property <[string]> weekdays;
-    in property <bool> cred-open: false;
-    in property <[DlCredField]> cred-fields;
-    in property <bool> cred-has-stored: false;
-    in property <string> cred-status;
-    in property <bool> confirm-clear: false;
 
     callback close();
     callback interval-picked(string);
@@ -1457,18 +1294,8 @@ component DownloadDock inherits Rectangle {
     callback retry();
     callback view-coverage();
     callback error-details();
-    callback advanced();
     callback log-toggle();
     callback log-clear();
-    callback broker-picked(string);
-    callback open-creds();
-    callback close-creds();
-    callback field-changed(string, string);
-    callback reveal(string);
-    callback test();
-    callback save();
-    callback clear();
-    callback confirm-result(bool);
 
     background: VayrenPalette.bg;
     VerticalLayout {
@@ -1594,13 +1421,13 @@ component DownloadDock inherits Rectangle {
                         font-weight: 600;
                     }
                     DlField {
-                        caption: "FROM";
+                        caption: "FROM (display only)";
                         value: root.from-display;
                         enabled: !root.busy;
                         open() => { root.open-cal("from"); }
                     }
                     DlField {
-                        caption: "TO";
+                        caption: "TO (display only)";
                         value: root.to-display;
                         enabled: !root.busy;
                         open() => { root.open-cal("to"); }
@@ -1613,12 +1440,33 @@ component DownloadDock inherits Rectangle {
                             picked => { root.quick(cap); }
                         }
                     }
+                    Text {
+                        text: "Display-only. The engine derives coverage from candle databases.";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        wrap: word-wrap;
+                    }
                 }
 
                 DlSection { label: "Download Plan"; }
                 DlKVRow { caption: "Stocks"; value: root.plan.stocks; }
                 DlKVRow { caption: "Interval"; value: root.plan.interval; }
-                DlKVRow { caption: "Date Range"; value: root.plan.range; wrap: true; }
+                // Engine-derived coverage can be long; give it its own
+                // multi-line block so it cannot overlap the rows below.
+                VerticalLayout {
+                    spacing: 2px;
+                    Text {
+                        text: "Date Range (engine-derived)";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                    }
+                    Text {
+                        text: root.plan.range;
+                        color: VayrenPalette.text;
+                        font-size: VayrenDesign.fs-label;
+                        wrap: word-wrap;
+                    }
+                }
                 DlKVRow { caption: "Est. Trading Days"; value: root.plan.days; }
                 DlKVRow { caption: "Est. Data Rows"; value: root.plan.rows; }
                 if root.plan.error != "": Text {
@@ -1652,6 +1500,11 @@ component DownloadDock inherits Rectangle {
                 }
 
                 // Status cards (mode-driven)
+                if root.status.mode == "pending": VerticalLayout {
+                    spacing: 3px;
+                    DlSection { label: "Download Starting"; }
+                    Text { text: root.status.progress-note; color: VayrenPalette.accent; font-size: VayrenDesign.fs-label; font-weight: 600; wrap: word-wrap; }
+                }
                 if root.status.mode == "running": VerticalLayout {
                     spacing: 3px;
                     DlSection { label: "Download Status"; }
@@ -1718,54 +1571,6 @@ component DownloadDock inherits Rectangle {
                     DlKVRow { caption: "Rows"; value: root.status.cov-rows; wrap: true; }
                 }
 
-                // Provider Status card
-                VerticalLayout {
-                    spacing: 4px;
-                    DlSection { label: "Provider Status"; }
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Text { text: "Broker"; color: VayrenPalette.faint; font-size: VayrenDesign.fs-label; vertical-alignment: center; }
-                        ComboBox {
-                            model: root.brokers;
-                            horizontal-stretch: 1;
-                            selected(v) => { root.broker-picked(v); }
-                        }
-                    }
-                    if root.status.broker-caps != "": Text { text: root.status.broker-caps; color: VayrenPalette.faint; font-size: VayrenDesign.fs-label; wrap: word-wrap; }
-                    if root.status.broker-error != "": Text { text: root.status.broker-error; color: VayrenPalette.neg; font-size: VayrenDesign.fs-label; wrap: word-wrap; }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: root.status.provider-name; color: VayrenPalette.text; font-size: VayrenDesign.fs-label; font-weight: 600; }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        Text { text: root.status.provider-status; color: VayrenPalette.text; font-size: VayrenDesign.fs-label; font-weight: 600; }
-                    }
-                    Text { text: root.status.provider-label; color: VayrenPalette.faint; font-size: VayrenDesign.fs-label; wrap: word-wrap; }
-                    HorizontalLayout {
-                        spacing: 4px;
-                        if root.status.configure-visible: SmallButton {
-                            label: "Configure Credentials";
-                            picked => { root.open-creds(); }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        if root.status.advanced-visible: SmallButton {
-                            label: root.status.advanced-open ? "Advanced \u{25b4}" : "Advanced \u{25be}";
-                            picked => { root.advanced(); }
-                        }
-                    }
-                    if root.status.advanced-open: Text {
-                        text: root.status.provider-detail;
-                        color: VayrenPalette.muted;
-                        font-size: VayrenDesign.fs-label;
-                        wrap: word-wrap;
-                    }
-                    if root.status.env-visible: Text {
-                        text: "VAYREN reads credentials from the secure store or the VAYREN_ZERODHA_* environment fallback; set them, then restart.";
-                        color: VayrenPalette.faint;
-                        font-size: VayrenDesign.fs-label;
-                        wrap: word-wrap;
-                    }
-                }
-
                 // Engine log (collapsible)
                 VerticalLayout {
                     spacing: 2px;
@@ -1807,7 +1612,7 @@ component DownloadDock inherits Rectangle {
         }
     }
 
-    // Calendar + credential overlays (native popups)
+    // Calendar overlay (native popup)
     if root.cal-open: Rectangle {
         x: 0;
         y: 0;
@@ -1824,22 +1629,6 @@ component DownloadDock inherits Rectangle {
         prev() => { root.cal-prev(); }
         next() => { root.cal-next(); }
         pick(d) => { root.pick-day(d); }
-    }
-    if root.cred-open: CredentialsModal {
-        width: parent.width;
-        height: parent.height;
-        title: "Configure Provider Credentials";
-        fields: root.cred-fields;
-        has-stored: root.cred-has-stored;
-        status: root.cred-status;
-        confirm: root.confirm-clear;
-        close() => { root.close-creds(); }
-        field-changed(k, v) => { root.field-changed(k, v); }
-        reveal(k) => { root.reveal(k); }
-        test() => { root.test(); }
-        save() => { root.save(); }
-        clear() => { root.clear(); }
-        confirm-result(y) => { root.confirm-result(y); }
     }
 }
 
@@ -1930,19 +1719,12 @@ export component MarketScreen inherits Rectangle {
     in property <string> dl-to-display;
     in property <DlPlan> dl-plan;
     in property <DlStatus> dl-status;
-    in property <[string]> dl-brokers;
-    in property <int> dl-broker-index: 0;
     in property <[string]> dl-log;
     in property <bool> dl-log-expanded: false;
     in property <bool> dl-cal-open: false;
     in property <string> dl-cal-title;
     in property <[DlCalDay]> dl-cal-days;
     in property <[string]> dl-weekdays;
-    in property <bool> dl-cred-open: false;
-    in property <[DlCredField]> dl-cred-fields;
-    in property <bool> dl-cred-has-stored: false;
-    in property <string> dl-cred-status;
-    in property <bool> dl-confirm-clear: false;
 
     callback dl-toggle();
     callback dl-interval(string);
@@ -1962,18 +1744,8 @@ export component MarketScreen inherits Rectangle {
     callback dl-retry();
     callback dl-view-coverage();
     callback dl-error-details();
-    callback dl-advanced();
     callback dl-log-toggle();
     callback dl-log-clear();
-    callback dl-broker(string);
-    callback dl-open-creds();
-    callback dl-close-creds();
-    callback dl-cred-field(string, string);
-    callback dl-cred-reveal(string);
-    callback dl-cred-test();
-    callback dl-cred-save();
-    callback dl-cred-clear();
-    callback dl-cred-confirm(bool);
 
     // â”€â”€ reported interactions (screen -> Rust) â”€â”€
     callback panel-toggle();
@@ -3023,19 +2795,12 @@ export component MarketScreen inherits Rectangle {
                 to-display: root.dl-to-display;
                 plan: root.dl-plan;
                 status: root.dl-status;
-                brokers: root.dl-brokers;
-                broker-index: root.dl-broker-index;
                 log: root.dl-log;
                 log-expanded: root.dl-log-expanded;
                 cal-open: root.dl-cal-open;
                 cal-title: root.dl-cal-title;
                 cal-days: root.dl-cal-days;
                 weekdays: root.dl-weekdays;
-                cred-open: root.dl-cred-open;
-                cred-fields: root.dl-cred-fields;
-                cred-has-stored: root.dl-cred-has-stored;
-                cred-status: root.dl-cred-status;
-                confirm-clear: root.dl-confirm-clear;
                 interval-picked(i) => { root.dl-interval(i); }
                 toggle-symbol(s) => { root.dl-toggle-symbol(s); }
                 select-all() => { root.dl-select-all(); }
@@ -3053,18 +2818,8 @@ export component MarketScreen inherits Rectangle {
                 retry() => { root.dl-retry(); }
                 view-coverage() => { root.dl-view-coverage(); }
                 error-details() => { root.dl-error-details(); }
-                advanced() => { root.dl-advanced(); }
                 log-toggle() => { root.dl-log-toggle(); }
                 log-clear() => { root.dl-log-clear(); }
-                broker-picked(v) => { root.dl-broker(v); }
-                open-creds() => { root.dl-open-creds(); }
-                close-creds() => { root.dl-close-creds(); }
-                field-changed(k, v) => { root.dl-cred-field(k, v); }
-                reveal(k) => { root.dl-cred-reveal(k); }
-                test() => { root.dl-cred-test(); }
-                save() => { root.dl-cred-save(); }
-                clear() => { root.dl-cred-clear(); }
-                confirm-result(y) => { root.dl-cred-confirm(y); }
             }
         }
     }
@@ -3206,3 +2961,5 @@ export component MarketScreen inherits Rectangle {
         }
     }
 }
+
+// phase6 benchmark probe

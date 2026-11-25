@@ -759,6 +759,13 @@ pub struct LiveState {
     pub test_clock: Option<String>,
     /// Server code synchronization status ("SERVER CODE: UPDATED" or "SERVER CODE: NOT UPDATED").
     pub server_code_status: String,
+    /// True when snapshot freshness expired or the gateway sent a stale fallback.
+    pub snapshot_stale: bool,
+    /// Explanation surfaced while last-known data is preserved with STALE branding.
+    pub snapshot_stale_reason: String,
+    /// Commands transmitted before a link drop whose server outcome is UNKNOWN
+    /// and must be reconciled by an authoritative snapshot before retry.
+    pub unreconciled_commands: Vec<String>,
 }
 
 impl Default for LiveState {
@@ -862,6 +869,9 @@ impl Default for LiveState {
             confirm_dialog_open: false,
             test_clock: None,
             server_code_status: "SERVER CODE: NOT UPDATED".to_string(),
+            snapshot_stale: false,
+            snapshot_stale_reason: String::new(),
+            unreconciled_commands: Vec::new(),
         }
     }
 }
@@ -1343,6 +1353,8 @@ impl LiveState {
     pub fn can_start(&self) -> bool {
         matches!(self.session, SessionStatus::Stopped | SessionStatus::Error)
             && self.bridge_wired
+            && !self.snapshot_stale
+            && self.unreconciled_commands.is_empty()
             && self.start_blockers().is_empty()
             && self.pending_action.is_none()
     }
@@ -1354,6 +1366,8 @@ impl LiveState {
     pub fn start_clickable(&self) -> bool {
         matches!(self.session, SessionStatus::Stopped | SessionStatus::Error)
             && self.bridge_wired
+            && !self.snapshot_stale
+            && self.unreconciled_commands.is_empty()
             && self.pending_action.is_none()
     }
 
@@ -2418,7 +2432,7 @@ impl LiveState {
                 losses: p.get("losses").and_then(|x| x.as_i64()),
             };
         }
-        if let Some(s) = v.get("strategy") {
+        if let Some(s) = v.get("strategy").filter(|val| !val.is_null()) {
             let params = s
                 .get("params")
                 .and_then(|p| p.as_object())
@@ -2976,8 +2990,9 @@ fn money_v(v: &serde_json::Value, key: &str) -> String {
 fn snapshot_clock(state: &LiveState) -> String {
     let stamp = state.snapshot_time.trim();
     let time_part = stamp.split('T').nth(1).unwrap_or("");
-    if time_part.len() >= 8 {
-        time_part[..8].to_string()
+    let prefix: String = time_part.chars().take(8).collect();
+    if prefix.chars().count() == 8 {
+        prefix
     } else {
         String::new()
     }
@@ -3938,12 +3953,15 @@ fn ist_components(iso: &str) -> Option<(i64, u32, u32, u32, u32, u32)> {
         (&trimmed[..trimmed.len() - 1], 0i64)
     } else if trimmed.len() >= 6 {
         let sign_pos = trimmed.len() - 6;
-        let c = trimmed.as_bytes()[sign_pos];
+        let bytes = trimmed.as_bytes();
+        let c = bytes[sign_pos];
         if (c == b'+' || c == b'-')
-            && trimmed[sign_pos + 1..].contains(':')
-            && trimmed[sign_pos + 1..sign_pos + 3]
-                .chars()
-                .all(|ch| ch.is_ascii_digit())
+            && bytes[sign_pos + 3] == b':'
+            && bytes[sign_pos + 1].is_ascii_digit()
+            && bytes[sign_pos + 2].is_ascii_digit()
+            && bytes[sign_pos + 4].is_ascii_digit()
+            && bytes[sign_pos + 5].is_ascii_digit()
+            && trimmed.is_char_boundary(sign_pos)
         {
             let hh: i64 = trimmed[sign_pos + 1..sign_pos + 3].parse().ok()?;
             let mm: i64 = trimmed[sign_pos + 4..sign_pos + 6].parse().ok()?;
@@ -4463,7 +4481,36 @@ pub fn derive_exchange_label(symbol: &str, state: &LiveState) -> String {
     format!("{} {}", ex, instrument)
 }
 
+/// Lightweight clock-only projection for the 1s UI timer tick — avoids
+/// rebuilding watchlist/order/event models when only wall time advanced.
+pub fn project_clock_tick(state: &LiveState) -> (String, Option<(String, String)>) {
+    let clock = state.test_clock.clone().unwrap_or_else(current_ist_clock);
+    let running = if matches!(state.session, SessionStatus::Running) {
+        let wall_now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        state
+            .elapsed_secs_since_start(wall_now_secs)
+            .map(|elapsed| (format_elapsed(elapsed), format_hms(elapsed)))
+    } else {
+        None
+    };
+    (clock, running)
+}
+
 pub fn project(state: &LiveState) -> LiveView {
+    let gw_status_upper = state.gateway.status.trim().to_uppercase();
+    let link_unverified = state.host_mode
+        && (matches!(
+            gw_status_upper.as_str(),
+            "AUTHENTICATING" | "RECONNECTING" | "STALE" | "OFFLINE" | "ERROR"
+        ) || (gw_status_upper == "CONNECTING"
+            && state.snapshot_time.trim().is_empty()
+            && state.start_epoch_secs.is_none()));
+    let stale_or_unverified = state.snapshot_stale || link_unverified;
+    let has_unreconciled = !state.unreconciled_commands.is_empty();
+
     // ── command bar ──
     // Card anatomy matches the terminal reference: small label (in Slint),
     // bold value, honest sub-line. The value never carries a prefix — the
@@ -4503,7 +4550,11 @@ pub fn project(state: &LiveState) -> LiveView {
         format!(" · ACC: {}", state.broker.account_id.trim())
     };
     let (conn_label, conn_tone) = if is_really_connected {
-        (format!("● Connected{}", account_suffix), 1)
+        if state.host_mode && stale_or_unverified {
+            (format!("○ Connected (STALE){}", account_suffix), 2)
+        } else {
+            (format!("● Connected{}", account_suffix), 1)
+        }
     } else {
         let r = state.broker.reason.trim();
         let r_lower = r.to_lowercase();
@@ -4582,7 +4633,31 @@ pub fn project(state: &LiveState) -> LiveView {
         Some(n) if n.is_empty() => (String::new(), 0),
         Some(n) => (n.to_string(), 2),
         None => {
-            if state.session == SessionStatus::Running
+            if has_unreconciled {
+                (
+                    format!(
+                        "⚠ Command outcome UNKNOWN ({}) — awaiting authoritative snapshot reconciliation",
+                        state.unreconciled_commands.join(", ")
+                    ),
+                    3,
+                )
+            } else if stale_or_unverified {
+                let reason = if !state.snapshot_stale_reason.trim().is_empty() {
+                    state.snapshot_stale_reason.trim()
+                } else if !state.gateway.last_error.trim().is_empty() {
+                    state.gateway.last_error.trim()
+                } else if gw_status_upper.is_empty() {
+                    "snapshot stale"
+                } else {
+                    gw_status_upper.as_str()
+                };
+                (
+                    format!(
+                        "⚠ STALE SNAPSHOT ({reason}) — last known data shown; controls fail-closed"
+                    ),
+                    2,
+                )
+            } else if state.session == SessionStatus::Running
                 && (state.websocket.status == "MARKET CLOSED"
                     || state.market_data.status == "MARKET CLOSED"
                     || state.websocket.status == "HOLIDAY"
@@ -4826,17 +4901,37 @@ pub fn project(state: &LiveState) -> LiveView {
     };
 
     // ── session setup ──
+    let (session_label, session_tone) = if state.host_mode && stale_or_unverified {
+        if state.snapshot_time.trim().is_empty()
+            && matches!(
+                gw_status_upper.as_str(),
+                "CONNECTING" | "AUTHENTICATING" | "OFFLINE" | "ERROR"
+            )
+        {
+            ("○ UNKNOWN", 2)
+        } else {
+            match state.session {
+                SessionStatus::Running => ("● STALE (LAST: RUNNING)", 2),
+                SessionStatus::Starting | SessionStatus::Stopping => ("● STALE (TRANSITIONING)", 2),
+                SessionStatus::Stopped => ("○ STALE (STOPPED)", 2),
+                SessionStatus::Halted => ("■ STALE (HALTED)", 3),
+                SessionStatus::Error => ("✕ STALE (ERROR)", 3),
+            }
+        }
+    } else {
+        (state.session.label(), state.session.badge())
+    };
     let setup = SetupView {
         quantity: grouped(state.quantity),
-        session_label: state.session.label().into(),
-        session_tone: state.session.badge(),
+        session_label: session_label.into(),
+        session_tone,
         can_start: state.can_start(),
         start_clickable: state.start_clickable(),
         can_stop: state.can_stop(),
         needs_live_confirm: state.mode == ExecMode::Live
             && !state.live_confirmed
             && state.venue_gates_ready(),
-        confirmed_live: state.live_confirmed,
+        confirmed_live: state.live_confirmed && !stale_or_unverified,
         confirm_dialog_open: state.confirm_dialog_open,
         blockers: LiveState::deduplicate_blockers(&blockers, &state.status_reason),
         venue_blockers: blockers
@@ -5198,7 +5293,18 @@ pub fn project(state: &LiveState) -> LiveView {
     // configured-but-stopped session read as if it were executing. The only
     // authority for "is it running" is the backend session fact, and a kill
     // switch outranks even that.
-    let (active_strat_status, active_strat_status_tone) = if state.kill_halted {
+    let (active_strat_status, active_strat_status_tone) = if state.host_mode && stale_or_unverified
+    {
+        if state.snapshot_time.trim().is_empty() {
+            ("○ UNKNOWN", 2)
+        } else if matches!(state.session, SessionStatus::Running) {
+            ("● STALE (LAST: RUNNING)", 2)
+        } else if state.kill_halted {
+            ("HALTED (STALE)", 3)
+        } else {
+            ("○ STALE", 2)
+        }
+    } else if state.kill_halted {
         ("HALTED", 3)
     } else if state.pending_action.as_deref() == Some("start") {
         ("STARTING", 2)
@@ -5295,7 +5401,7 @@ pub fn project(state: &LiveState) -> LiveView {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
         .unwrap_or(0.0);
-    let engine_running = matches!(state.session, SessionStatus::Running);
+    let engine_running = matches!(state.session, SessionStatus::Running) && !stale_or_unverified;
     let active_strat = ActiveStrategyView {
         name: strategy_label.clone(),
         status: active_strat_status.into(),
@@ -5751,18 +5857,21 @@ pub fn project(state: &LiveState) -> LiveView {
                 r.symbol.replace("NSE:", "").replace("-EQ", "")
             };
 
-            let pos_match = state
-                .positions
-                .iter()
-                .find(|p| p.symbol.contains(&sym_disp) || sym_disp.contains(&p.symbol));
+            fn norm_sym(s: &str) -> &str {
+                s.trim()
+                    .trim_start_matches("NSE:")
+                    .trim_start_matches("BSE:")
+                    .trim_end_matches("-EQ")
+            }
+            let sym_eq = |candidate: &str| {
+                !sym_disp.trim().is_empty()
+                    && norm_sym(candidate).eq_ignore_ascii_case(norm_sym(&sym_disp))
+            };
+            let pos_match = state.positions.iter().find(|p| sym_eq(&p.symbol));
             // The MOST RECENT order for this symbol, not the first match: the
             // pipeline must describe the order the operator is watching, and a
             // stale earlier order would render a lifecycle that already ended.
-            let ord_match = state
-                .orders
-                .iter()
-                .rev()
-                .find(|o| o.symbol.contains(&sym_disp) || sym_disp.contains(&o.symbol));
+            let ord_match = state.orders.iter().rev().find(|o| sym_eq(&o.symbol));
 
             // STEP 12/13: the pipeline and the failure reason both come from the
             // engine's own record. `history` is empty for an order the backend
@@ -5981,13 +6090,21 @@ pub fn project(state: &LiveState) -> LiveView {
             state.reconciliation.status.clone()
         },
         clock,
-        snapshot_time: snap_time,
+        snapshot_time: if state.host_mode
+            && stale_or_unverified
+            && !snap_time.is_empty()
+            && snap_time != "NOT AVAILABLE"
+        {
+            format!("{snap_time} (STALE)")
+        } else {
+            snap_time
+        },
         server_code_status: state.server_code_status.clone(),
     };
 
     // ── GatewayView ──
-    let gw_status_upper = state.gateway.status.trim().to_uppercase();
     let (gw_status, gw_tone) = match gw_status_upper.as_str() {
+        "CONNECTED" if state.snapshot_stale => ("STALE".to_string(), 2),
         "CONNECTED" => ("CONNECTED".to_string(), 1),
         "CONNECTING" | "AUTHENTICATING" | "RECONNECTING" => (
             if gw_status_upper.is_empty() {
@@ -6001,7 +6118,9 @@ pub fn project(state: &LiveState) -> LiveView {
         "OFFLINE" => ("OFFLINE".to_string(), 3),
         "ERROR" => ("ERROR".to_string(), 3),
         _ => {
-            if state.gateway.connected {
+            if state.snapshot_stale {
+                ("STALE".to_string(), 2)
+            } else if state.gateway.connected {
                 ("CONNECTED".to_string(), 1)
             } else {
                 ("DISCONNECTED".to_string(), 3)
@@ -6019,6 +6138,10 @@ pub fn project(state: &LiveState) -> LiveView {
     };
     let gw_conn_state = if !state.gateway.last_error.trim().is_empty() {
         state.gateway.last_error.trim().to_string()
+    } else if state.snapshot_stale && !state.snapshot_stale_reason.trim().is_empty() {
+        format!("STALE — {}", state.snapshot_stale_reason.trim())
+    } else if state.snapshot_stale {
+        "STALE".to_string()
     } else if state.gateway.connected {
         "CONNECTED".to_string()
     } else if !gw_status_upper.is_empty() {
@@ -9736,5 +9859,72 @@ mod tests {
             st.watchlist_rows[0].tick_trigger, 0,
             "Unchanged price must produce 0 tick_trigger"
         );
+    }
+
+    #[test]
+    fn stale_snapshot_marks_status_stale_fails_controls_closed_and_preserves_data() {
+        let mut st = LiveState::default();
+        st.host_mode = true;
+        st.bridge_wired = true;
+        st.remote_commands_allowed = true;
+        st.mode = ExecMode::Live;
+        st.live_confirmed = true;
+        st.session = SessionStatus::Running;
+        st.gateway.connected = true;
+        st.gateway.status = "CONNECTED".to_string();
+        st.broker.connected = Some(true);
+        st.broker.name = "FYERS".to_string();
+        st.broker.status = "CONNECTED".to_string();
+        st.snapshot_time = "2026-11-25T10:00:00Z".to_string();
+        st.positions.push(PositionRow {
+            symbol: "NSE:KAYNES".into(),
+            side: "SELL".into(),
+            quantity: "5".into(),
+            entry: "4500.0".into(),
+            current: "4480.0".into(),
+            pnl: "+100.00".into(),
+            status: "OPEN".into(),
+            pnl_pct: Some(0.44),
+        });
+        let fresh = project(&st);
+        assert!(fresh.active_strat.engine_running);
+        assert_eq!(fresh.setup.session_label, "● RUNNING");
+        assert!(fresh.setup.confirmed_live);
+        assert_eq!(fresh.gateway.status, "CONNECTED");
+
+        st.snapshot_stale = true;
+        st.snapshot_stale_reason = "heartbeat aged 25s".to_string();
+        let stale_view = project(&st);
+        assert_eq!(stale_view.positions.len(), 1, "last-known data preserved");
+        assert!(!stale_view.active_strat.engine_running);
+        assert!(stale_view.active_strat.status.contains("STALE"));
+        assert!(stale_view.setup.session_label.contains("STALE"));
+        assert!(!stale_view.setup.confirmed_live);
+        assert!(!stale_view.setup.can_start);
+        assert_eq!(stale_view.gateway.status, "STALE");
+        assert_eq!(stale_view.gateway.tone, 2);
+        assert!(stale_view.footer.snapshot_time.ends_with("(STALE)"));
+        assert!(stale_view.bar.conn_label.contains("STALE"));
+        assert!(stale_view.bar.note.contains("STALE SNAPSHOT"));
+    }
+
+    #[test]
+    fn unreconciled_commands_block_new_starts_until_cleared() {
+        let mut st = LiveState::default();
+        st.host_mode = true;
+        st.bridge_wired = true;
+        st.remote_commands_allowed = true;
+        st.session = SessionStatus::Stopped;
+        st.gateway.connected = true;
+        st.gateway.status = "CONNECTED".to_string();
+        st.unreconciled_commands = vec!["start".to_string()];
+
+        assert!(!st.can_start());
+        assert!(!st.start_clickable());
+        let view = project(&st);
+        assert!(view.bar.note.contains("UNKNOWN"));
+
+        st.unreconciled_commands.clear();
+        assert!(st.start_clickable());
     }
 }

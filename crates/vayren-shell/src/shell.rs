@@ -19,10 +19,10 @@ use crate::viewport::ChartViewportZoom;
 pub use crate::ShellScreen;
 use crate::{
     ui_settings, AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView,
-    DlCalDay, DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric,
-    LabHeader, LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow,
-    LabTradeMetric, LabTradeRow, LiveActiveStrategy, LiveBar, LiveEligibility, LiveEligibilityRow,
-    LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
+    DlCalDay, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
+    LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
+    LabTradeRow, LiveActiveStrategy, LiveBar, LiveEligibility, LiveEligibilityRow, LiveEventRow,
+    LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
     LivePipelineStep, LivePosition, LiveRemoteGateway, LiveSelectedStock, LiveSetup, LiveStat,
     LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
     MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketTick, MarketTimeframe,
@@ -33,7 +33,6 @@ use crate::{
     ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
 };
 use slint::ComponentHandle;
-#[cfg(test)]
 use slint::Model;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -559,24 +558,7 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
         cov_range: dl_status.cov_range.clone().into(),
         cov_coverage: dl_status.cov_coverage.clone().into(),
         cov_rows: dl_status.cov_rows.clone().into(),
-        provider_name: dl_status.provider_name.clone().into(),
-        provider_status: dl_status.provider_status.clone().into(),
-        provider_label: dl_status.provider_label.clone().into(),
-        provider_detail: dl_status.provider_detail.clone().into(),
-        configure_visible: dl_status.configure_visible,
-        advanced_visible: dl_status.advanced_visible,
-        advanced_open: dl_status.advanced_open,
-        env_visible: dl_status.env_visible,
-        broker_caps: dl_status.broker_caps.clone().into(),
-        broker_error: dl_status.broker_error.clone().into(),
     });
-    ui.set_market_dl_brokers(market_model(
-        dl.brokers
-            .iter()
-            .map(|s| slint::SharedString::from(s.clone()))
-            .collect(),
-    ));
-    ui.set_market_dl_broker_index(dl.broker_index as i32);
     ui.set_market_dl_log(market_model(
         dl.log
             .iter()
@@ -603,22 +585,6 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
             .map(|s| slint::SharedString::from(s.clone()))
             .collect(),
     ));
-    ui.set_market_dl_cred_open(dl.cred_open);
-    ui.set_market_dl_cred_fields(market_model(
-        dl.cred_fields
-            .iter()
-            .map(|f| DlCredField {
-                key: f.key.clone().into(),
-                label: f.label.clone().into(),
-                secret: f.secret,
-                value: f.value.clone().into(),
-                revealed: f.revealed,
-            })
-            .collect(),
-    ));
-    ui.set_market_dl_cred_has_stored(dl.cred_has_stored);
-    ui.set_market_dl_cred_status(dl.cred_status.clone().into());
-    ui.set_market_dl_confirm_clear(dl.confirm_clear);
 }
 
 /// Wire the Market chart interactions: Slint reports, Rust mutates centrally,
@@ -765,9 +731,26 @@ pub fn wire_market(
     ui: &AppWindow,
     state: Rc<RefCell<market::MarketState>>,
     fetch: Rc<dyn Fn(Option<String>, Option<String>)>,
+    dispatch_download: Rc<dyn Fn(String)>,
 ) {
     fn refresh(ui: &AppWindow, state: &Rc<RefCell<market::MarketState>>) {
         apply_market(ui, &state.borrow());
+    }
+    /// Forward only Historical-Download wires to the backend; all other
+    /// market wires stay queued for their existing host paths.
+    fn flush_download_wires(
+        state: &Rc<RefCell<market::MarketState>>,
+        dispatch: &Rc<dyn Fn(String)>,
+    ) {
+        let (download, keep): (Vec<String>, Vec<String>) = state
+            .borrow_mut()
+            .pending_actions
+            .drain(..)
+            .partition(|wire| wire.starts_with("dl:"));
+        state.borrow_mut().pending_actions = keep;
+        for wire in download {
+            dispatch(wire);
+        }
     }
     /// Crosshair-only refresh: 9 scalar props, zero model rebuilds.
     fn refresh_hover(ui: &AppWindow, state: &Rc<RefCell<market::MarketState>>) {
@@ -1137,14 +1120,17 @@ pub fn wire_market(
             refresh(&ui, &strong);
         });
     }
-    // Download console: local optimistic apply; backend wires stay queued.
+    // Download console: optimistic local apply, then forward only the
+    // backend-owned `dl:*` wires to the composition service.
     macro_rules! dl_act {
         ($cb:ident, $action:expr) => {{
             let strong = state.clone();
             let weak = ui.as_weak();
+            let dispatch = dispatch_download.clone();
             ui.$cb(move || {
                 let Some(ui) = weak.upgrade() else { return };
                 strong.borrow_mut().interact_download($action);
+                flush_download_wires(&strong, &dispatch);
                 refresh(&ui, &strong);
             });
         }};
@@ -1153,9 +1139,11 @@ pub fn wire_market(
         ($cb:ident, $make:expr) => {{
             let strong = state.clone();
             let weak = ui.as_weak();
+            let dispatch = dispatch_download.clone();
             ui.$cb(move |v: slint::SharedString| {
                 let Some(ui) = weak.upgrade() else { return };
                 strong.borrow_mut().interact_download($make(v.to_string()));
+                flush_download_wires(&strong, &dispatch);
                 refresh(&ui, &strong);
             });
         }};
@@ -1191,28 +1179,10 @@ pub fn wire_market(
         mdownload::DownloadAction::ToggleErrorDetails
     );
     dl_act!(
-        on_market_dl_advanced,
-        mdownload::DownloadAction::ToggleAdvanced
-    );
-    dl_act!(
         on_market_dl_log_toggle,
         mdownload::DownloadAction::ToggleLog
     );
     dl_act!(on_market_dl_log_clear, mdownload::DownloadAction::ClearLog);
-    dl_act!(
-        on_market_dl_open_creds,
-        mdownload::DownloadAction::OpenCreds
-    );
-    dl_act!(
-        on_market_dl_close_creds,
-        mdownload::DownloadAction::CloseCreds
-    );
-    dl_act!(on_market_dl_cred_test, mdownload::DownloadAction::CredTest);
-    dl_act!(on_market_dl_cred_save, mdownload::DownloadAction::CredSave);
-    dl_act!(
-        on_market_dl_cred_clear,
-        mdownload::DownloadAction::CredClear
-    );
     dl_str!(on_market_dl_interval, mdownload::DownloadAction::Interval);
     dl_str!(
         on_market_dl_toggle_symbol,
@@ -1224,44 +1194,16 @@ pub fn wire_market(
     );
     dl_str!(on_market_dl_open_cal, mdownload::DownloadAction::OpenCal);
     dl_str!(on_market_dl_quick, mdownload::DownloadAction::QuickRange);
-    dl_str!(on_market_dl_broker, mdownload::DownloadAction::Broker);
-    dl_str!(
-        on_market_dl_cred_reveal,
-        mdownload::DownloadAction::CredReveal
-    );
     {
         let strong = state.clone();
         let weak = ui.as_weak();
+        let dispatch = dispatch_download.clone();
         ui.on_market_dl_pick_day(move |d: i32| {
             let Some(ui) = weak.upgrade() else { return };
             strong
                 .borrow_mut()
                 .interact_download(mdownload::DownloadAction::PickDay(d));
-            refresh(&ui, &strong);
-        });
-    }
-    {
-        let strong = state.clone();
-        let weak = ui.as_weak();
-        ui.on_market_dl_cred_confirm(move |yes: bool| {
-            let Some(ui) = weak.upgrade() else { return };
-            strong
-                .borrow_mut()
-                .interact_download(mdownload::DownloadAction::CredConfirmClear(yes));
-            refresh(&ui, &strong);
-        });
-    }
-    {
-        let strong = state.clone();
-        let weak = ui.as_weak();
-        ui.on_market_dl_cred_field(move |k: slint::SharedString, v: slint::SharedString| {
-            let Some(ui) = weak.upgrade() else { return };
-            strong
-                .borrow_mut()
-                .interact_download(mdownload::DownloadAction::CredField(
-                    k.to_string(),
-                    v.to_string(),
-                ));
+            flush_download_wires(&strong, &dispatch);
             refresh(&ui, &strong);
         });
     }
@@ -3377,37 +3319,211 @@ pub fn demo_portfolio_configured() -> PortfolioState {
 /// Project the LIVE view-model onto the Slint workstation. Every rendered
 /// value comes from `LiveState` facts (gates, session, blotters) — the
 /// screen never infers connection, readiness or run state.
+fn set_if_changed<T: PartialEq>(current: T, next: T, setter: impl FnOnce(T)) {
+    if current != next {
+        setter(next);
+    }
+}
+
+fn model_items_equal<T: PartialEq>(a: &slint::ModelRc<T>, b: &slint::ModelRc<T>) -> bool {
+    let count = a.row_count();
+    if count != b.row_count() {
+        return false;
+    }
+    (0..count).all(|i| match (a.row_data(i), b.row_data(i)) {
+        (Some(x), Some(y)) => x == y,
+        (None, None) => true,
+        _ => false,
+    })
+}
+
+fn sync_vec_model_with<T: Clone + 'static>(
+    current: slint::ModelRc<T>,
+    setter: impl FnOnce(slint::ModelRc<T>),
+    next: Vec<T>,
+    eq: impl Fn(&T, &T) -> bool,
+) {
+    if let Some(existing) = current.as_any().downcast_ref::<slint::VecModel<T>>() {
+        let cur_len = existing.row_count();
+        let next_len = next.len();
+        let common = cur_len.min(next_len);
+        if cur_len == next_len
+            && (0..common).all(|i| {
+                existing
+                    .row_data(i)
+                    .as_ref()
+                    .is_some_and(|cur| eq(cur, &next[i]))
+            })
+        {
+            return;
+        }
+        for i in (next_len..cur_len).rev() {
+            existing.remove(i);
+        }
+        for (i, item) in next.iter().take(common).enumerate() {
+            let same = existing
+                .row_data(i)
+                .as_ref()
+                .is_some_and(|cur| eq(cur, item));
+            if !same {
+                existing.set_row_data(i, item.clone());
+            }
+        }
+        for item in next.into_iter().skip(common) {
+            existing.push(item);
+        }
+        return;
+    }
+    setter(Rc::new(slint::VecModel::from(next)).into());
+}
+
+fn sync_vec_model<T: Clone + PartialEq + 'static>(
+    current: slint::ModelRc<T>,
+    setter: impl FnOnce(slint::ModelRc<T>),
+    next: Vec<T>,
+) {
+    sync_vec_model_with(current, setter, next, |a, b| a == b);
+}
+
+fn live_setup_eq(a: &LiveSetup, b: &LiveSetup) -> bool {
+    a.quantity == b.quantity
+        && a.session_label == b.session_label
+        && a.session_tone == b.session_tone
+        && a.can_start == b.can_start
+        && a.start_clickable == b.start_clickable
+        && a.can_stop == b.can_stop
+        && a.needs_live_confirm == b.needs_live_confirm
+        && a.confirmed_live == b.confirmed_live
+        && a.confirm_dialog_open == b.confirm_dialog_open
+        && a.symbol_total == b.symbol_total
+        && a.universe_exchange == b.universe_exchange
+        && a.pending_start == b.pending_start
+        && a.pending_stop == b.pending_stop
+        && a.lifecycle_stage == b.lifecycle_stage
+        && a.lifecycle_detail == b.lifecycle_detail
+        && a.lifecycle_done == b.lifecycle_done
+        && a.lifecycle_total == b.lifecycle_total
+        && model_items_equal(&a.stock_universe, &b.stock_universe)
+}
+
+fn live_order_eq(a: &LiveOrder, b: &LiveOrder) -> bool {
+    a.order_id == b.order_id
+        && a.strategy == b.strategy
+        && a.symbol == b.symbol
+        && a.side == b.side
+        && a.side_tone == b.side_tone
+        && a.qty == b.qty
+        && a.order_type == b.order_type
+        && a.price == b.price
+        && a.status == b.status
+        && a.time == b.time
+        && a.broker == b.broker
+        && a.status_tone == b.status_tone
+        && a.reason == b.reason
+        && a.plain_status == b.plain_status
+        && a.plain_detail == b.plain_detail
+        && a.bucket == b.bucket
+        && a.record_time == b.record_time
+        && a.filled_qty == b.filled_qty
+        && a.remaining_qty == b.remaining_qty
+        && a.broker_order_id == b.broker_order_id
+        && a.limit_price == b.limit_price
+        && a.intent_id == b.intent_id
+        && a.session_date == b.session_date
+        && model_items_equal(&a.timeline, &b.timeline)
+        && model_items_equal(&a.details, &b.details)
+}
+
+fn live_selected_stock_eq(a: &LiveSelectedStock, b: &LiveSelectedStock) -> bool {
+    a.symbol == b.symbol
+        && a.ltp == b.ltp
+        && a.change == b.change
+        && a.change_tone == b.change_tone
+        && a.ref_high == b.ref_high
+        && a.ref_low == b.ref_low
+        && a.break_low == b.break_low
+        && a.entry_price == b.entry_price
+        && a.stop_price == b.stop_price
+        && a.risk_share == b.risk_share
+        && a.calculated_qty == b.calculated_qty
+        && a.planned_risk == b.planned_risk
+        && a.risk_util == b.risk_util
+        && a.signal == b.signal
+        && a.order == b.order
+        && a.current_position == b.current_position
+        && a.avg_price == b.avg_price
+        && a.qty == b.qty
+        && a.unrealized_pnl == b.unrealized_pnl
+        && a.realized_pnl == b.realized_pnl
+        && a.recent_orders == b.recent_orders
+        && a.risk_validated == b.risk_validated
+        && a.risk_banner_text == b.risk_banner_text
+        && a.order_reason == b.order_reason
+        && a.current_open_risk == b.current_open_risk
+        && a.pipeline_stage == b.pipeline_stage
+        && a.broker_capital == b.broker_capital
+        && a.effective_capital == b.effective_capital
+        && a.max_allowed_risk == b.max_allowed_risk
+        && a.capital_source == b.capital_source
+        && model_items_equal(&a.pipeline, &b.pipeline)
+}
+
+/// Fast 1-second timer tick: updates only wall-clock and running duration so
+/// idle ticks never rebuild watchlist/orders/events VecModels or disturb hover/scroll.
+pub fn apply_live_clock_tick(ui: &AppWindow, state: &LiveState) {
+    let (clock, running) = live::project_clock_tick(state);
+    let mut footer = ui.get_live_footer();
+    if footer.clock.as_str() != clock {
+        footer.clock = clock.into();
+        ui.set_live_footer(footer);
+    }
+    if let Some((duration, engine_clock)) = running {
+        let mut strat = ui.get_live_active_strat();
+        if strat.duration.as_str() != duration || strat.engine_clock.as_str() != engine_clock {
+            strat.duration = duration.into();
+            strat.engine_clock = engine_clock.into();
+            ui.set_live_active_strat(strat);
+        }
+    }
+}
+
 pub fn apply_live(ui: &AppWindow, state: &LiveState) {
     let view = live::project(state);
-    ui.set_live_bar(LiveBar {
-        mode: view.bar.mode,
-        broker_label: view.bar.broker_label.into(),
-        broker_tone: view.bar.broker_tone,
-        conn_label: view.bar.conn_label.into(),
-        conn_tone: view.bar.conn_tone,
-        strategy_label: view.bar.strategy_label.into(),
-        strategy_tone: view.bar.strategy_tone,
-        strategy_sub: view.bar.strategy_sub.into(),
-        risk_label: view.bar.risk_label.into(),
-        risk_tone: view.bar.risk_tone,
-        risk_sub: view.bar.risk_sub.into(),
-        recon_label: view.bar.recon_label.into(),
-        recon_tone: view.bar.recon_tone,
-        recon_sub: view.bar.recon_sub.into(),
-        exec_label: view.bar.exec_label.into(),
-        exec_tone: view.bar.exec_tone,
-        inspector_open: view.bar.inspector_open,
-        note: view.bar.note.into(),
-        note_tone: view.bar.note_tone,
-        capital_broker_name: view.bar.capital_broker_name.into(),
-        capital_value: view.bar.capital_value.into(),
-        capital_sub: view.bar.capital_sub.into(),
-        capital_status: view.bar.capital_status.into(),
-        capital_tone: view.bar.capital_tone,
-        capital_last_updated: view.bar.capital_last_updated.into(),
+    set_if_changed(
+        ui.get_live_bar(),
+        LiveBar {
+            mode: view.bar.mode,
+            broker_label: view.bar.broker_label.into(),
+            broker_tone: view.bar.broker_tone,
+            conn_label: view.bar.conn_label.into(),
+            conn_tone: view.bar.conn_tone,
+            strategy_label: view.bar.strategy_label.into(),
+            strategy_tone: view.bar.strategy_tone,
+            strategy_sub: view.bar.strategy_sub.into(),
+            risk_label: view.bar.risk_label.into(),
+            risk_tone: view.bar.risk_tone,
+            risk_sub: view.bar.risk_sub.into(),
+            recon_label: view.bar.recon_label.into(),
+            recon_tone: view.bar.recon_tone,
+            recon_sub: view.bar.recon_sub.into(),
+            exec_label: view.bar.exec_label.into(),
+            exec_tone: view.bar.exec_tone,
+            inspector_open: view.bar.inspector_open,
+            note: view.bar.note.into(),
+            note_tone: view.bar.note_tone,
+            capital_broker_name: view.bar.capital_broker_name.into(),
+            capital_value: view.bar.capital_value.into(),
+            capital_sub: view.bar.capital_sub.into(),
+            capital_status: view.bar.capital_status.into(),
+            capital_tone: view.bar.capital_tone,
+            capital_last_updated: view.bar.capital_last_updated.into(),
+        },
+        |v| ui.set_live_bar(v),
+    );
+    set_if_changed(ui.get_live_inspector_open(), view.bar.inspector_open, |v| {
+        ui.set_live_inspector_open(v)
     });
-    ui.set_live_inspector_open(view.bar.inspector_open);
-    ui.set_live_setup(LiveSetup {
+    let next_setup = LiveSetup {
         quantity: view.setup.quantity.into(),
         session_label: view.setup.session_label.into(),
         session_tone: view.setup.session_tone,
@@ -3433,132 +3549,178 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         lifecycle_detail: view.setup.lifecycle_detail.into(),
         lifecycle_done: view.setup.lifecycle_done,
         lifecycle_total: view.setup.lifecycle_total,
-    });
-    let mut combo_names: Vec<String> = Vec::with_capacity(view.setup.strategy_names.len() + 1);
-    combo_names.push("— Select Strategy —".to_string());
-    combo_names.extend(view.setup.strategy_names.clone());
-    ui.set_live_strategy_names(
-        Rc::new(slint::VecModel::from(
-            combo_names.into_iter().map(<_>::into).collect::<Vec<_>>(),
-        ))
-        .into(),
+    };
+    if !live_setup_eq(&ui.get_live_setup(), &next_setup) {
+        ui.set_live_setup(next_setup);
+    }
+    let mut combo_names: Vec<slint::SharedString> =
+        Vec::with_capacity(view.setup.strategy_names.len() + 1);
+    combo_names.push("— Select Strategy —".into());
+    combo_names.extend(
+        view.setup
+            .strategy_names
+            .into_iter()
+            .map(slint::SharedString::from),
     );
-    ui.set_live_strategy_selected(if view.setup.strategy_selected < 0 {
+    sync_vec_model(
+        ui.get_live_strategy_names(),
+        |m| ui.set_live_strategy_names(m),
+        combo_names,
+    );
+    let next_strat_selected = if view.setup.strategy_selected < 0 {
         0
     } else {
         view.setup.strategy_selected + 1
-    });
-    ui.set_live_timeframe_names(
-        Rc::new(slint::VecModel::from(
-            view.setup
-                .timeframe_names
-                .into_iter()
-                .map(<_>::into)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
-    ui.set_live_timeframe_selected(view.setup.timeframe_selected);
-    ui.set_live_market(LiveMarket {
-        has_data: view.market.has_data,
-        state_label: view.market.state_label.into(),
-        tone: view.market.tone,
-        title: view.market.title.into(),
-        detail: view.market.detail.into(),
-        header: view.market.header.into(),
-        feed_label: view.market.feed_label.into(),
-        feed_tone: view.market.feed_tone,
-        updated_label: view.market.updated_label.into(),
-    });
-    ui.set_live_symbols(
-        Rc::new(slint::VecModel::from(
-            view.symbols
-                .into_iter()
-                .map(|s| LiveSymbolRow {
-                    real_index: s.real_index,
-                    name: s.name.into(),
-                    checked: s.checked,
-                    ltp: s.ltp.into(),
-                    change: s.change.into(),
-                    change_tone: s.change_tone,
-                    status: s.status.into(),
-                    status_tone: s.status_tone,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
-    ui.set_live_symbol_filter(view.symbol_filter.into());
-    ui.set_live_gates(
-        Rc::new(slint::VecModel::from(
-            view.gates
-                .into_iter()
-                .map(|g| LiveGate {
-                    name: g.name.into(),
-                    status: g.status.into(),
-                    tone: g.tone,
-                    reason: g.reason.into(),
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
-    ui.set_live_blockers(
-        Rc::new(slint::VecModel::from(
-            view.setup
-                .blockers
-                .into_iter()
-                .map(<_>::into)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
-    ui.set_live_venue_blockers(
-        Rc::new(slint::VecModel::from(
-            view.setup
-                .venue_blockers
-                .into_iter()
-                .map(<_>::into)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
-    let kv_model = |rows: Vec<live::KvRow>| {
-        Rc::new(slint::VecModel::from(
-            rows.into_iter()
-                .map(|r| LiveKv {
-                    key: r.key.into(),
-                    value: r.value.into(),
-                    tone: r.tone,
-                })
-                .collect::<Vec<_>>(),
-        )) as Rc<slint::VecModel<LiveKv>>
     };
-    ui.set_live_strategy_rows(kv_model(view.strategy_rows).into());
-    ui.set_live_position_rows(kv_model(view.position_rows).into());
-    ui.set_live_risk_rows(kv_model(view.risk_rows).into());
-    ui.set_live_broker_rows(kv_model(view.broker_rows).into());
-    ui.set_live_recon_rows(kv_model(view.recon_rows).into());
-    ui.set_live_account_rows(kv_model(view.account_rows).into());
-    ui.set_live_positions(
-        Rc::new(slint::VecModel::from(
-            view.positions
-                .into_iter()
-                .map(|p| LivePosition {
-                    symbol: p.symbol.into(),
-                    side: p.side.into(),
-                    side_tone: p.side_tone,
-                    qty: p.qty.into(),
-                    entry: p.entry.into(),
-                    current: p.current.into(),
-                    pnl: p.pnl.into(),
-                    pnl_tone: p.pnl_tone,
-                    pnl_pct: p.pnl_pct.into(),
-                    status: p.status.into(),
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    set_if_changed(ui.get_live_strategy_selected(), next_strat_selected, |v| {
+        ui.set_live_strategy_selected(v)
+    });
+    let tf_names = view
+        .setup
+        .timeframe_names
+        .into_iter()
+        .map(slint::SharedString::from)
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        ui.get_live_timeframe_names(),
+        |m| ui.set_live_timeframe_names(m),
+        tf_names,
+    );
+    set_if_changed(
+        ui.get_live_timeframe_selected(),
+        view.setup.timeframe_selected,
+        |v| ui.set_live_timeframe_selected(v),
+    );
+    set_if_changed(
+        ui.get_live_market(),
+        LiveMarket {
+            has_data: view.market.has_data,
+            state_label: view.market.state_label.into(),
+            tone: view.market.tone,
+            title: view.market.title.into(),
+            detail: view.market.detail.into(),
+            header: view.market.header.into(),
+            feed_label: view.market.feed_label.into(),
+            feed_tone: view.market.feed_tone,
+            updated_label: view.market.updated_label.into(),
+        },
+        |v| ui.set_live_market(v),
+    );
+    let next_symbols = view
+        .symbols
+        .into_iter()
+        .map(|s| LiveSymbolRow {
+            real_index: s.real_index,
+            name: s.name.into(),
+            checked: s.checked,
+            ltp: s.ltp.into(),
+            change: s.change.into(),
+            change_tone: s.change_tone,
+            status: s.status.into(),
+            status_tone: s.status_tone,
+        })
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        ui.get_live_symbols(),
+        |m| ui.set_live_symbols(m),
+        next_symbols,
+    );
+    let next_sym_filter: slint::SharedString = view.symbol_filter.into();
+    set_if_changed(ui.get_live_symbol_filter(), next_sym_filter, |v| {
+        ui.set_live_symbol_filter(v)
+    });
+    let next_gates = view
+        .gates
+        .into_iter()
+        .map(|g| LiveGate {
+            name: g.name.into(),
+            status: g.status.into(),
+            tone: g.tone,
+            reason: g.reason.into(),
+        })
+        .collect::<Vec<_>>();
+    sync_vec_model(ui.get_live_gates(), |m| ui.set_live_gates(m), next_gates);
+    let next_blockers = view
+        .setup
+        .blockers
+        .into_iter()
+        .map(slint::SharedString::from)
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        ui.get_live_blockers(),
+        |m| ui.set_live_blockers(m),
+        next_blockers,
+    );
+    let next_venue_blockers = view
+        .setup
+        .venue_blockers
+        .into_iter()
+        .map(slint::SharedString::from)
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        ui.get_live_venue_blockers(),
+        |m| ui.set_live_venue_blockers(m),
+        next_venue_blockers,
+    );
+    let kv_rows = |rows: Vec<live::KvRow>| -> Vec<LiveKv> {
+        rows.into_iter()
+            .map(|r| LiveKv {
+                key: r.key.into(),
+                value: r.value.into(),
+                tone: r.tone,
+            })
+            .collect()
+    };
+    sync_vec_model(
+        ui.get_live_strategy_rows(),
+        |m| ui.set_live_strategy_rows(m),
+        kv_rows(view.strategy_rows),
+    );
+    sync_vec_model(
+        ui.get_live_position_rows(),
+        |m| ui.set_live_position_rows(m),
+        kv_rows(view.position_rows),
+    );
+    sync_vec_model(
+        ui.get_live_risk_rows(),
+        |m| ui.set_live_risk_rows(m),
+        kv_rows(view.risk_rows),
+    );
+    sync_vec_model(
+        ui.get_live_broker_rows(),
+        |m| ui.set_live_broker_rows(m),
+        kv_rows(view.broker_rows),
+    );
+    sync_vec_model(
+        ui.get_live_recon_rows(),
+        |m| ui.set_live_recon_rows(m),
+        kv_rows(view.recon_rows),
+    );
+    sync_vec_model(
+        ui.get_live_account_rows(),
+        |m| ui.set_live_account_rows(m),
+        kv_rows(view.account_rows),
+    );
+    let next_positions = view
+        .positions
+        .into_iter()
+        .map(|p| LivePosition {
+            symbol: p.symbol.into(),
+            side: p.side.into(),
+            side_tone: p.side_tone,
+            qty: p.qty.into(),
+            entry: p.entry.into(),
+            current: p.current.into(),
+            pnl: p.pnl.into(),
+            pnl_tone: p.pnl_tone,
+            pnl_pct: p.pnl_pct.into(),
+            status: p.status.into(),
+        })
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        ui.get_live_positions(),
+        |m| ui.set_live_positions(m),
+        next_positions,
     );
     let live_order = |o: vayren_domain::live::OrderRowView| LiveOrder {
         order_id: o.order_id.into(),
@@ -3599,215 +3761,260 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         ))
         .into(),
     };
-    ui.set_live_orders(
-        Rc::new(slint::VecModel::from(
-            view.orders.into_iter().map(&live_order).collect::<Vec<_>>(),
-        ))
-        .into(),
+    let next_orders = view.orders.into_iter().map(&live_order).collect::<Vec<_>>();
+    sync_vec_model_with(
+        ui.get_live_orders(),
+        |m| ui.set_live_orders(m),
+        next_orders,
+        live_order_eq,
     );
-    ui.set_live_orders_today(
-        Rc::new(slint::VecModel::from(
-            view.orders_today_rows
-                .into_iter()
-                .map(&live_order)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    let next_orders_today = view
+        .orders_today_rows
+        .into_iter()
+        .map(&live_order)
+        .collect::<Vec<_>>();
+    sync_vec_model_with(
+        ui.get_live_orders_today(),
+        |m| ui.set_live_orders_today(m),
+        next_orders_today,
+        live_order_eq,
     );
-    ui.set_live_orders_attention(
-        Rc::new(slint::VecModel::from(
-            view.orders_attention_rows
-                .into_iter()
-                .map(&live_order)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    let next_orders_attention = view
+        .orders_attention_rows
+        .into_iter()
+        .map(&live_order)
+        .collect::<Vec<_>>();
+    sync_vec_model_with(
+        ui.get_live_orders_attention(),
+        |m| ui.set_live_orders_attention(m),
+        next_orders_attention,
+        live_order_eq,
     );
-    ui.set_live_orders_history(
-        Rc::new(slint::VecModel::from(
-            view.orders_history_rows
-                .into_iter()
-                .map(&live_order)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    let next_orders_history = view
+        .orders_history_rows
+        .into_iter()
+        .map(&live_order)
+        .collect::<Vec<_>>();
+    sync_vec_model_with(
+        ui.get_live_orders_history(),
+        |m| ui.set_live_orders_history(m),
+        next_orders_history,
+        live_order_eq,
     );
-    ui.set_live_orders_today_count(view.orders_today_count.clone().into());
-    ui.set_live_orders_attention_count(view.orders_attention_count.clone().into());
-    ui.set_live_orders_history_count(view.orders_history_count.clone().into());
-    ui.set_live_open_positions_count(view.open_positions_count.clone().into());
-    ui.set_live_orders_summary(view.orders_summary.clone().into());
-    ui.set_live_fills(
-        Rc::new(slint::VecModel::from(
-            view.fills
-                .into_iter()
-                .map(|f| LiveFill {
-                    time: f.time.into(),
-                    symbol: f.symbol.into(),
-                    side: f.side.into(),
-                    qty: f.qty.into(),
-                    price: f.price.into(),
-                    order_id: f.order_id.into(),
-                    strategy: f.strategy.into(),
-                    side_tone: f.side_tone,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    set_if_changed(
+        ui.get_live_orders_today_count(),
+        view.orders_today_count.into(),
+        |v| ui.set_live_orders_today_count(v),
     );
-    ui.set_live_stats(
-        Rc::new(slint::VecModel::from(
-            view.stats
-                .into_iter()
-                .map(|s| LiveStat {
-                    label: s.label.into(),
-                    value: s.value.into(),
-                    tone: s.tone,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    set_if_changed(
+        ui.get_live_orders_attention_count(),
+        view.orders_attention_count.into(),
+        |v| ui.set_live_orders_attention_count(v),
     );
-    ui.set_live_events(
-        Rc::new(slint::VecModel::from(
-            view.events
-                .into_iter()
-                .map(|e| LiveEventRow {
-                    timestamp: e.timestamp.into(),
-                    time: e.time.into(),
-                    strategy: e.strategy.into(),
-                    symbol: e.symbol.into(),
-                    event: e.event.into(),
-                    status: e.status.into(),
-                    status_tone: e.status_tone,
-                    level: e.level.into(),
-                    category: e.category.into(),
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    set_if_changed(
+        ui.get_live_orders_history_count(),
+        view.orders_history_count.into(),
+        |v| ui.set_live_orders_history_count(v),
     );
-    ui.set_live_event_types(
-        Rc::new(slint::VecModel::from(
-            view.event_types
-                .into_iter()
-                .map(<_>::into)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    set_if_changed(
+        ui.get_live_open_positions_count(),
+        view.open_positions_count.into(),
+        |v| ui.set_live_open_positions_count(v),
     );
-    ui.set_live_event_type_index(view.event_type_index);
-    ui.set_live_event_filter(view.event_filter.into());
-    ui.set_live_ws(LiveWebSocket {
-        status: view.ws.status.into(),
-        tone: view.ws.tone,
-        latency: view.ws.latency.into(),
-        sub: view.ws.sub.into(),
-        last_tick: view.ws.last_tick.into(),
-        last_error: view.ws.last_error.into(),
+    set_if_changed(
+        ui.get_live_orders_summary(),
+        view.orders_summary.into(),
+        |v| ui.set_live_orders_summary(v),
+    );
+    let next_fills = view
+        .fills
+        .into_iter()
+        .map(|f| LiveFill {
+            time: f.time.into(),
+            symbol: f.symbol.into(),
+            side: f.side.into(),
+            qty: f.qty.into(),
+            price: f.price.into(),
+            order_id: f.order_id.into(),
+            strategy: f.strategy.into(),
+            side_tone: f.side_tone,
+        })
+        .collect::<Vec<_>>();
+    sync_vec_model(ui.get_live_fills(), |m| ui.set_live_fills(m), next_fills);
+    let next_stats = view
+        .stats
+        .into_iter()
+        .map(|s| LiveStat {
+            label: s.label.into(),
+            value: s.value.into(),
+            tone: s.tone,
+        })
+        .collect::<Vec<_>>();
+    sync_vec_model(ui.get_live_stats(), |m| ui.set_live_stats(m), next_stats);
+    let next_events = view
+        .events
+        .into_iter()
+        .map(|e| LiveEventRow {
+            timestamp: e.timestamp.into(),
+            time: e.time.into(),
+            strategy: e.strategy.into(),
+            symbol: e.symbol.into(),
+            event: e.event.into(),
+            status: e.status.into(),
+            status_tone: e.status_tone,
+            level: e.level.into(),
+            category: e.category.into(),
+        })
+        .collect::<Vec<_>>();
+    sync_vec_model(ui.get_live_events(), |m| ui.set_live_events(m), next_events);
+    let next_event_types = view
+        .event_types
+        .into_iter()
+        .map(slint::SharedString::from)
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        ui.get_live_event_types(),
+        |m| ui.set_live_event_types(m),
+        next_event_types,
+    );
+    set_if_changed(ui.get_live_event_type_index(), view.event_type_index, |v| {
+        ui.set_live_event_type_index(v)
     });
-    ui.set_live_md(LiveMarketData {
-        status: view.md.status.into(),
-        tone: view.md.tone,
-        sub: view.md.sub.into(),
-        last_tick: view.md.last_tick.into(),
-        freshness: view.md.freshness.into(),
+    set_if_changed(ui.get_live_event_filter(), view.event_filter.into(), |v| {
+        ui.set_live_event_filter(v)
     });
-    ui.set_live_gateway(LiveRemoteGateway {
-        status: view.gateway.status.into(),
-        tone: view.gateway.tone,
-        conn_state: view.gateway.conn_state.into(),
-        rtt: view.gateway.rtt.into(),
-        last_heartbeat: view.gateway.last_heartbeat.into(),
-        detail: view.gateway.detail.into(),
-    });
-    ui.set_live_active_strat(LiveActiveStrategy {
-        name: view.active_strat.name.into(),
-        status: view.active_strat.status.into(),
-        status_tone: view.active_strat.status_tone,
-        mode: view.active_strat.mode.into(),
-        mode_tone: view.active_strat.mode_tone,
-        started_at: view.active_strat.started_at.into(),
-        stopped_at: view.active_strat.stopped_at.into(),
-        duration: view.active_strat.duration.into(),
-        engine_running: view.active_strat.engine_running,
-        engine_clock: view.active_strat.engine_clock.into(),
-        symbols_count: view.active_strat.symbols_count.into(),
-        today_signals: view.active_strat.today_signals.into(),
-        current_position: view.active_strat.current_position.into(),
-        orders_today: view.active_strat.orders_today.into(),
-        orders_detail: view.active_strat.orders_detail.into(),
-        strategy_logic: view.active_strat.strategy_logic.into(),
-    });
-    ui.set_live_watchlist(
-        Rc::new(slint::VecModel::from(
-            view.watchlist
-                .into_iter()
-                .map(|r| LiveWatchlistRow {
-                    index: r.index,
-                    symbol: r.symbol.into(),
-                    full_symbol: r.full_symbol.into(),
-                    ltp: r.ltp.into(),
-                    change: r.change.into(),
-                    change_tone: r.change_tone,
-                    tick_trigger: r.tick_trigger,
-                    ref_high: r.ref_high.into(),
-                    ref_low: r.ref_low.into(),
-                    break_low: r.break_low.into(),
-                    entry: r.entry.into(),
-                    stop: r.stop.into(),
-                    risk_share: r.risk_share.into(),
-                    qty: r.qty.into(),
-                    max_allowed_risk: r.max_allowed_risk.into(),
-                    planned_risk: r.planned_risk.into(),
-                    risk_util: r.risk_util.into(),
-                    risk_util_tone: r.risk_util_tone,
-                    position: r.position.into(),
-                    status: r.status.into(),
-                    status_tone: r.status_tone,
-                    signal: r.signal.into(),
-                    signal_tone: r.signal_tone,
-                    order: r.order.into(),
-                    order_tone: r.order_tone,
-                    pnl: r.pnl.into(),
-                    pnl_tone: r.pnl_tone,
-                    last_update: r.last_update.into(),
-                    selected: r.selected,
-                    eligibility: r.eligibility.into(),
-                    eligibility_tone: r.eligibility_tone,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    set_if_changed(
+        ui.get_live_ws(),
+        LiveWebSocket {
+            status: view.ws.status.into(),
+            tone: view.ws.tone,
+            latency: view.ws.latency.into(),
+            sub: view.ws.sub.into(),
+            last_tick: view.ws.last_tick.into(),
+            last_error: view.ws.last_error.into(),
+        },
+        |v| ui.set_live_ws(v),
     );
-    ui.set_live_eligibility(LiveEligibility {
-        reported: view.eligibility.reported,
-        final_label: view.eligibility.final_label.into(),
-        final_tone: view.eligibility.final_tone,
-        reason: view.eligibility.reason.into(),
-        market: view.eligibility.market.into(),
-        execution: view.eligibility.execution.into(),
-        risk: view.eligibility.risk.into(),
-        strategy_counts: view.eligibility.strategy_counts.into(),
-        enforcement: view.eligibility.enforcement,
-    });
-    ui.set_live_eligibility_rows(
-        Rc::new(slint::VecModel::from(
-            view.eligibility
-                .rows
-                .into_iter()
-                .map(|r| LiveEligibilityRow {
-                    symbol: r.symbol.into(),
-                    level: r.level.into(),
-                    level_tone: r.level_tone,
-                    allowed: r.allowed,
-                    reasons: r.reasons.into(),
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    set_if_changed(
+        ui.get_live_md(),
+        LiveMarketData {
+            status: view.md.status.into(),
+            tone: view.md.tone,
+            sub: view.md.sub.into(),
+            last_tick: view.md.last_tick.into(),
+            freshness: view.md.freshness.into(),
+        },
+        |v| ui.set_live_md(v),
     );
-    ui.set_live_selected_stock(LiveSelectedStock {
+    set_if_changed(
+        ui.get_live_gateway(),
+        LiveRemoteGateway {
+            status: view.gateway.status.into(),
+            tone: view.gateway.tone,
+            conn_state: view.gateway.conn_state.into(),
+            rtt: view.gateway.rtt.into(),
+            last_heartbeat: view.gateway.last_heartbeat.into(),
+            detail: view.gateway.detail.into(),
+        },
+        |v| ui.set_live_gateway(v),
+    );
+    set_if_changed(
+        ui.get_live_active_strat(),
+        LiveActiveStrategy {
+            name: view.active_strat.name.into(),
+            status: view.active_strat.status.into(),
+            status_tone: view.active_strat.status_tone,
+            mode: view.active_strat.mode.into(),
+            mode_tone: view.active_strat.mode_tone,
+            started_at: view.active_strat.started_at.into(),
+            stopped_at: view.active_strat.stopped_at.into(),
+            duration: view.active_strat.duration.into(),
+            engine_running: view.active_strat.engine_running,
+            engine_clock: view.active_strat.engine_clock.into(),
+            symbols_count: view.active_strat.symbols_count.into(),
+            today_signals: view.active_strat.today_signals.into(),
+            current_position: view.active_strat.current_position.into(),
+            orders_today: view.active_strat.orders_today.into(),
+            orders_detail: view.active_strat.orders_detail.into(),
+            strategy_logic: view.active_strat.strategy_logic.into(),
+        },
+        |v| ui.set_live_active_strat(v),
+    );
+    let next_watchlist = view
+        .watchlist
+        .into_iter()
+        .map(|r| LiveWatchlistRow {
+            index: r.index,
+            symbol: r.symbol.into(),
+            full_symbol: r.full_symbol.into(),
+            ltp: r.ltp.into(),
+            change: r.change.into(),
+            change_tone: r.change_tone,
+            tick_trigger: r.tick_trigger,
+            ref_high: r.ref_high.into(),
+            ref_low: r.ref_low.into(),
+            break_low: r.break_low.into(),
+            entry: r.entry.into(),
+            stop: r.stop.into(),
+            risk_share: r.risk_share.into(),
+            qty: r.qty.into(),
+            max_allowed_risk: r.max_allowed_risk.into(),
+            planned_risk: r.planned_risk.into(),
+            risk_util: r.risk_util.into(),
+            risk_util_tone: r.risk_util_tone,
+            position: r.position.into(),
+            status: r.status.into(),
+            status_tone: r.status_tone,
+            signal: r.signal.into(),
+            signal_tone: r.signal_tone,
+            order: r.order.into(),
+            order_tone: r.order_tone,
+            pnl: r.pnl.into(),
+            pnl_tone: r.pnl_tone,
+            last_update: r.last_update.into(),
+            selected: r.selected,
+            eligibility: r.eligibility.into(),
+            eligibility_tone: r.eligibility_tone,
+        })
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        ui.get_live_watchlist(),
+        |m| ui.set_live_watchlist(m),
+        next_watchlist,
+    );
+    set_if_changed(
+        ui.get_live_eligibility(),
+        LiveEligibility {
+            reported: view.eligibility.reported,
+            final_label: view.eligibility.final_label.into(),
+            final_tone: view.eligibility.final_tone,
+            reason: view.eligibility.reason.into(),
+            market: view.eligibility.market.into(),
+            execution: view.eligibility.execution.into(),
+            risk: view.eligibility.risk.into(),
+            strategy_counts: view.eligibility.strategy_counts.into(),
+            enforcement: view.eligibility.enforcement,
+        },
+        |v| ui.set_live_eligibility(v),
+    );
+    let next_elig_rows = view
+        .eligibility
+        .rows
+        .into_iter()
+        .map(|r| LiveEligibilityRow {
+            symbol: r.symbol.into(),
+            level: r.level.into(),
+            level_tone: r.level_tone,
+            allowed: r.allowed,
+            reasons: r.reasons.into(),
+        })
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        ui.get_live_eligibility_rows(),
+        |m| ui.set_live_eligibility_rows(m),
+        next_elig_rows,
+    );
+    let next_selected_stock = LiveSelectedStock {
         symbol: view.selected_stock.symbol.into(),
         ltp: view.selected_stock.ltp.into(),
         change: view.selected_stock.change.into(),
@@ -3861,29 +4068,48 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         effective_capital: view.selected_stock.effective_capital.into(),
         max_allowed_risk: view.selected_stock.max_allowed_risk.into(),
         capital_source: view.selected_stock.capital_source.into(),
+    };
+    if !live_selected_stock_eq(&ui.get_live_selected_stock(), &next_selected_stock) {
+        ui.set_live_selected_stock(next_selected_stock);
+    }
+    let next_server_code: slint::SharedString = view.footer.server_code_status.clone().into();
+    set_if_changed(
+        ui.get_live_footer(),
+        LiveFooter {
+            broker: view.footer.broker.into(),
+            websocket: view.footer.websocket.into(),
+            market_data: view.footer.market_data.into(),
+            strategy: view.footer.strategy.into(),
+            risk: view.footer.risk.into(),
+            reconciliation: view.footer.reconciliation.into(),
+            clock: view.footer.clock.into(),
+            snapshot_time: view.footer.snapshot_time.into(),
+            server_code_status: next_server_code.clone(),
+        },
+        |v| ui.set_live_footer(v),
+    );
+    set_if_changed(ui.get_server_code_status(), next_server_code, |v| {
+        ui.set_server_code_status(v)
     });
-    ui.set_live_footer(LiveFooter {
-        broker: view.footer.broker.into(),
-        websocket: view.footer.websocket.into(),
-        market_data: view.footer.market_data.into(),
-        strategy: view.footer.strategy.into(),
-        risk: view.footer.risk.into(),
-        reconciliation: view.footer.reconciliation.into(),
-        clock: view.footer.clock.into(),
-        snapshot_time: view.footer.snapshot_time.into(),
-        server_code_status: view.footer.server_code_status.clone().into(),
-    });
-    ui.set_server_code_status(view.footer.server_code_status.into());
-    ui.set_live_filter_chip_selected(view.filter_chip_selected);
-    ui.set_live_filter_chip_counts(view.filter_chip_counts.into());
-    ui.set_live_filter_chips(
-        Rc::new(slint::VecModel::from(
-            view.filter_chips
-                .into_iter()
-                .map(<_>::into)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    set_if_changed(
+        ui.get_live_filter_chip_selected(),
+        view.filter_chip_selected,
+        |v| ui.set_live_filter_chip_selected(v),
+    );
+    set_if_changed(
+        ui.get_live_filter_chip_counts(),
+        view.filter_chip_counts.into(),
+        |v| ui.set_live_filter_chip_counts(v),
+    );
+    let next_chips = view
+        .filter_chips
+        .into_iter()
+        .map(slint::SharedString::from)
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        ui.get_live_filter_chips(),
+        |m| ui.set_live_filter_chips(m),
+        next_chips,
     );
 }
 
@@ -4008,6 +4234,7 @@ where
     });
     wire_text!(on_live_watchlist_search_changed, |s: &mut LiveState, q| {
         s.set_watchlist_search(q);
+        s.set_symbol_filter(q);
     });
 }
 
@@ -5380,5 +5607,62 @@ mod tests {
         assert_eq!(run.end, select.end);
         assert_eq!(run.capital, select.capital);
         assert_eq!(run.mode, select.mode);
+    }
+
+    #[test]
+    fn apply_live_reuses_vecmodels_and_clock_tick_preserves_watchlist() {
+        init_test_backend();
+        let ui = AppWindow::new().expect("window");
+        let mut state = demo_live_state_running();
+        state.apply_snapshot(&serde_json::json!({
+            "quotes": [{
+                "symbol": "NSE:RELIANCE",
+                "clean_symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "change_pct": 1.2,
+                "status": "READY"
+            }]
+        }));
+        state.test_clock = Some("10:00:00 IST".into());
+
+        apply_live(&ui, &state);
+        assert_eq!(ui.get_live_watchlist().row_count(), 1);
+        assert_eq!(ui.get_live_footer().clock.as_str(), "10:00:00 IST");
+
+        // Second apply_live with a price change mutates the existing VecModel
+        // in place instead of replacing it, keeping row widgets & animations intact.
+        let model_before = ui.get_live_watchlist();
+        let ptr_before = model_before
+            .as_any()
+            .downcast_ref::<slint::VecModel<LiveWatchlistRow>>()
+            .unwrap() as *const slint::VecModel<LiveWatchlistRow>;
+        state.apply_snapshot(&serde_json::json!({
+            "quotes": [{
+                "symbol": "NSE:RELIANCE",
+                "clean_symbol": "RELIANCE",
+                "ltp": 2505.0,
+                "change_pct": 1.4,
+                "status": "READY"
+            }]
+        }));
+        apply_live(&ui, &state);
+        let model_after = ui.get_live_watchlist();
+        let ptr_after = model_after
+            .as_any()
+            .downcast_ref::<slint::VecModel<LiveWatchlistRow>>()
+            .unwrap() as *const slint::VecModel<LiveWatchlistRow>;
+        assert_eq!(ptr_before, ptr_after);
+        let after_row = model_after.row_data(0).unwrap();
+        assert_eq!(after_row.ltp.as_str(), "2505.00");
+        assert!(after_row.tick_trigger > 0);
+
+        // Clock tick updates clock without touching watchlist rows.
+        state.test_clock = Some("10:00:01 IST".into());
+        apply_live_clock_tick(&ui, &state);
+        assert_eq!(ui.get_live_footer().clock.as_str(), "10:00:01 IST");
+        assert_eq!(
+            ui.get_live_watchlist().row_data(0).unwrap().ltp.as_str(),
+            "2505.00"
+        );
     }
 }

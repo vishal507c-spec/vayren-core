@@ -261,8 +261,14 @@ fn handshake_hello_welcome_snapshot() {
     };
     assert_eq!((connection_id.as_str(), role.as_str()), ("c1", "trade"));
     match snapshot {
-        ClientEvent::Snapshot { sections, resync } => {
+        ClientEvent::Snapshot {
+            sections,
+            resync,
+            stale,
+            ..
+        } => {
             assert!(!resync);
+            assert!(!stale);
             assert_eq!(sections["strategy"]["status"], "BLOCKED");
         }
         other => panic!("expected snapshot, got {other:?}"),
@@ -460,4 +466,198 @@ fn gateway_error_and_malformed_frames_surface_cleanly() {
     // The connection itself survives both: ping still answers.
     client.ping().unwrap();
     assert!(matches!(next_of(&mut client), ClientEvent::Pong));
+}
+
+#[test]
+fn ping_between_welcome_and_snapshot_does_not_abort_handshake() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let url = format!("ws://{addr}/vayren/v1");
+    thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept(stream).unwrap();
+        let _hello = socket.read().unwrap();
+        socket
+            .send(Message::text(envelope(
+                "welcome",
+                json!({"connection_id": "c-ping", "role": "trade", "server_time": "t"}),
+                None,
+                None,
+            )))
+            .unwrap();
+        socket
+            .send(Message::Ping(b"keepalive".to_vec().into()))
+            .unwrap();
+        let pong = socket.read().unwrap();
+        assert!(
+            matches!(pong, Message::Pong(_)),
+            "expected Pong before snapshot, got {pong:?}"
+        );
+        socket
+            .send(Message::text(envelope(
+                "snapshot",
+                json!({"snapshot": snapshot_sections(), "stale": false}),
+                None,
+                None,
+            )))
+            .unwrap();
+        let _ = socket.close(None);
+    });
+
+    let (client, _welcome, snapshot) = RemoteClient::connect(&url, TOKEN, STEP).unwrap();
+    assert_eq!(
+        client.state(),
+        vayren_remote_client::ConnectionState::Connected
+    );
+    match snapshot {
+        ClientEvent::Snapshot { stale, .. } => assert!(!stale),
+        other => panic!("expected snapshot, got {other:?}"),
+    }
+}
+
+#[test]
+fn continuous_pings_without_snapshot_expire_cumulative_deadline() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let url = format!("ws://{addr}/vayren/v1");
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_srv = stop.clone();
+    thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept(stream).unwrap();
+        let _hello = socket.read().unwrap();
+        socket
+            .send(Message::text(envelope(
+                "welcome",
+                json!({"connection_id": "c-drip", "role": "read"}),
+                None,
+                None,
+            )))
+            .unwrap();
+        while !stop_srv.load(std::sync::atomic::Ordering::Relaxed) {
+            if socket.send(Message::Ping(vec![].into())).is_err() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(60));
+        }
+    });
+
+    let t0 = std::time::Instant::now();
+    let err = RemoteClient::connect(&url, TOKEN, Duration::from_millis(350))
+        .err()
+        .expect("handshake without snapshot must time out");
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        matches!(err, vayren_remote_client::ClientError::Timeout),
+        "expected Timeout, got {err}"
+    );
+    assert!(t0.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn snapshot_deadline_exceeded_surfaces_protocol_error() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let url = format!("ws://{addr}/vayren/v1");
+    thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept(stream).unwrap();
+        let _hello = socket.read().unwrap();
+        socket
+            .send(Message::text(envelope(
+                "welcome",
+                json!({"connection_id": "c-err", "role": "trade"}),
+                None,
+                None,
+            )))
+            .unwrap();
+        socket
+            .send(Message::text(envelope(
+                "error",
+                json!({"code": "DEADLINE_EXCEEDED", "detail": "snapshot stalled"}),
+                None,
+                None,
+            )))
+            .unwrap();
+        let _ = socket.close(None);
+    });
+
+    let err = RemoteClient::connect(&url, TOKEN, STEP)
+        .err()
+        .expect("DEADLINE_EXCEEDED must fail handshake");
+    match err {
+        vayren_remote_client::ClientError::Protocol(pe) => {
+            assert_eq!(pe.code, "DEADLINE_EXCEEDED");
+        }
+        other => panic!("expected Protocol(DEADLINE_EXCEEDED), got {other}"),
+    }
+}
+
+#[test]
+fn stale_snapshot_flag_sets_stale_state_and_silent_upgrade_times_out() {
+    // 1. Stale snapshot marks ConnectionState::Stale and preserves reason.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let url = format!("ws://{addr}/vayren/v1");
+    thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept(stream).unwrap();
+        let _hello = socket.read().unwrap();
+        socket
+            .send(Message::text(envelope(
+                "welcome",
+                json!({"connection_id": "c-stale", "role": "trade"}),
+                None,
+                None,
+            )))
+            .unwrap();
+        socket
+            .send(Message::text(envelope(
+                "snapshot",
+                json!({
+                    "snapshot": snapshot_sections(),
+                    "stale": true,
+                    "stale_reason": "backend warm cache",
+                    "snapshot_age_ms": 4200.0
+                }),
+                None,
+                None,
+            )))
+            .unwrap();
+        thread::sleep(Duration::from_millis(100));
+    });
+
+    let (client, _, snapshot) = RemoteClient::connect(&url, TOKEN, STEP).unwrap();
+    assert_eq!(client.state(), vayren_remote_client::ConnectionState::Stale);
+    match snapshot {
+        ClientEvent::Snapshot {
+            stale,
+            stale_reason,
+            snapshot_age_ms,
+            ..
+        } => {
+            assert!(stale);
+            assert_eq!(stale_reason.as_deref(), Some("backend warm cache"));
+            assert_eq!(snapshot_age_ms, Some(4200.0));
+        }
+        other => panic!("expected snapshot, got {other:?}"),
+    }
+
+    // 2. TCP accepts but never completes HTTP/WS upgrade: handshake must bound cleanly.
+    let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let saddr = silent.local_addr().unwrap();
+    let surl = format!("ws://{saddr}/vayren/v1");
+    let _holder = thread::spawn(move || {
+        let (_sock, _) = silent.accept().unwrap();
+        thread::sleep(Duration::from_secs(2));
+    });
+    let t0 = std::time::Instant::now();
+    let err = RemoteClient::connect(&surl, TOKEN, Duration::from_millis(350))
+        .err()
+        .expect("silent WS upgrade must time out");
+    assert!(
+        matches!(err, vayren_remote_client::ClientError::Timeout),
+        "expected Timeout, got {err}"
+    );
+    assert!(t0.elapsed() < Duration::from_secs(2));
 }

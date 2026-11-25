@@ -277,7 +277,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         try:
             from remote.server_code_status import get_server_code_status
 
-            server_code = get_server_code_status(force=False)
+            server_code = get_server_code_status(force=False, nonblocking=True)
         except Exception as exc:  # noqa: BLE001
             server_code = {
                 "status": "SERVER CODE: NOT UPDATED",

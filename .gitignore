@@ -80,3 +80,7 @@ rust/shell_build.log
 rust/shell_build.err
 
 uv.lock
+
+# Preserved historical download engine runtime artifacts (regenerable)
+/src/data/logs/
+/src/data/symbols.csv

@@ -95,6 +95,7 @@ class HeadlessGateway(BackendGateway):
         self._snapshot_cache: dict[str, Any] | None = None
         self._snapshot_cached_at: float = 0.0
         self._snapshot_lock = threading.Lock()
+        self._snapshot_inflight: threading.Event | None = None
 
     def _ensure_manager(self) -> Any | None:
         """The SYSTEM broker manager — shared singleton, not a second instance.
@@ -128,28 +129,67 @@ class HeadlessGateway(BackendGateway):
         LIVE always read the same EC2-owned session state and can never
         render opposite verdicts from different sections.
 
-        Coalesced: calls within 250ms share one backend build. The returned
-        dict is the cached build (callers project, never mutate).
+        Single-flight & coalesced: calls within 250ms share one backend
+        build, and concurrent misses wait on the in-flight owner instead of
+        stampeding into simultaneous builds.
         """
+        inflight: threading.Event | None = None
+        owner_event: threading.Event | None = None
         now = time.monotonic()
         with self._snapshot_lock:
             cached = self._snapshot_cache
             if cached is not None and (now - self._snapshot_cached_at) < 0.25:
                 return cached
-        from app.headless import _trading_service_snapshot
+            if self._snapshot_inflight is not None:
+                inflight = self._snapshot_inflight
+            else:
+                owner_event = threading.Event()
+                self._snapshot_inflight = owner_event
 
-        live = _trading_service_snapshot(self._data_dir, self._strategy_dir, self._ensure_manager())
-        with contextlib.suppress(Exception):
-            manager = self._ensure_manager()
-            if manager is not None and isinstance(live, dict):
-                active = str((manager.snapshot() or {}).get("active_broker", "") or "")
-                if active:
-                    live["broker_session"] = manager.get_session_snapshot(active)
-        if isinstance(live, dict):
+        if inflight is not None:
+            finished = inflight.wait(timeout=5.0)
             with self._snapshot_lock:
-                self._snapshot_cache = live
-                self._snapshot_cached_at = time.monotonic()
-        return live
+                if (
+                    self._snapshot_cache is not None
+                    and (time.monotonic() - self._snapshot_cached_at) < 5.0
+                ):
+                    return self._snapshot_cache
+            if not finished:
+                raise TimeoutError("backend snapshot build timed out")
+
+        assert owner_event is not None or self._snapshot_cache is None
+        need_cleanup = False
+        if owner_event is None:
+            with self._snapshot_lock:
+                if self._snapshot_inflight is None:
+                    owner_event = threading.Event()
+                    self._snapshot_inflight = owner_event
+        if owner_event is not None:
+            need_cleanup = True
+
+        try:
+            from app.headless import _trading_service_snapshot
+
+            live = _trading_service_snapshot(
+                self._data_dir, self._strategy_dir, self._ensure_manager()
+            )
+            with contextlib.suppress(Exception):
+                manager = self._ensure_manager()
+                if manager is not None and isinstance(live, dict):
+                    active = str((manager.snapshot() or {}).get("active_broker", "") or "")
+                    if active:
+                        live["broker_session"] = manager.get_session_snapshot(active)
+            if isinstance(live, dict):
+                with self._snapshot_lock:
+                    self._snapshot_cache = live
+                    self._snapshot_cached_at = time.monotonic()
+            return live
+        finally:
+            if need_cleanup and owner_event is not None:
+                with self._snapshot_lock:
+                    if self._snapshot_inflight is owner_event:
+                        self._snapshot_inflight = None
+                owner_event.set()
 
     def apply_command(self, action: dict[str, Any]) -> dict[str, Any]:
         """One control action through the existing gated action path."""
@@ -169,6 +209,21 @@ class HeadlessGateway(BackendGateway):
             "safe_disconnect",
         ):
             return self._apply_broker_command(act)
+        if name == "download_action":
+            # The preserved engine runs HERE, against the broker CONNECTED in
+            # the gateway's authoritative manager (never a second session).
+            from app.headless import _download_action, _ensure_download_service
+
+            _ensure_download_service(self._data_dir, self._ensure_manager())
+            result = _download_action({"action": act.get("wire", "")})
+            # Return the download section directly so `_command_result` can
+            # carry it back on the command response as well as on the next
+            # periodic snapshot.
+            return {
+                "download": result["snapshot"],
+                "ok": bool(result.get("outcome", {}).get("ok", True)),
+                "reason": str(result.get("outcome", {}).get("reason", "") or ""),
+            }
         return _live_action(
             self._data_dir,
             self._strategy_dir,

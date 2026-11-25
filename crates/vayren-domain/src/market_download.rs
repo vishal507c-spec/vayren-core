@@ -1,26 +1,11 @@
-//! Historical-Download console view-model — the native Market's faithful port
-//! of `02_data`'s `HistoricalDownloadPanel` (DownloadPanel + StatusView +
-//! LogPanel) + `ProviderCredentialsDialog`. It owns ONLY presentation + the
-//! calendar/credential modal interaction state. Every user action maps to an
-//! existing public method/signal on the retained legacy panel or the provider
-//! manager (see `slint_market_host.py`), so no download logic, validation,
-//! engine, progress math, plan estimate or credential handling is duplicated
-//! in Rust — this mirrors the Strategy Lab projection contract exactly.
+//! Historical-Download console view-model — presentation only.
 //!
-//! All financial/provider facts arrive from the backend bridge; missing
-//! pieces degrade to honest absence (never invented). Formatting that the legacy
-//! panel already performs (plan text, coverage text, status labels, clock,
-//! byte sizes) is passed through verbatim so the native console reads the same.
-
-/// One provider credential field (`CredentialField` projected for the modal).
-#[derive(Debug, Clone, PartialEq)]
-pub struct CredField {
-    pub key: String,
-    pub label: String,
-    pub secret: bool,
-    pub value: String,
-    pub revealed: bool,
-}
+//! The broker is selected and authenticated EXCLUSIVELY in the SYSTEM UI;
+//! this projection keeps no broker selector, provider status or credential
+//! state. All venue facts arrive from the backend bridge (which reads the
+//! authoritative SYSTEM session), and missing pieces degrade to honest
+//! absence — never invented. Download logic, validation and progress math
+//! stay in the preserved Python engine.
 
 /// Download-plan estimate rows (verbatim from `DownloadPanel._update_plan`).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -71,24 +56,6 @@ pub struct StatusViewFacts {
     pub cov_range: String,
     pub cov_coverage: String,
     pub cov_rows: String,
-    // provider card
-    pub provider_name: String,
-    pub provider_status: String,
-    pub provider_label: String,
-    pub provider_detail: String,
-    pub configure_visible: bool,
-    pub advanced_visible: bool,
-    pub advanced_open: bool,
-    pub env_visible: bool,
-    pub broker_caps: String,
-    pub broker_error: String,
-}
-
-/// A broker selector entry (registry facts).
-#[derive(Debug, Clone, PartialEq)]
-pub struct BrokerChoice {
-    pub name: String,
-    pub display: String,
 }
 
 /// Full download-console state. `pending` wires are drained by the legacy host to
@@ -114,21 +81,12 @@ pub struct DownloadState {
     pub to_ymd: Option<(i32, i32, i32)>,
     pub plan: PlanView,
     pub status: StatusViewFacts,
-    pub brokers: Vec<BrokerChoice>,
-    pub broker_index: usize,
     pub log: Vec<String>,
     pub log_expanded: bool,
     // native calendar (view-local): which field is open + shown month
     pub cal_field: String, // "" | "from" | "to"
     pub cal_year: i32,
     pub cal_month: i32, // 1..=12
-    // credentials modal
-    pub cred_open: bool,
-    pub cred_fields: Vec<CredField>,
-    pub cred_has_stored: bool,
-    pub cred_status: String,
-    pub test_running: bool,
-    pub confirm_clear: bool,
 }
 
 impl Default for DownloadState {
@@ -147,19 +105,11 @@ impl Default for DownloadState {
             to_ymd: None,
             plan: PlanView::default(),
             status: StatusViewFacts::default(),
-            brokers: Vec::new(),
-            broker_index: 0,
             log: Vec::new(),
             log_expanded: false,
             cal_field: String::new(),
             cal_year: 0,
             cal_month: 0,
-            cred_open: false,
-            cred_fields: Vec::new(),
-            cred_has_stored: false,
-            cred_status: String::new(),
-            test_running: false,
-            confirm_clear: false,
         }
     }
 }
@@ -186,18 +136,8 @@ pub enum DownloadAction {
     Retry,
     ViewCoverage,
     ToggleErrorDetails,
-    ToggleAdvanced,
     ToggleLog,
     ClearLog,
-    Broker(String),
-    OpenCreds,
-    CloseCreds,
-    CredField(String, String),
-    CredReveal(String),
-    CredTest,
-    CredSave,
-    CredClear,
-    CredConfirmClear(bool),
 }
 
 /// Local-only calendar month arithmetic (pure presentation).
@@ -220,18 +160,6 @@ impl DownloadState {
     /// Apply a console action locally (optimistic UI: filter, calendar, modal
     /// open/close, chips) and report the wire string when the action must
     /// reach the retained backend. Returns `None` for pure view-local moves.
-    /// Compact JSON map of the current credential field values, embedded in
-    /// the test/save wire so the host can call the SAME manager methods the
-    /// legacy dialog used (no engine, no duplicate validation).
-    fn cred_payload(&self) -> String {
-        let map: serde_json::Map<String, serde_json::Value> = self
-            .cred_fields
-            .iter()
-            .map(|f| (f.key.clone(), serde_json::Value::String(f.value.clone())))
-            .collect();
-        serde_json::to_string(&serde_json::Value::Object(map)).unwrap_or_else(|_| "{}".to_string())
-    }
-
     pub fn apply(&mut self, action: DownloadAction) -> Option<String> {
         match action {
             DownloadAction::Toggle => {
@@ -320,18 +248,27 @@ impl DownloadState {
                 self.cal_field.clear();
                 Some(format!("dl:quick:{caption}"))
             }
-            DownloadAction::Download => Some("dl:download".to_string()),
+            DownloadAction::Download => {
+                // Visible pending state ONLY — never a success claim. The
+                // authoritative snapshot from the gateway replaces this as
+                // soon as the command result arrives.
+                self.status.mode = "pending".to_string();
+                self.status.progress_note = "Starting Download...".to_string();
+                self.plan.error.clear();
+                Some("dl:download".to_string())
+            }
             DownloadAction::CheckCoverage => Some("dl:coverage".to_string()),
             DownloadAction::Cancel => Some("dl:cancel".to_string()),
-            DownloadAction::Retry => Some("dl:retry".to_string()),
+            DownloadAction::Retry => {
+                self.status.mode = "pending".to_string();
+                self.status.progress_note = "Starting Download...".to_string();
+                self.plan.error.clear();
+                Some("dl:retry".to_string())
+            }
             DownloadAction::ViewCoverage => Some("dl:view-coverage".to_string()),
             DownloadAction::ToggleErrorDetails => {
                 self.status.error_details_shown = !self.status.error_details_shown;
                 Some("dl:error-details".to_string())
-            }
-            DownloadAction::ToggleAdvanced => {
-                self.status.advanced_open = !self.status.advanced_open;
-                Some("dl:advanced".to_string())
             }
             DownloadAction::ToggleLog => {
                 self.log_expanded = !self.log_expanded;
@@ -340,53 +277,6 @@ impl DownloadState {
             DownloadAction::ClearLog => {
                 self.log.clear();
                 Some("dl:log-clear".to_string())
-            }
-            DownloadAction::Broker(display) => {
-                if let Some(i) = self.brokers.iter().position(|b| b.display == display) {
-                    self.broker_index = i;
-                    Some(format!("dl:broker:{}", self.brokers[i].name))
-                } else {
-                    None
-                }
-            }
-            DownloadAction::OpenCreds => {
-                self.cred_open = true;
-                Some("dl:creds-open".to_string())
-            }
-            DownloadAction::CloseCreds => {
-                self.cred_open = false;
-                self.confirm_clear = false;
-                None
-            }
-            DownloadAction::CredField(key, value) => {
-                if let Some(f) = self.cred_fields.iter_mut().find(|f| f.key == key) {
-                    f.value = value;
-                }
-                None
-            }
-            DownloadAction::CredReveal(key) => {
-                if let Some(f) = self.cred_fields.iter_mut().find(|f| f.key == key) {
-                    f.revealed = !f.revealed;
-                }
-                None
-            }
-            DownloadAction::CredTest => {
-                self.test_running = true;
-                self.cred_status = "Testing connection…".to_string();
-                Some(format!("dl:creds-test:{}", self.cred_payload()))
-            }
-            DownloadAction::CredSave => Some(format!("dl:creds-save:{}", self.cred_payload())),
-            DownloadAction::CredClear => {
-                self.confirm_clear = true;
-                None
-            }
-            DownloadAction::CredConfirmClear(yes) => {
-                self.confirm_clear = false;
-                if yes {
-                    Some("dl:creds-clear".to_string())
-                } else {
-                    None
-                }
             }
         }
     }
@@ -420,19 +310,12 @@ pub struct DownloadView {
     pub to_display: String,
     pub plan: PlanView,
     pub status: StatusViewFacts,
-    pub brokers: Vec<String>,
-    pub broker_index: usize,
     pub log: Vec<String>,
     pub log_expanded: bool,
     pub cal_open: bool,
     pub cal_title: String,
     pub cal_days: Vec<CalDay>,
     pub weekday_labels: Vec<String>,
-    pub cred_open: bool,
-    pub cred_fields: Vec<CredField>,
-    pub cred_has_stored: bool,
-    pub cred_status: String,
-    pub confirm_clear: bool,
 }
 
 /// One checklist row (filtered universe + its selection flag).
@@ -500,6 +383,11 @@ pub fn project_download(state: &DownloadState) -> DownloadView {
         .get(state.interval_index)
         .cloned()
         .unwrap_or_default();
+    // The STOCK COUNT is derived from the authoritative selected list, never
+    // from a separately transported backend counter: a stale or dropped
+    // counter used to render "0" while three checkboxes were visibly checked.
+    let mut plan = state.plan.clone();
+    plan.stocks = state.selected.len().to_string();
 
     // Calendar grid (6 rows x 7 cols).
     let mut cal_days: Vec<CalDay> = Vec::new();
@@ -545,21 +433,14 @@ pub fn project_download(state: &DownloadState) -> DownloadView {
         filter: state.filter.clone(),
         from_display: state.from_display.clone(),
         to_display: state.to_display.clone(),
-        plan: state.plan.clone(),
+        plan,
         status: state.status.clone(),
-        brokers: state.brokers.iter().map(|b| b.display.clone()).collect(),
-        broker_index: state.broker_index,
         log: state.log.clone(),
         log_expanded: state.log_expanded,
         cal_open: !state.cal_field.is_empty(),
         cal_title,
         cal_days,
         weekday_labels: WEEKDAYS.iter().map(|s| s.to_string()).collect(),
-        cred_open: state.cred_open,
-        cred_fields: state.cred_fields.clone(),
-        cred_has_stored: state.cred_has_stored,
-        cred_status: state.cred_status.clone(),
-        confirm_clear: state.confirm_clear,
     }
 }
 
@@ -691,56 +572,8 @@ pub fn apply_download_snapshot(state: &mut DownloadState, value: &serde_json::Va
         s.cov_range = dl_str(st, "cov_range");
         s.cov_coverage = dl_str(st, "cov_coverage");
         s.cov_rows = dl_str(st, "cov_rows");
-        s.provider_name = dl_str(st, "provider_name");
-        s.provider_status = dl_str(st, "provider_status");
-        s.provider_label = dl_str(st, "provider_label");
-        s.provider_detail = dl_str(st, "provider_detail");
-        s.configure_visible = dl_bool(st, "configure_visible");
-        s.advanced_visible = dl_bool(st, "advanced_visible");
-        s.advanced_open = dl_bool(st, "advanced_open");
-        s.env_visible = dl_bool(st, "env_visible");
-        s.broker_caps = dl_str(st, "broker_caps");
-        s.broker_error = dl_str(st, "broker_error");
-    }
-    if let Some(brokers) = value.get("brokers").and_then(|x| x.as_array()) {
-        state.brokers = brokers
-            .iter()
-            .map(|b| BrokerChoice {
-                name: dl_str(b, "name"),
-                display: dl_str(b, "display"),
-            })
-            .collect();
-        if let Some(i) = value.get("broker_index").and_then(|x| x.as_u64()) {
-            state.broker_index = i as usize;
-        }
     }
     state.log = dl_list(value, "log");
-    if let Some(creds) = value.get("credentials") {
-        if let Some(fields) = creds.get("fields").and_then(|x| x.as_array()) {
-            // Merge provider field schema onto any typed-in local values.
-            let local = state.cred_fields.clone();
-            state.cred_fields = fields
-                .iter()
-                .map(|f| {
-                    let key = dl_str(f, "key");
-                    let previous = local.iter().find(|l| l.key == key);
-                    CredField {
-                        secret: dl_bool(f, "secret"),
-                        label: dl_str(f, "label"),
-                        value: previous
-                            .map(|p| p.value.clone())
-                            .unwrap_or_else(|| dl_str(f, "value")),
-                        revealed: previous.map(|p| p.revealed).unwrap_or(false),
-                        key,
-                    }
-                })
-                .collect();
-        }
-        state.cred_has_stored = dl_bool(creds, "has_stored");
-        if !state.cred_open {
-            state.cred_status = dl_str(creds, "status");
-        }
-    }
 }
 
 #[cfg(test)]
@@ -826,44 +659,6 @@ mod tests {
     }
 
     #[test]
-    fn credentials_modal_serializes_values() {
-        let mut st = DownloadState {
-            cred_fields: vec![CredField {
-                key: "api_key".to_string(),
-                label: "API key".to_string(),
-                secret: false,
-                value: "K".to_string(),
-                revealed: false,
-            }],
-            ..Default::default()
-        };
-        let wire = st.apply(DownloadAction::CredTest).unwrap();
-        assert!(wire.starts_with("dl:creds-test:"));
-        assert!(wire.contains("\"api_key\":\"K\""));
-        // reveal + edit are local (no wire).
-        assert_eq!(
-            st.apply(DownloadAction::CredReveal("api_key".to_string())),
-            None
-        );
-        assert!(st.cred_fields[0].revealed);
-        assert_eq!(
-            st.apply(DownloadAction::CredField(
-                "api_key".to_string(),
-                "K2".to_string()
-            )),
-            None
-        );
-        assert_eq!(st.cred_fields[0].value, "K2");
-        // clear asks for confirmation first (local), then emits on yes.
-        assert_eq!(st.apply(DownloadAction::CredClear), None);
-        assert!(st.confirm_clear);
-        assert_eq!(
-            st.apply(DownloadAction::CredConfirmClear(true)),
-            Some("dl:creds-clear".to_string())
-        );
-    }
-
-    #[test]
     fn calendar_bounds_come_from_the_snapshot_or_are_absent_never_invented() {
         let mut st = DownloadState::default();
         // No calendar object at all → no bounds, no invented 2017-01-01.
@@ -913,6 +708,23 @@ mod tests {
     }
 
     #[test]
+    fn plan_count_follows_selection_and_download_shows_pending() {
+        let mut st = DownloadState::default();
+        st.symbols = vec!["360ONE".into(), "AARTIIND".into(), "ACUTAAS".into()];
+        st.selected = st.symbols.clone();
+        st.plan.stocks = "0".into(); // stale backend counter must NOT win
+        let view = project_download(&st);
+        assert_eq!(view.plan.stocks, "3");
+        assert_eq!(view.selected_count, 3);
+        assert_eq!(
+            st.apply(DownloadAction::Download).as_deref(),
+            Some("dl:download")
+        );
+        assert_eq!(st.status.mode, "pending");
+        assert_eq!(st.status.progress_note, "Starting Download...");
+    }
+
+    #[test]
     fn snapshot_merges_backend_and_keeps_local() {
         let mut st = DownloadState::default();
         st.open = true; // user opened via rail
@@ -921,10 +733,7 @@ mod tests {
                "universe":["A","B"],"selected":["A"],"from_display":"01 Jan 2017",
                "to_display":"15 Sep 2026","plan":{"stocks":"1","interval":"15m","range":"x",
                "days":"2400","rows":"~576K","error":""},
-               "status":{"mode":"idle","provider_status":"● Not Configured"},
-               "brokers":[{"name":"zerodha","display":"Zerodha"}],"broker_index":0,
-               "log":["→ ready"],"credentials":{"fields":[{"key":"api_key","label":"API key",
-               "secret":true,"value":"stored"}],"has_stored":true,"status":"● Configured"}}"#,
+               "log":["→ ready"]}"#,
         )
         .unwrap();
         apply_download_snapshot(&mut st, &value);
@@ -932,11 +741,6 @@ mod tests {
         assert_eq!(st.interval_index, 2);
         assert_eq!(st.selected, vec!["A".to_string()]);
         assert_eq!(st.plan.rows, "~576K");
-        assert_eq!(st.status.provider_status, "● Not Configured");
-        assert_eq!(st.brokers.len(), 1);
-        assert_eq!(st.log, vec!["→ ready".to_string()]);
-        assert!(st.cred_fields[0].secret);
-        assert!(st.cred_has_stored);
         let view = project_download(&st);
         assert_eq!(view.interval_label, "15m");
         assert_eq!(view.chips, vec!["A".to_string()]);
